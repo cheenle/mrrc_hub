@@ -35,14 +35,16 @@ reload_if_changed() {
 
 # ── A) 真证书路径 ─────────────────────────────────────────────────────
 if [ -s "$CREDS" ]; then
-    if ! python3 -c "import certbot_dns_aliyun" 2>/dev/null; then
-        pip3 install --quiet --break-system-packages certbot-dns-aliyun 2>/dev/null \
-            || echo "[WARNING] certbot-dns-aliyun 安装失败，本轮跳过签发"
-    fi
+    # Manual + our own DNS hook rather than certbot-dns-aliyun: that plugin is
+    # third-party and unmaintained, and this box's Python is newer than it. With
+    # both hooks present the manual plugin renews unattended like any other.
+    HOOK=/usr/local/sbin/aliyun-acme-dns-hook.py
     if [ ! -s "/etc/letsencrypt/live/$CERT_NAME/fullchain.pem" ]; then
         echo "[INFO] 首次 DNS-01 签发 *.${BASE}（凭证已就位）"
-        certbot certonly --cert-name "$CERT_NAME" --dns-aliyun \
-            --dns-aliyun-credentials "$CREDS" --deploy-hook /usr/local/sbin/mrrc-hub-cert-hook.sh \
+        certbot certonly --cert-name "$CERT_NAME" \
+            --manual --preferred-challenges dns \
+            --manual-auth-hook "$HOOK" --manual-cleanup-hook "$HOOK" \
+            --deploy-hook /usr/local/sbin/mrrc-hub-cert-hook.sh \
             --non-interactive --agree-tos --register-unsafely-without-email \
             -d "*.${BASE}" -d "${BASE}" && reload_if_changed
     else

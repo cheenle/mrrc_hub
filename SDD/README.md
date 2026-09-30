@@ -92,3 +92,15 @@ MRRC Fleet Agent（客户内网）
 | 令牌不进 URL | **待实现（MVP 必需）** | 需改实例前端；见 AD-H07 |
 | OTA 灰度 | 部分复用 | 拉取侧复用 `upgrade_core.py`，补签名/灰度/回滚（AD-H13） |
 | RX 扇出 | 条件启用 | 触发门槛见 AD-H12；带宽杠杆在频谱（408 kbps，占 86%） |
+
+## 索引补充（V0.8，2026-09-30）
+
+| 想找什么 | 去哪 |
+|----------|------|
+| 呼号注册与核验流程（含四种异常分支） | `06-use-case-model.md` **UC-H10** |
+| 呼号即身份的成功判据 | `03-project-definition.md` **SC-H10** |
+| 证书生命周期要求（真证书 / 自动续期 / 禁止跨机同步） | `05-non-functional-requirements.md` **NFR-H030** |
+| **实况部署事实**（主机、入口、证书全流程、运维命令、已知退化） | `12-operational-model.md` **§12.8** |
+| 架构/服务模型的实况指认 | `09-architecture-overview.md` §9.9、`10-service-model.md` §10.8 |
+| 开放问题与已结案 | `13-feasibility-assessment.md`（I-H9 已结案） |
+| 现状取证评审（四项 P0）与其结案状态 | `../docs/2026-09-30-fleet-hub-design-review.md` §结案 |

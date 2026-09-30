@@ -29,21 +29,7 @@ days_left() {
     echo $(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
 }
 
-reload_if_changed
-
-# 供 Portal 后台显示证书到期：写到 Portal 能读的位置。
-# 不为了「显示」而放宽 /etc/mrrc-hub/tls 的目录权限 —— 权限收紧是对的，改这边的写入方。
-write_cert_info() {
-    local dest=/var/lib/mrrc-hub/portal/cert.txt
-    [ -s /etc/mrrc-hub/tls/fullchain.pem ] || return 0
-    install -d -o mrrcportal -g mrrcportal -m 750 "$(dirname "$dest")" 2>/dev/null \
-        || install -d -m 750 "$(dirname "$dest")"
-    openssl x509 -in /etc/mrrc-hub/tls/fullchain.pem -noout -enddate -subject 2>/dev/null > "$dest"
-    chown mrrcportal:mrrcportal "$dest" 2>/dev/null || true
-    chmod 0640 "$dest" 2>/dev/null || true
-}
-write_cert_info
-() {
+reload_if_changed() {
     nginx -t >/dev/null 2>&1 && systemctl reload nginx && echo "[INFO] nginx 已 reload（证书已更新）"
 }
 
@@ -109,3 +95,16 @@ else
     echo "[OK] 证书正常，还有 $DAYS 天到期"
     exit 0
 fi
+
+# 供 Portal 后台显示证书到期：写到 Portal 能读的位置。
+# 不为了「显示」去放宽 /etc/mrrc-hub/tls 的目录权限 —— 收紧是对的，改这里的写入方。
+write_cert_info() {
+    local dest=/var/lib/mrrc-hub/portal/cert.txt
+    [ -s /etc/mrrc-hub/tls/fullchain.pem ] || return 0
+    install -d -o mrrcportal -g mrrcportal -m 750 "$(dirname "$dest")" 2>/dev/null \
+        || install -d -m 750 "$(dirname "$dest")"
+    openssl x509 -in /etc/mrrc-hub/tls/fullchain.pem -noout -enddate -subject 2>/dev/null > "$dest"
+    chown mrrcportal:mrrcportal "$dest" 2>/dev/null || true
+    chmod 0640 "$dest" 2>/dev/null || true
+}
+write_cert_info

@@ -19,11 +19,14 @@ from __future__ import annotations
 
 import re
 
-# 业余呼号的常见形态：前缀(1-3 字母数字) + 分区数字 + 后缀(1-4) + 可选 /操作标识。
-# 这是**有意简化**的判定：真实世界的呼号形态远多于正则所能覆盖（特殊事件台、
-# 临时呼号、多国连缀等）。所以正则只负责挡掉明显无效的输入，边界情形交给
-# 人工复核（ManualVerifier）—— 这正是核验环节存在的意义。
-CALLSIGN_RE = re.compile(r"^[A-Z0-9]{1,3}[0-9][A-Z0-9]{1,4}(/[A-Z0-9]{1,4})?$")
+# 规则**逐条对齐站内留言版**（/home/cheenle/feedback/callsign.py）—— 两个系统必须
+# 对同一个呼号给出同样的结论，否则用户会在一个入口通过、在另一个入口被拒。
+#
+# 基准呼号：可选 1 位数字前缀（9M2 / 4X 这类）+ 1-2 字母 + 1 位数字 + 1-3 字母。
+CALLSIGN_RE = re.compile(r"^[0-9]?[A-Z]{1,2}[0-9][A-Z]{1,3}$")
+
+# 便携/特殊分隔符：注册只接受**基准呼号**，故含这些字符一律拒绝（与留言版一致）。
+SEPARATORS = "/_.-"
 
 
 class InvalidCallsign(ValueError):
@@ -31,20 +34,56 @@ class InvalidCallsign(ValueError):
 
 
 def normalize(raw: str) -> str:
-    """把用户输入规范成唯一形式。
+    """规范化：去空白、转大写、去掉全角字符带来的歧义。
 
-    规则（AD-H15）：去空白、全大写、全角连字符与下划线归一为斜杠。
-    `bg1sb` 与 `BG1SB` 必须是同一个租户 —— 大小写不敏感是 DNS 与 Host 层的
-    既有事实，规范化只是让应用层与它一致。
+    `bg1sb` 与 `BG1SB` 必须是同一个租户 —— 大小写不敏感是 DNS 与 Host 层的既有事实，
+    规范化只是让应用层与它一致（AD-H15）。
+
+    **只接受基准呼号**：含 `/ _ . -` 的输入（`BG1SB/P`、`4X/BG1SB`）一律拒绝，
+    与留言版一致。理由：注册的是**身份**，便携/前缀属于操作状态，不该进租户名；
+    而 `label_for` 要用它拼 DNS 标签，斜杠与点在那里也不合法。
     """
     if raw is None:
         raise InvalidCallsign("空呼号")
-    text = str(raw).strip()
-    text = text.replace("－", "/").replace("_", "/").replace("／", "/")
-    text = re.sub(r"\s+", "", text).upper()
+    text = re.sub(r"\s+", "", str(raw)).upper()
+    if not text:
+        raise InvalidCallsign("空呼号")
+    if any(ch in text for ch in SEPARATORS):
+        raise InvalidCallsign(
+            f"只接受基准呼号，不含 {'/'.join(SEPARATORS)}（收到 {raw!r}）——"
+            "便携/前缀等操作标识不用于租户名"
+        )
     if not CALLSIGN_RE.match(text):
-        raise InvalidCallsign(f"不合法或超出可自动判定的范围: {raw!r} → {text!r}")
+        raise InvalidCallsign(f"呼号格式不正确（示例：BG1SB）: {raw!r}")
     return text
+
+
+def base_callsign(key: str) -> str:
+    """从 Club Log 原始键提取基准呼号（与留言版同一套语义）。
+
+    '4X/BG1SB' → 'BG1SB'（取 / 右侧合法段）
+    'BG1SB/P'  → 'BG1SB'（P 不合法则取左侧）
+    '1A0C_14'  → '1A0C'（去掉 _ 后缀）
+    'BG1SB'    → 'BG1SB'；'SOS' → ''（提取失败）
+    """
+    if not isinstance(key, str):
+        return ""
+    k = key.strip().upper()
+    if not k:
+        return ""
+    if "/" in k:
+        for part in reversed([p for p in k.split("/") if p]):
+            if is_valid_format(part):
+                return part
+        return ""
+    if "_" in k:
+        k = k.split("_", 1)[0]
+    return k if is_valid_format(k) else ""
+
+
+def is_valid_format(value: str) -> bool:
+    """基准呼号格式校验（输入须已规范化）。"""
+    return bool(CALLSIGN_RE.match(value or ""))
 
 
 def is_normalized(value: str) -> bool:

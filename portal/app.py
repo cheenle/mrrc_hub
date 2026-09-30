@@ -31,17 +31,25 @@ from portal import callsign as cs          # noqa: E402
 from portal import registry as reg          # noqa: E402
 from portal.store import Store             # noqa: E402
 from portal.store import VERIFIED as STORE_VERIFIED  # noqa: E402
-from portal.verify import ChainVerifier, CallsignListVerifier, ManualVerifier, VerificationOutcome  # noqa: E402
+from portal.verify import (CallsignListVerifier, ChainVerifier, ClubLogVerifier,  # noqa: E402
+                           ManualVerifier, VerificationOutcome)
 
 DEFAULT_STORE = os.environ.get("MRRC_PORTAL_STORE", "/etc/mrrc-hub/portal.json")
 DEFAULT_REGISTRY = os.environ.get("MRRC_PORTAL_REGISTRY", "/etc/mrrc-hub/instances.tsv")
 DEFAULT_CALLSIGN_DB = os.environ.get("MRRC_PORTAL_CALLSIGN_DB", "/etc/mrrc-hub/callsigns.txt")
 DEFAULT_TOKEN_FILE = os.environ.get("MRRC_PORTAL_TOKEN_FILE", "/etc/mrrc-hub/portal.token")
+DEFAULT_CLUBLOG = os.environ.get("MRRC_PORTAL_CLUBLOG", "/var/lib/mrrc-hub/portal/clublog_users.json")
 
 
-def build_verifier(callsign_db: str | Path = DEFAULT_CALLSIGN_DB):
-    """呼号库能给出确定答案时用它，否则转人工。"""
-    return ChainVerifier(CallsignListVerifier(callsign_db), ManualVerifier())
+def build_verifier(callsign_db: str | Path = DEFAULT_CALLSIGN_DB,
+                   clublog: str | Path = DEFAULT_CLUBLOG):
+    """核验链：Club Log 权威库 → 运维自建清单 → 人工兜底。
+
+    顺序即优先级：能给出**确定结论**的依据先问（Club Log 27 万条），自建清单用于
+    库里暂时没有的呼号（新用户），人工始终兜底 —— 与留言版同源，两个入口对同一呼号
+    给出一致结论。
+    """
+    return ChainVerifier(ClubLogVerifier(clublog), CallsignListVerifier(callsign_db), ManualVerifier())
 
 
 class Portal:
@@ -219,6 +227,8 @@ def main(argv=None) -> int:
     ap.add_argument("--store", default=DEFAULT_STORE)
     ap.add_argument("--registry", default=DEFAULT_REGISTRY)
     ap.add_argument("--callsign-db", default=DEFAULT_CALLSIGN_DB)
+    ap.add_argument("--clublog", default=DEFAULT_CLUBLOG,
+                    help="Club Log 呼号库 JSON（与站内留言版同源；由 hub 定时从 www 拉取）")
     ap.add_argument("--token-file", default=DEFAULT_TOKEN_FILE)
     ap.add_argument("--base-path", default=os.environ.get("MRRC_PORTAL_BASE", ""),
                     help="挂载前缀，如 /mrrc_portal（默认空 = 挂在根）")
@@ -226,7 +236,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     token = Path(args.token_file).read_text(encoding="utf-8").strip() if Path(args.token_file).exists() else ""
-    portal = Portal(Store(args.store), reg.Registry(args.registry), build_verifier(args.callsign_db))
+    portal = Portal(Store(args.store), reg.Registry(args.registry),
+                    build_verifier(args.callsign_db, args.clublog))
     if args.dry_run:
         print(f"store={args.store} registry={args.registry} callsign_db={args.callsign_db}")
         print(f"token={'已配置' if token else '未配置（运维动作会被拒绝）'}")

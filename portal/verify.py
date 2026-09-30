@@ -16,9 +16,12 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+from portal import callsign as cs
 
 
 class VerificationOutcome(str, Enum):
@@ -61,6 +64,53 @@ class CallsignListVerifier:
         if base in known:
             return VerificationResult(VerificationOutcome.VERIFIED, f"命中呼号库 {self.path}")
         return VerificationResult(VerificationOutcome.UNVERIFIED, f"呼号库中未收录 {base}，转人工核验")
+
+
+class ClubLogVerifier:
+    """以 Club Log 呼号库为权威依据（与站内留言版同源）。
+
+    数据是 clublog.org 的 `clublog-users.json`（27 万条），键形如 `4X/BG1SB`、
+    `1A0C_14`、`BG1SB` —— 用 `callsign.base_callsign()` 提取基准呼号建索引。
+
+    判定语义：**命中即可证明该呼号存在于公开通联记录中**（这就是"核验"能给的最强
+    证据）；未命中**不等于假**（新执照、低活跃、Club Log 未使用者都不在库里），
+    所以返回 UNVERIFIED 转人工，而不是 REJECTED。这一点很重要：把"查不到"当成
+    "冒用"，会拒掉真实的新用户。
+    """
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self._index: set | None = None
+
+    def _load(self) -> set:
+        if self._index is not None:
+            return self._index
+        if not self.path.exists():
+            self._index = set()
+            return self._index
+        try:
+            with self.path.open(encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except Exception as exc:                      # noqa: BLE001
+            raise RuntimeError(f"Club Log 呼号库无法解析: {self.path}: {exc}") from exc
+        keys = raw.keys() if isinstance(raw, dict) else raw
+        index = set()
+        for key in keys:
+            base = cs.base_callsign(key)
+            if base:
+                index.add(base)
+        self._index = index
+        return index
+
+    def check(self, callsign: str) -> VerificationResult:
+        index = self._load()
+        if not index:
+            return VerificationResult(VerificationOutcome.UNVERIFIED, f"Club Log 呼号库不可用: {self.path}")
+        if callsign in index:
+            return VerificationResult(VerificationOutcome.VERIFIED,
+                                      f"Club Log 呼号库命中（{len(index)} 个基准呼号）")
+        return VerificationResult(VerificationOutcome.UNVERIFIED,
+                                  "Club Log 呼号库未收录（新执照/低活跃也可能如此），转人工核验")
 
 
 class ManualVerifier:

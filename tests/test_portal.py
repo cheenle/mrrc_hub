@@ -25,8 +25,8 @@ from portal import callsign as cs            # noqa: E402
 from portal import registry as reg           # noqa: E402
 from portal.app import Portal, make_handler  # noqa: E402
 from portal.store import Store               # noqa: E402
-from portal.verify import (CallsignListVerifier, ManualVerifier,  # noqa: E402
-                           VerificationOutcome)
+from portal.verify import (CallsignListVerifier, ClubLogVerifier,  # noqa: E402
+                           ManualVerifier, VerificationOutcome)
 
 FAILS = []
 
@@ -49,13 +49,27 @@ def raises(exc, fn, *a, **kw):
 
 
 def test_normalize_is_case_insensitive():
-    for raw in ("bg1sb", "BG1SB", " Bg1Sb ", "bG1sB"):
+    for raw in ("bg1sb", "BG1SB", " Bg1Sb ", "bG1sB", " BG1SB "):
         check(cs.normalize(raw) == "BG1SB", f"规范化 {raw!r} 应为 BG1SB")
-    check(cs.normalize("bg1sb/p") == "BG1SB/P", "便携后缀 /P 归一")
-    check(cs.normalize("bg1sb－p") == "BG1SB/P", "全角连字符归一为 /")
-    check(cs.normalize("bg1sb_p") == "BG1SB/P", "下划线归一为 /")
-    raises(cs.InvalidCallsign, cs.normalize, "hello")
-    raises(cs.InvalidCallsign, cs.normalize, "")
+    # 只接受基准呼号：便携/前缀等操作标识一律拒绝（与站内留言版一致）
+    for bad in ("bg1sb/p", "BG1SB/P", "4X/BG1SB", "bg1sb_p", "BG1.SB", "BG1-SB", "hello", "", "  "):
+        raises(cs.InvalidCallsign, cs.normalize, bad)
+
+
+def test_callsign_rules_match_the_feedback_board():
+    """与 /home/cheenle/feedback/callsign.py 逐条对齐 —— 两个入口必须同判。
+
+    base_callsign 的四个样例直接照抄那份模块的 docstring。
+    """
+    check(cs.base_callsign("4X/BG1SB") == "BG1SB", "4X/BG1SB → BG1SB")
+    check(cs.base_callsign("BG1SB/P") == "BG1SB", "BG1SB/P → BG1SB")
+    check(cs.base_callsign("1A0C_14") == "1A0C", "1A0C_14 → 1A0C")
+    check(cs.base_callsign("BG1SB") == "BG1SB", "BG1SB → BG1SB")
+    check(cs.base_callsign("SOS") == "", "SOS → 空（提取失败）")
+    for good in ("BG1SB", "9M2ABC", "4X1AB", "W1AW", "JA1XYZ"):
+        check(cs.is_valid_format(good), f"{good} 应判合法")
+    for bad in ("BG1SB2", "BG1S", "B1SB", "BG1SBXX", "9M21ABC", "SO1S"):
+        check(not cs.is_valid_format(bad), f"{bad} 应判不合法")
 
 
 def test_label_rule():
@@ -71,6 +85,22 @@ def test_dedupe_never_overwrites():
         store.apply("BG1SB", contact="first")
         raises(ValueError, store.apply, "BG1SB", "second")   # 同一呼号第二次申请必须被拒
         check(store.get("BG1SB").contact == "first", "首个申请的联系方式未被覆盖")
+
+
+def test_clublog_verifier_semantics():
+    """Club Log：命中即证明；**查不到不是冒用**，转人工而不是拒绝。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        db = tmp / "clublog.json"
+        db.write_text(json.dumps({"4X/BG1SB": {}, "1A0C_14": {}, "SOS": {}, "W1AW": {}}), encoding="utf-8")
+        v = ClubLogVerifier(db)
+        check(v.check("BG1SB").outcome is VerificationOutcome.VERIFIED, "库中的 BG1SB（键 4X/BG1SB）应命中")
+        check(v.check("1A0C").outcome is VerificationOutcome.VERIFIED, "1A0C_14 → 1A0C 应命中")
+        unknown = v.check("BG9ZZZ")
+        check(unknown.outcome is VerificationOutcome.UNVERIFIED, "库外呼号应转人工")
+        check(unknown.outcome is not VerificationOutcome.REJECTED, "查不到不得判为冒用")
+        missing = ClubLogVerifier(tmp / "nope.json")
+        check(missing.check("BG1SB").outcome is VerificationOutcome.UNVERIFIED, "库文件缺失应转人工而非抛错")
 
 
 def test_grant_requires_verification():

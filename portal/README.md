@@ -45,6 +45,7 @@ python3 -m portal.app --port 8890
 | `--store` | `/etc/mrrc-hub/portal.json` | 申请/授予记录 + 追加式审计（原子写） |
 | `--registry` | `/etc/mrrc-hub/instances.tsv` | 与 hub 上 `gen_hub_routes.py` 用的同一份 |
 | `--callsign-db` | `/etc/mrrc-hub/callsigns.txt` | 呼号库，一行一个（`#` 注释）。有它就自动核验，没有就全转人工 |
+| `--clublog` | `/var/lib/mrrc-hub/portal/clublog_users.json` | **Club Log 全库**（27 万条），与站内留言版同源；由 hub 每天 04:30 从 www 拉取 |
 | `--token-file` | `/etc/mrrc-hub/portal.token` | 运维动作令牌（建议 0600，`openssl rand -hex 32`） |
 
 运维动作（`verify` / `reject` / `grant` / `revoke`）必须带 `X-Portal-Token`，且用常数时间比较。

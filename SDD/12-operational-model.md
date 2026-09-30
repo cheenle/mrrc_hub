@@ -174,7 +174,9 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 代码 | `portal/`（零第三方依赖，标准库 HTTP；与 HTTP 层解耦便于测试） |
 | 数据 | `/etc/mrrc-hub/portal.json`（申请/授予 + 追加式审计，原子写） |
 | 注册表 | 与 hub 同一份 `/etc/mrrc-hub/instances.tsv`（Portal 只追加一行） |
-| 呼号库 | `/etc/mrrc-hub/callsigns.txt`（一行一个）。**有它则自动核验，无则全转人工** |
+| 呼号库（权威） | `/var/lib/mrrc-hub/portal/clublog_users.json` —— **Club Log** 全库（273,047 条），与站内留言版 `www.vlsc.net/feedback` **同源**；hub 每天 04:30 从 www 拉取（`mrrc-portal-sync-clublog.sh`，晚于 www 的 03:00 刷新） |
+| 呼号库（自建） | `/etc/mrrc-hub/callsigns.txt`（一行一个）—— 用于权威库暂未收录的新执照 |
+| 核验链 | `ClubLogVerifier → CallsignListVerifier → ManualVerifier`（能给出**确定结论**的依据先问，人工始终兜底） |
 | 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较 |
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
 | 测试 | `python3 tests/test_portal.py` |
@@ -203,3 +205,24 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 运维动作两种用法：脚本/curl 用请求头 `X-Portal-Token`；浏览器用表单里的同名字段
 （**令牌走请求体，不进 URL** —— URL 会进访问日志与浏览器历史）。
 授予之后仍需 root 手工执行 `gen_hub_routes.py` + `nginx reload`（有意分工，见 §12.9）。
+
+### 12.9.2 核验依据：与留言版同源（2026-10-01）
+
+站内留言版（`www.vlsc.net/feedback`，其代码在 `/home/cheenle/feedback/`）早已解决"呼号有效性"：
+`callsign.py` 做归一化与基准呼号格式校验，判定则查 **Club Log 呼号库**（27 万条，每日从
+clublog.org 刷新，与 RumLogNG 同源）。Portal **直接采用同一套规则与同一份数据**，理由是：
+两个入口若对同一呼号给出不同结论，比只有一个入口更糟。
+
+采用的规则（逐条对齐留言版）：
+
+| 项 | 规则 |
+|----|------|
+| 格式 | `^[0-9]?[A-Z]{1,2}[0-9][A-Z]{1,3}$`（可选 1 位数字前缀 + 1-2 字母 + 分区数字 + 1-3 字母） |
+| 便携/前缀 | **拒绝** `BG1SB/P`、`4X/BG1SB` 等 —— 注册的是身份，便携是操作状态；且标签要当 DNS 名用 |
+| 基准呼号提取 | `4X/BG1SB`→`BG1SB`、`BG1SB/P`→`BG1SB`、`1A0C_14`→`1A0C`、`SOS`→'' |
+| 判定语义 | 命中 = 已核验；**未命中 ≠ 冒用**（新执照、低活跃、未上传 Club Log 都可能不在库里）⇒ 转人工，只有人能拒绝 |
+
+**拉取的授权方式是受限命令**：hub 上那把钥匙在 www 的 `authorized_keys` 里绑定了
+`command="cat .../clublog_users.json"`，因此它**只能读这一个文件**，拿不到 shell（已实测：
+请求执行 `id` 仍只返回 JSON）。同步脚本还带**规模校验门**（<10 万条即拒绝替换），
+避免把好索引换成空索引。

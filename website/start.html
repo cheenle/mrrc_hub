@@ -188,10 +188,14 @@
 
             <div class="hub-callout">
               <span class="hub-callout-title">
-                <span class="hub-badge todo">未实现 · 阶段 2</span>
-                目标态：自助注册 Portal
+                <span class="hub-badge live">已实现并部署</span>
+                自助注册 Portal（呼号核验四步）
               </span>
-              <p>设计已定稿，实现还没做。它要做的是一条四步流水线：</p>
+              <p>
+                服务已在 Hub 上常驻运行，流程就是下面这四步。
+                <b>但它只绑回环、还没有公网入口</b> —— 所以今天你仍然要联系管理员，
+                只是管理员现在走的是同一条有据可查的流程。
+              </p>
               <ul>
                 <li>
                   <b>规范化</b> —— 去空格、大小写不敏感。<code>BG1SB</code> 与
@@ -205,6 +209,10 @@
                 <li><b>核验</b> —— 呼号库比对，或执照材料人工审核。</li>
                 <li><b>分配</b> —— 分配呼号标签与隧道端口，注册表落一行。</li>
               </ul>
+              <p>
+                对你有三个实际好处：<b>不会被静默覆盖</b>（被冒用会拒绝而不是抢走你的）、
+                <b>每一步有审计</b>、以及<b>可被撑销</b>（冒用被核实后会移除绑定并停用入口）。
+              </p>
             </div>
 
             <div class="hub-callout warn">

@@ -415,9 +415,13 @@
                   </td>
                 </tr>
                 <tr>
-                  <td>自助注册 Portal</td>
-                  <td><span class="hub-badge todo">阶段 2</span></td>
-                  <td>现在由管理员人工开通；呼号核验的流程设计已定稿</td>
+                  <td>自助注册 Portal（呼号核验四步）</td>
+                  <td><span class="hub-badge live">已实现并部署</span></td>
+                  <td>
+                    代码在 <code>portal/</code>，服务常驻 Hub。只绑回环（管理面）——
+                    <b>尚未对外开放公网入口</b>，所以用户注册仍走管理员。
+                    授予后重生成路由与实例侧装隧道仍是 root 手执行。
+                  </td>
                 </tr>
                 <tr>
                   <td>一机一证（设备证书）</td>

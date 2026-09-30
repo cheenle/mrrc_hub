@@ -40,18 +40,8 @@
       });
     }
 
-    /* ── 滚动入场（上游 .vlsc-reveal / .in） ── */
-    var reveals = document.querySelectorAll('.vlsc-reveal');
-    if (reveals.length && 'IntersectionObserver' in window) {
-      var ro = new IntersectionObserver((entries) => {
-        entries.forEach((e) => {
-          if (e.isIntersecting) { e.target.classList.add('in'); ro.unobserve(e.target); }
-        });
-      }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
-      reveals.forEach((el) => { ro.observe(el); });
-    } else {
-      reveals.forEach((el) => { el.classList.add('in'); });
-    }
+    /* 注：不用 octen.css 的 .vlsc-reveal。它默认 opacity:0、必须靠 JS 加 .in 才可见，
+       JS 一旦加载失败正文会整段隐形。入场动画改用纯 CSS 的 .animate（octen.css 已有）。 */
 
     /* ── 目录高亮（只在有 .hub-toc 的页面生效） ── */
     var tocLinks = Array.prototype.slice.call(document.querySelectorAll('.hub-toc a'));

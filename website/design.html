@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="MRRC Cloud Hub 的设计与层层实现：从电台到浏览器的六层职责与边界、关键架构决策及其取舍、三条安全不变量、现状与目标态的差距。">
+<meta name="author" content="BG1SB">
+<meta name="theme-color" content="#000000">
+<title>设计与层层实现 · MRRC Cloud Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/octen.css?v=1">
+<link rel="stylesheet" href="css/hub.css?v=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>">
+</head>
+<body>
+<a href="#main" class="hub-skip">跳到主要内容</a>
+
+<nav class="navbar">
+  <div class="container navbar-content">
+    <a href="index.html" class="logo">
+      <span class="logo-icon"><i class="fas fa-satellite-dish"></i></span>
+      <span>MRRC <span style="color: var(--accent)">Cloud Hub</span></span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html">概览</a></li>
+      <li><a href="start.html">接入</a></li>
+      <li><a href="use.html">使用与分享</a></li>
+      <li><a href="trouble.html">排障</a></li>
+      <li><a href="design.html" class="active" aria-current="page">设计与实现</a></li>
+      <li><a href="https://github.com/cheenle/mrrc_hub" target="_blank" rel="noopener"><i class="fab fa-github"></i> 源码</a></li>
+    </ul>
+    <div class="nav-actions">
+      <a href="https://www.vlsc.net/mrrc_modern/" class="lang-btn">MRRC Modern</a>
+      <button class="mobile-menu-toggle" aria-label="打开菜单" onclick="toggleMobileMenu()"><i class="fas fa-bars"></i></button>
+    </div>
+  </div>
+</nav>
+
+<header class="hub-hero">
+  <h1>设计与层层实现</h1>
+  <p>
+    从电台到浏览器，六层。每一层负责什么、边界画在哪、失效时表现什么 ——
+    以及每条关键决策背后，当时为什么不选另一种。
+  </p>
+</header>
+
+<main id="main" class="hub-shell">
+
+  <nav class="hub-toc" aria-label="本页目录">
+    <h4>本页</h4>
+    <ul>
+      <li><a href="#layers">分层</a></li>
+      <li><a href="#perlayer">每层职责与边界</a></li>
+      <li><a href="#decisions">关键决策</a></li>
+      <li><a href="#invariants">安全不变量</a></li>
+      <li><a href="#status">现状与目标态</a></li>
+      <li><a href="#boundary">边界声明</a></li>
+    </ul>
+  </nav>
+
+  <div class="hub-prose">
+
+    <section id="layers">
+      <h2>分层</h2>
+      <p>
+        整条链路只有一件事在流动：<b>把浏览器的一个动作，送到那台具体的电台上，再把结果送回来</b>。
+        下面六层是这件事在物理上的六个落点。
+      </p>
+      <div class="hub-stack">
+        <div class="hub-layer">
+          <div class="hub-layer-id">L0</div>
+          <div class="hub-layer-body">
+            <strong>电台硬件</strong>
+            <span>FT-710 / IC-7300 / IC-7300MK2。产生射频，提供 CAT/CI-V 状态。不参与任何接入逻辑 —— 它不知道有 Hub 这回事。</span>
+          </div>
+        </div>
+        <div class="hub-layer">
+          <div class="hub-layer-id">L1</div>
+          <div class="hub-layer-body">
+            <strong>实例本地 · MRRC Modern</strong>
+            <span>跑在你自己的机器上（默认 <code>8888</code>）。CAT/CI-V 控制、双向音频、频谱、以及 <b>PTT 释放的权威</b>。</span>
+          </div>
+        </div>
+        <div class="hub-layer">
+          <div class="hub-layer-id">L2</div>
+          <div class="hub-layer-body">
+            <strong>隧道</strong>
+            <span>你的机器主动出站 → Hub 的隧道入口 <code>:8989</code> → Hub 上属于你的回环端口 <code>188xx</code>。客户侧零入站。</span>
+          </div>
+        </div>
+        <div class="hub-layer">
+          <div class="hub-layer-id">L3</div>
+          <div class="hub-layer-body">
+            <strong>Hub 入口</strong>
+            <span>一条通配 vhost 服务所有实例（<code>:9988</code> 与 <code>:8899</code>，均为 TLS）。终结 TLS、按 Host 取呼号、查表得端口、<b>校验上游证书</b>、透明转发数据通道。</span>
+          </div>
+        </div>
+        <div class="hub-layer">
+          <div class="hub-layer-id">L4</div>
+          <div class="hub-layer-body">
+            <strong>海外边缘</strong>
+            <span><code>www.vlsc.net</code> 的 443 路径入口。标准端口 + 真证书 + 前缀透明。定位是<b>退化路</b>，不是主路。</span>
+          </div>
+        </div>
+        <div class="hub-layer">
+          <div class="hub-layer-id">L5</div>
+          <div class="hub-layer-body">
+            <strong>客户端</strong>
+            <span>浏览器 / PWA / 原生 App。负责展示与交互，<b>不是 PTT 释放的依赖</b> —— 客户端失联时释放由 L1 负责。</span>
+          </div>
+        </div>
+        <div class="hub-layer cross">
+          <div class="hub-layer-id">横切</div>
+          <div class="hub-layer-body">
+            <strong>证书 · 身份 · 审计 · 遥测</strong>
+            <span>
+              贯穿所有层，不属于任何一层：通配证书（DNS-01 签发、每日自动续期）、
+              呼号即租户名与账号标识、访问日志只记路径不记查询串、会话并发遥测。
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="perlayer">
+      <h2>每层职责与边界</h2>
+      <p>
+        边界比职责更重要 —— <b>明确写出"这层不做什么"，才能知道该在哪一层找问题</b>。
+      </p>
+      <div class="arch-grid">
+        <div class="arch-card">
+          <span class="label">L1 实例本地</span>
+          <div class="endpoint">五个数据通道</div>
+          <div class="dir">
+            控制 · 频谱 · 收音频 · 发音频 · 天调
+          </div>
+          <div class="payload">
+            <b>不做什么：</b>不做成员与权限管理（那在 Hub，且尚未实现）；
+            <b>不把 PTT 释放托付给云端</b>。
+            <br><br>
+            <b>失效表现：</b>本地页打不开；局域网就 502。
+          </div>
+        </div>
+        <div class="arch-card">
+          <span class="label">L2 隧道</span>
+          <div class="endpoint">frpc / frps</div>
+          <div class="dir">
+            配置 <code>0600</code>，装成常驻服务，带 KeepAlive
+          </div>
+          <div class="payload">
+            <b>不做什么：</b>不终结 TLS、不做路由决策、
+            不知道"呼号"以外的任何业务语义。
+            <br><br>
+            <b>失效表现：</b>Hub 侧 502；日志里 <code>start proxy success</code> 消失。
+          </div>
+        </div>
+        <div class="arch-card">
+          <span class="label">L3 Hub 入口</span>
+          <div class="endpoint">通配 vhost + 注册表</div>
+          <div class="dir">
+            一条 vhost 服务全部实例；每实例的全部差异只是注册表里的一行
+          </div>
+          <div class="payload">
+            <b>不做什么：</b><b>不保存会话状态</b>（无状态，可横向扩）；
+            <b>永不写 PTT</b>。
+            <br><br>
+            <b>失效表现：</b>未知呼号 → <code>404</code>（不猜测别的实例）；
+            上游证书不符 → <code>502</code>。
+          </div>
+        </div>
+        <div class="arch-card">
+          <span class="label">L4 海外边缘</span>
+          <div class="endpoint">443 路径代理</div>
+          <div class="dir">
+            反代整条会话（含全部数据通道），并告知实例当前路径前缀
+          </div>
+          <div class="payload">
+            <b>不做什么：</b>不是主路。多一跳海外，音频与 PTT 延迟明显增加。
+            <br><br>
+            <b>失效表现：</b><code>502</code>，
+            或<b>间歇性无响应</b>（2026-10-01 已复现，见现状一节）。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <h2>关键决策</h2>
+      <p>每条决策的价值不在结论，而在<b>当时排除了什么</b>。</p>
+      <div class="hub-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">决策</th>
+              <th scope="col">内容</th>
+              <th scope="col">为什么不选另一种</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>AD-H01</code><br>实例主动出站</td>
+              <td>客户侧只出站，零入站</td>
+              <td>
+                反过来的"Hub 连进来"需要在每家路由器上做端口映射 ——
+                家庭宽带做不到，4G/5G 更做不到。
+              </td>
+            </tr>
+            <tr>
+              <td><code>AD-H02</code><br>通配子域</td>
+              <td>一条通配 vhost + 注册表映射</td>
+              <td>
+                每实例一个 vhost 是上一版的做法：加一个实例就要改中心配置，
+                还要处理正则与前缀的优先级。规模一上来就不可维护。
+              </td>
+            </tr>
+            <tr>
+              <td><code>AD-H03</code><br>控制面 / 数据面分离</td>
+              <td>无状态入口 ×N，有状态隧道网关 ×≥2</td>
+              <td>
+                合成一个进程后，入口的横向扩容会牵着会话归属一起搬 ——
+                等于把无状态的部分也变成了有状态。
+              </td>
+            </tr>
+            <tr>
+              <td><code>AD-H05</code><br>单写者租约</td>
+              <td>每实例同时最多一个写者</td>
+              <td>
+                允许多写者会让两个人同时按下 PTT。这个冲突在电台侧无法仲裁 ——
+                电台只知道"有人在发射"。
+              </td>
+            </tr>
+            <tr>
+              <td><code>AD-H06</code><br>PTT 权威在实例本地</td>
+              <td>Hub 只能关流通知，<b>从不写下 PTT</b></td>
+              <td>
+                依赖云端超时释放，意味着云端一断网或一延迟，电台就一直发射。
+                释放的权威必须和电台在同一台机器上。
+              </td>
+            </tr>
+            <tr>
+              <td><code>AD-H07</code><br>会话凭据不进 URL</td>
+              <td>走 Cookie 与握手，不进查询串</td>
+              <td>
+                查询串必然落进代理与实例的访问日志 ——
+                这个失效模式在本项目早前的形态里真实发生过，不是理论风险。
+              </td>
+            </tr>
+            <tr>
+              <td><code>AD-H08</code><br>监听者语义</td>
+              <td>可听、可看频谱、<b>可调频换模式</b>、禁发射</td>
+              <td>
+                简单做成"只读"会让人没法帮忙找台；
+                而调频并不改变"谁在发射"这个根本约束，所以放开它没有代价。
+              </td>
+            </tr>
+            <tr>
+              <td><code>AD-H15</code><br>呼号即身份</td>
+              <td>租户名 = 呼号；入口 = 呼号.域名</td>
+              <td>
+                另建一套用户名体系，会把"这是谁家的电台"变成一个要查表的问题，
+                而它本来是可以从地址里直接读出来的。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="invariants">
+      <h2>三条安全不变量</h2>
+      <p>这三条是不能被"优化掉"的。任何实现如果违反它们，就是错的，不管跑得多快。</p>
+      <div class="hub-callout danger">
+        <span class="hub-callout-title">一 · Hub 永远不是 PTT 写者</span>
+        <p>
+          Hub 与隧道只能发送"关流"这类通知并回收授权，
+          <b>不得直接下发"切到接收"的指令</b>。多一个写者，就会出现两条互相矛盾的释放路径，
+          实例侧的仲裁逻辑随之失效。
+        </p>
+      </div>
+      <div class="hub-callout danger">
+        <span class="hub-callout-title">二 · 会话凭据不进 URL，也不进日志</span>
+        <p>
+          包括 Hub、实例、以及链路中间任何代理的访问日志。
+          这一条同时约束前端（不拼查询串）与运维侧（日志格式不得记录查询串）。
+        </p>
+      </div>
+      <div class="hub-callout danger">
+        <span class="hub-callout-title">三 · 禁止关闭上游证书校验</span>
+        <p>
+          每一跳都校验对端证书。关掉它（哪怕"只是为了先跑通"）
+          等于把中间人攻击变成默认配置 —— 而且这类关闭一旦上线，
+          通常不会有人再回头打开。
+        </p>
+      </div>
+    </section>
+
+    <section id="status">
+      <h2>现状与目标态</h2>
+      <p>这张表区分"已经跑通"和"设计好了但还没做"。两者不能混着看。</p>
+      <div class="hub-table-wrap">
+        <table>
+          <thead>
+            <tr><th scope="col">能力</th><th scope="col">状态</th><th scope="col">说明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>实例出站隧道</td>
+              <td><span class="hub-badge live">已跑通</span></td>
+              <td>阶段 1 用成熟反向隧道验证通路；目标态是内置的实例代理进程</td>
+            </tr>
+            <tr>
+              <td>通配子域接入 + 真证书</td>
+              <td><span class="hub-badge live">已跑通</span></td>
+              <td>一条通配 vhost + 注册表；证书为真发证书，每日自动续期</td>
+            </tr>
+            <tr>
+              <td>数据通道透明转发</td>
+              <td><span class="hub-badge live">已跑通</span></td>
+              <td>五条通道的握手、长连接与关闭语义，与直连一致</td>
+            </tr>
+            <tr>
+              <td>逐跳证书校验</td>
+              <td><span class="hub-badge live">已开启</span></td>
+              <td>Hub 到实例这一跳也校验，没有一处是关闭校验换来的</td>
+            </tr>
+            <tr>
+              <td>会话凭据不进 URL</td>
+              <td><span class="hub-badge live">已实现</span></td>
+              <td>前端不再拼接查询串；Hub 侧日志格式也不记查询串</td>
+            </tr>
+            <tr>
+              <td>海外边缘入口</td>
+              <td><span class="hub-badge gap">间歇可用</span></td>
+              <td>
+                2026-10-01 实测 6 次中 3 次 20 秒无响应。
+                已排除本地链路、www 静态服务、www 上另一条代理腿、Hub 侧 SNI/Host 组合；
+                问题定位在 <b>www → Hub 这一跳</b>，待进一步取证。
+              </td>
+            </tr>
+            <tr>
+              <td>PTT 半开连接释放<br><span style="color: var(--text-muted); font-size: 0.8rem;">（远程会话活性）</span></td>
+              <td><span class="hub-badge todo">MVP 必修</span></td>
+              <td>
+                "TCP 还活着但对端已失联"的情形（拔网线、NAT 掉表）。
+                目前由实例本地的多层释放兜底，但缺这一层时释放会慢。
+              </td>
+            </tr>
+            <tr>
+              <td>自助注册 Portal</td>
+              <td><span class="hub-badge todo">阶段 2</span></td>
+              <td>现在由管理员人工开通；呼号核验的流程设计已定稿</td>
+            </tr>
+            <tr>
+              <td>一机一证（设备证书）</td>
+              <td><span class="hub-badge todo">阶段 2</span></td>
+              <td>现阶段隧道使用共享凭证 —— 这是它被定位为过渡通道的原因</td>
+            </tr>
+            <tr>
+              <td>独占写者租约</td>
+              <td><span class="hub-badge todo">阶段 2</span></td>
+              <td>现阶段由实例侧仲裁谁在发射</td>
+            </tr>
+            <tr>
+              <td>成员管理与单独撤销</td>
+              <td><span class="hub-badge todo">阶段 2</span></td>
+              <td>现阶段只能改监听口令，会影响所有持有它的人</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="boundary">
+      <h2>边界声明</h2>
+      <p>
+        本页只讲<b>接入层</b>：隧道、入口、路由、证书、身份、边缘。
+      </p>
+      <p>
+        电台控制、音频编解码、频谱、以及 <b>PTT 安全释放的全部细节</b>，
+        权威在 MRRC Modern 自己的设计记录里 —— 本页不复制它们，
+        只定义与它们相邻的接口。
+      </p>
+      <ul>
+        <li>要到产品站看 MRRC Modern 的设计与操作指南 → <a href="https://www.vlsc.net/mrrc_modern/" style="color: var(--accent);">MRRC Modern</a></li>
+        <li>要看本项目的完整设计记录（需求、用例、决策、风险） → <a href="https://github.com/cheenle/mrrc_hub" style="color: var(--accent);">mrrc_hub 仓库</a>的 <code>SDD/</code> 目录</li>
+        <li>实测的运维事实（主机、端口、证书流程、排障） → <code>SDD/12 §12.8</code></li>
+      </ul>
+      <div class="hub-callout ok">
+        <span class="hub-callout-title">文档与现网不一致时以现网为准</span>
+        <p>
+          本页所有事实来自 2026-10-01 对现网实际配置、证书与注册表的现场读取。
+          如果你发现页面说的和实际不符，<b>是页面该改</b> ——
+          欢迎提 issue 指出。
+        </p>
+      </div>
+    </section>
+
+    <p class="hub-note">
+      ← 回到 <a href="index.html" style="color: var(--accent);">概览</a> ·
+      照做走一遍 <a href="start.html" style="color: var(--accent);">接入四步</a> ·
+      遇到问题 <a href="trouble.html" style="color: var(--accent);">排障</a>
+      <br>
+      本页事实基线：2026-10-01 现场取证（现网 nginx 配置、证书有效期、注册表内容、入口可用性实测）。
+    </p>
+
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-section">
+        <h4>MRRC Cloud Hub</h4>
+        <p>把 MRRC Modern 实例接入云端统一入口：实例主动出站、一个呼号一个入口、PTT 释放永远在电台本地执行。</p>
+      </div>
+      <div class="footer-section">
+        <h4>文档</h4>
+        <ul>
+          <li><a href="index.html">概览</a></li>
+          <li><a href="start.html">接入四步</a></li>
+          <li><a href="use.html">使用与分享</a></li>
+          <li><a href="trouble.html">排障</a></li>
+          <li><a href="design.html">设计与层层实现</a></li>
+        </ul>
+      </div>
+      <div class="footer-section">
+        <h4>相关</h4>
+        <ul>
+          <li><a href="https://www.vlsc.net/mrrc_modern/">MRRC Modern 产品站</a></li>
+          <li><a href="https://github.com/cheenle/mrrc_hub" target="_blank" rel="noopener">源码（GitHub）</a></li>
+          <li><a href="https://www.vlsc.net/" target="_blank" rel="noopener">VLSC Projects</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 MRRC Cloud Hub · BG1SB</p>
+      <p>事实基线：2026-10-01 现场取证 · 运营事实以 <code>SDD/12 §12.8</code> 为准</p>
+    </div>
+  </div>
+</footer>
+
+<button class="vlsc-to-top" id="backTop" aria-label="回到顶部"><i class="fas fa-arrow-up"></i></button>
+<div class="vlsc-scroll-progress" id="scrollProgress"></div>
+<script src="js/hub.js"></script>
+</body>
+</html>

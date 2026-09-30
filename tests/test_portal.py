@@ -170,6 +170,29 @@ def test_http_layer_auth_and_flow():
             httpd.shutdown()
 
 
+def test_base_path_mount():
+    """挂载前缀：生成的链接带前缀，且带/不带前缀两条路径都能处理。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        from http.server import ThreadingHTTPServer
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="t", base="/mrrc_portal"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            with urllib.request.urlopen(base + "/mrrc_portal/", timeout=5) as resp:
+                html = resp.read().decode()
+            check('action="apply"' in html, "表单用相对 action（挂载无关）")
+            check('action="/apply"' not in html, "不再硬编码站点根，避免挂到前缀下 404")
+            data = urllib.parse.urlencode({"callsign": "bg1sb"}).encode()
+            with urllib.request.urlopen(base + "/mrrc_portal/apply", data=data, timeout=5) as resp:
+                check(json.loads(resp.read().decode())["status"] == "verified", "带前缀 POST 可用")
+        finally:
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

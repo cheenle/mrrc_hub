@@ -97,12 +97,27 @@ class Portal:
         return {"callsign": normalized, "label": app.label, "entry_removed": removed, "status": "revoked"}
 
 
-def make_handler(portal: Portal, token: str):
+def make_handler(portal: Portal, token: str, base: str = ""):
+    """base 是挂载前缀（如 `/mrrc_portal`），空串表示挂在根。
+
+    两边都容忍：入口收到 `{base}/apply` 或 `/apply` 都能处理（边缘可以保留前缀，
+    也可以剥掉前缀）。页面里的链接用**相对形式**（`action="apply"`），因此同一份代码
+    挂在根（`https://portal.../`）与挂在前缀（`https://www.vlsc.net/mrrc_portal/`）
+    下都指向正确位置 —— 不必为每个挂载点各配一份 base。
+    """
+    base = ("/" + base.strip("/")) if base and base.strip("/") else ""
     class Handler(BaseHTTPRequestHandler):
         server_version = "MRRC-Portal/1.0"
 
         def log_message(self, fmt, *args):       # 不记录 query（可能含呼号/联系方式）
             sys.stderr.write("portal: " + fmt % args + "\n")
+
+        def _route(self) -> str:
+            """去掉挂载前缀后的路径；带前缀与不带前缀两种形式都接受。"""
+            path = self.path.split("?")[0]
+            if base and (path == base or path.startswith(base + "/")):
+                path = path[len(base):] or "/"
+            return path
 
         # ---- helpers ----
         def _body(self) -> dict:
@@ -138,7 +153,7 @@ def make_handler(portal: Portal, token: str):
 
         # ---- routes ----
         def do_GET(self):                        # noqa: N802
-            if self.path.split("?")[0] != "/":
+            if self._route() != "/":
                 return self._send(404, {"error": "not found"})
             rows = "".join(
                 f"<tr><td>{html.escape(a['callsign'])}</td><td>{html.escape(a['status'])}</td>"
@@ -153,7 +168,7 @@ td,th{{border-bottom:1px solid #ddd;padding:6px;text-align:left}}
 code{{background:#f4f4f4;padding:1px 4px}}</style>
 <h1>呼号自助注册</h1>
 <p>按 <strong>规范化 → 查重 → 核验 → 分配</strong> 四步完成。呼号经核验通过后才会分配入口。</p>
-<form method="post" action="/apply">
+<form method="post" action="apply">
   <p><input name="callsign" placeholder="呼号，例如 BG1SB" required>
      <input name="contact" placeholder="联系方式（可选）">
      <input name="product" placeholder="产品（留空=主产品）"></p>
@@ -166,7 +181,7 @@ code{{background:#f4f4f4;padding:1px 4px}}</style>
                        ctype="text/html; charset=utf-8")
 
         def do_POST(self):                       # noqa: N802
-            route = self.path.split("?")[0]
+            route = self._route()
             try:
                 body = self._body()
             except Exception as exc:             # noqa: BLE001
@@ -205,6 +220,8 @@ def main(argv=None) -> int:
     ap.add_argument("--registry", default=DEFAULT_REGISTRY)
     ap.add_argument("--callsign-db", default=DEFAULT_CALLSIGN_DB)
     ap.add_argument("--token-file", default=DEFAULT_TOKEN_FILE)
+    ap.add_argument("--base-path", default=os.environ.get("MRRC_PORTAL_BASE", ""),
+                    help="挂载前缀，如 /mrrc_portal（默认空 = 挂在根）")
     ap.add_argument("--dry-run", action="store_true", help="只加载配置并自检，不监听")
     args = ap.parse_args(argv)
 
@@ -215,8 +232,9 @@ def main(argv=None) -> int:
         print(f"token={'已配置' if token else '未配置（运维动作会被拒绝）'}")
         print(f"注册表现有条目: {len(portal.registry.entries())} | 占用端口: {sorted(portal.registry.used_ports())[:5]}")
         return 0
-    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(portal, token))
-    print(f"Portal 监听 http://{args.host}:{args.port}/ （注册表 {args.registry}）", flush=True)
+    base = ("/" + args.base_path.strip("/")) if args.base_path.strip("/") else ""
+    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(portal, token, base))
+    print(f"Portal 监听 http://{args.host}:{args.port}{base or '/'} （注册表 {args.registry}）", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

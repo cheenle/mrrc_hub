@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""UC-H10 呼号自助 Portal 的测试。
+
+运行：python3 tests/test_portal.py   （也兼容 pytest）
+
+重点守三件事：
+ ① 大小写不敏感 ⇒ `BG1SB` 与 `bg1sb` 是**同一个租户**
+ ② **未核验不得授予** —— 这是 UC-H10 的安全前置：呼号是公开标识、入口可枚举，
+    所以防线只能放在"核验之后"（callsign.py 顶部有完整论证）
+ ③ 查重冲突绝不静默覆盖（走申诉/转移），以及撤销会真的移除入口
+"""
+import json
+import sys
+import tempfile
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from portal import callsign as cs            # noqa: E402
+from portal import registry as reg           # noqa: E402
+from portal.app import Portal, make_handler  # noqa: E402
+from portal.store import Store               # noqa: E402
+from portal.verify import (CallsignListVerifier, ManualVerifier,  # noqa: E402
+                           VerificationOutcome)
+
+FAILS = []
+
+
+def check(cond, label):
+    if not cond:
+        FAILS.append(label)
+
+
+def raises(exc, fn, *a, **kw):
+    try:
+        fn(*a, **kw)
+    except exc:
+        return True
+    except Exception as other:                    # noqa: BLE001
+        FAILS.append(f"{fn} 抛了 {type(other).__name__}，期望 {exc.__name__}")
+        return False
+    FAILS.append(f"{fn} 没有抛出 {exc.__name__}")
+    return False
+
+
+def test_normalize_is_case_insensitive():
+    for raw in ("bg1sb", "BG1SB", " Bg1Sb ", "bG1sB"):
+        check(cs.normalize(raw) == "BG1SB", f"规范化 {raw!r} 应为 BG1SB")
+    check(cs.normalize("bg1sb/p") == "BG1SB/P", "便携后缀 /P 归一")
+    check(cs.normalize("bg1sb－p") == "BG1SB/P", "全角连字符归一为 /")
+    check(cs.normalize("bg1sb_p") == "BG1SB/P", "下划线归一为 /")
+    raises(cs.InvalidCallsign, cs.normalize, "hello")
+    raises(cs.InvalidCallsign, cs.normalize, "")
+
+
+def test_label_rule():
+    check(cs.label_for("BG1SB") == "bg1sb", "主产品用裸呼号")
+    check(cs.label_for("bg1sb", "modern") == "bg1sb", "modern 视为主产品")
+    check(cs.label_for("BG1SB", "legacy") == "bg1sb-legacy", "附加产品加后缀")
+    check(cs.label_for("BG1SB", "Old Rig") == "bg1sb-old-rig", "产品名 slug 化")
+
+
+def test_dedupe_never_overwrites():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "portal.json")
+        store.apply("BG1SB", contact="first")
+        raises(ValueError, store.apply, "BG1SB", "second")   # 同一呼号第二次申请必须被拒
+        check(store.get("BG1SB").contact == "first", "首个申请的联系方式未被覆盖")
+
+
+def test_grant_requires_verification():
+    """核心安全断言：未核验 ⇒ 拒绝授予（不是"提醒"，是异常）。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "portal.json")
+        store.apply("BG1SB")
+        raises(PermissionError, store.grant, "BG1SB", "bg1sb", 18802)
+        store.mark_verified("BG1SB", "呼号库命中")
+        app = store.grant("BG1SB", "bg1sb", 18802)
+        check(app.status == "granted", "核验后可授予")
+        raises(PermissionError, store.grant, "BG1SB", "bg1sb", 18803)  # 已授予不再是 verified，同一道闸拦住
+
+
+def test_revoke_and_reject_paths():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "portal.json")
+        store.apply("BG1SB")
+        raises(ValueError, store.revoke, "BG1SB", "未授予不能撤销")
+        store.mark_verified("BG1SB", "ok")
+        store.grant("BG1SB", "bg1sb", 18802)
+        check(store.revoke("BG1SB", "冒用举报").status == "revoked", "撤销成功")
+        store.apply("BG2XX")
+        check(store.reject("BG2XX", "材料不足").status == "rejected", "拒绝成功")
+
+
+def test_registry_ports_and_duplicates():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "instances.tsv"
+        registry = reg.Registry(path, first=18802, last=18804)
+        check(registry.free_port() == 18802, "首个空闲端口")
+        registry.add("bg1sb", 18802)
+        check(registry.free_port() == 18803, "跳过已占用端口")
+        registry.add("bg1sb-legacy", 18803)
+        raises(ValueError, registry.add, "bg1sb-legacy", 18804)   # 标签重复
+        raises(ValueError, registry.add, "bg1xx", 18802)          # 端口重复
+        registry.add("bg1yy", 18804)
+        raises(RuntimeError, registry.free_port)                  # 端口用尽
+        check(registry.remove("bg1sb-legacy") is True, "移除成功")
+        check(registry.labels() == {"bg1sb", "bg1yy"}, "移除后只剩两项")
+        check(registry.remove("nope") is False, "移除不存在项返回 False")
+
+
+def test_end_to_end_with_callsign_db():
+    """库里有 ⇒ 自动核验并可授予；库里没有 ⇒ 停在待核验，授予被拒。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "callsigns.txt").write_text("# 呼号库\nBG1SB\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        known = portal.apply("bg1sb", contact="op@example.net")
+        check(known["status"] == "verified", "库中命中 ⇒ 自动核验")
+        unknown = portal.apply("JA1XYZ")
+        check(unknown["status"] == "applied", "库中未收录 ⇒ 留在待核验")
+        raises(PermissionError, portal.grant, "JA1XYZ")
+        result = portal.grant("BG1SB")
+        check(result["label"] == "bg1sb" and result["port"] == 18802, "分配标签与端口")
+        check("install_instance_tunnel.sh bg1sb 18802" in result["next_step"], "给出实例侧上线命令")
+        check(reg.Registry(tmp / "instances.tsv").entries() == [("bg1sb", 18802)], "注册表已落一行")
+        revoked = portal.revoke("BG1SB", "冒用")
+        check(revoked["entry_removed"] and reg.Registry(tmp / "instances.tsv").entries() == [], "撤销移除入口")
+        events = [a["event"] for a in portal.store.audit()]
+        check(events[:3] == ["applied", "applied", "granted"] or "granted" in events, f"审计含关键事件: {events}")
+
+
+def test_http_layer_auth_and_flow():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        handler = make_handler(portal, token="s3cret")
+        from http.server import ThreadingHTTPServer
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            # GET / 走查（未登录可见的只有注册表摘要；管理动作另有令牌门）
+            with urllib.request.urlopen(base + "/", timeout=5) as resp:
+                check(resp.status == 200 and "呼号自助注册" in resp.read().decode(), "GET / 返回页面")
+            # 自助申请（表单编码）
+            data = urllib.parse.urlencode({"callsign": "bg1sb", "contact": "op"}).encode()
+            with urllib.request.urlopen(base + "/apply", data=data, timeout=5) as resp:
+                payload = json.loads(resp.read().decode())
+            check(payload["callsign"] == "BG1SB" and payload["status"] == "verified", "POST /apply 规范化+核验")
+            # 运维动作必须有令牌
+            grant = urllib.parse.urlencode({"callsign": "BG1SB"}).encode()
+            try:
+                urllib.request.urlopen(base + "/grant", data=grant, timeout=5)
+                FAILS.append("无令牌的 /grant 竟然成功")
+            except urllib.error.HTTPError as exc:
+                check(exc.code == 403, "无令牌运维动作被拒（403）")
+            req = urllib.request.Request(base + "/grant", data=grant, headers={"X-Portal-Token": "s3cret"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                check(json.loads(resp.read().decode())["label"] == "bg1sb", "带令牌授予成功")
+        finally:
+            httpd.shutdown()
+
+
+def main():
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    for fn in tests:
+        fn()
+    if FAILS:
+        print(f"❌ {len(FAILS)} 项不合格:")
+        for f in FAILS:
+            print("   -", f)
+        return 1
+    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

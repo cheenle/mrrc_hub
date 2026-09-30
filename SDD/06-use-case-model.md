@@ -97,6 +97,9 @@
 | Safety | 呼号是**公开**标识，入口存在性可被枚举（AD-H15 有意接受）。因此核验必须发生在**授予访问之前**，而不是事后追责 |
 | Postconditions | 租户名 = 呼号；账号标识 = 呼号；审计记录了核验依据 |
 | Refs | `AD-H15` `NFR-H028` `NFR-H029` `SC-H10` `UC-H01` `I-H9` |
+| **Status** | **已实现**（2026-09-30）：`portal/`（`callsign.py` 规范化与标签规则、`store.py` 状态机与审计、
+`registry.py` 注册表与端口分配、`verify.py` 核验器、`app.py` 开放四步端点）。
+测试 `tests/test_portal.py`。**核验是授予的硬前置**，由测试守住。 |
 
 ### UC-H07: Tunnel Gateway 故障切换
 

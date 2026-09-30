@@ -160,3 +160,21 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 
 改造记录与逐步计划：`../../mrrc/docs/current/design/hub-parity-plan.md`。
 
+## 12.9 Portal 自助（UC-H10 的落地）
+
+| 项 | 实况 |
+|----|------|
+| 代码 | `portal/`（零第三方依赖，标准库 HTTP；与 HTTP 层解耦便于测试） |
+| 数据 | `/etc/mrrc-hub/portal.json`（申请/授予 + 追加式审计，原子写） |
+| 注册表 | 与 hub 同一份 `/etc/mrrc-hub/instances.tsv`（Portal 只追加一行） |
+| 呼号库 | `/etc/mrrc-hub/callsigns.txt`（一行一个）。**有它则自动核验，无则全转人工** |
+| 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较 |
+| 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
+| 测试 | `python3 tests/test_portal.py` |
+
+**要记住的一条**：`grant` 只写注册表并打印实例侧命令，**不自动重生成路由** ——
+`gen_hub_routes.py` + `nginx reload` 仍需 root 手工执行，这是有意的分工。
+
+**核验为何必须在授予之前**：呼号是公开标识、入口可枚举（I-H9 接受），
+所以防线只能放在"核验通过才给访问"，不能放在"别人猜不到"。完整论证见
+`../portal/README.md` 与 `../portal/callsign.py`。

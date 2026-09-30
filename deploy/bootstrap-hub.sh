@@ -35,12 +35,19 @@ FRP_VERSION="0.71.0"
 FRP_SHA256_AMD64="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
 FRP_SHA256_ARM64="f33c293c275d8fc68c654b6fba8f10b2551d6463d09a9fc9cffb7227eae82266"
 
-# The instance presents a Let's Encrypt certificate for this name; nginx verifies
-# against it by name rather than skipping verification.
+# Ports are non-standard on purpose: a mainland-China ECS serving 80/443 needs an
+# ICP filing, so the hub entry lives on 8899 (plain) / 9988 (TLS) and the tunnel
+# control port on 8989. Consequence to keep in mind: users must type the port, and
+# networks that only allow 80/443 outbound cannot reach the hub at all.
+HTTP_PORT="8899"
+HTTPS_PORT="9988"
+FRP_TLS_PORT="8989"
+
+# The instance presents a real Let's Encrypt certificate for this name; nginx
+# verifies against it by name rather than skipping verification.
 UPSTREAM_SSL_NAME="radio.vlsc.net"
 # Loopback-only: the tunnel proxy port must never be reachable from the internet.
 FRP_TCP_PORT="18888"
-FRP_TLS_PORT="7000"
 
 case "$(uname -m)" in
     x86_64)  FRP_ARCH="linux_amd64"; FRP_SHA256="$FRP_SHA256_AMD64" ;;
@@ -50,16 +57,20 @@ esac
 
 log() { printf '\n==> %s\n' "$*"; }
 
-log "preflight: ports 80/443 must be reachable from the internet (security group)"
-for p in 80 443 "$FRP_TLS_PORT"; do
+log "preflight: ports $HTTP_PORT/$HTTPS_PORT/$FRP_TLS_PORT must be reachable (security group)"
+for p in "$HTTP_PORT" "$HTTPS_PORT" "$FRP_TLS_PORT"; do
     if ss -tln "sport = :$p" 2>/dev/null | grep -q LISTEN; then
         echo "    :$p already listening (likely a re-run)"
     else
         echo "    :$p idle — will bind"
     fi
 done
-echo "    If the security group still blocks these, Let's Encrypt will fail and"
-echo "    the tunnel will be unreachable: open 80/443/$FRP_TLS_PORT first."
+echo "    If the security group still blocks these, nothing below is reachable"
+echo "    from the internet: open $HTTP_PORT/$HTTPS_PORT/$FRP_TLS_PORT first."
+echo "    NOTE: Let's Encrypt cannot validate on non-standard ports (HTTP-01 is"
+echo "    fixed to 80, TLS-ALPN-01 to 443). A trusted certificate therefore needs"
+echo "    DNS-01 - see the TLS section below; otherwise this falls back to a"
+echo "    self-signed certificate, which is fine for the smoke test and nothing else."
 
 log "apt: nginx + certbot"
 export DEBIAN_FRONTEND=noninteractive
@@ -136,28 +147,44 @@ systemctl daemon-reload
 systemctl enable --now frps
 systemctl is-active --quiet frps && echo "    frps active on :${FRP_TLS_PORT} + tcp :${FRP_TCP_PORT}"
 
-log "nginx: HTTP-01 first, then the TLS vhost for ${SUBDOMAIN}"
-cat >/etc/nginx/sites-available/mrrc-hub <<EOF
-# Managed by mrrc_hub/deploy/bootstrap-hub.sh — edits are overwritten on re-run.
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${SUBDOMAIN};
-
-    location /.well-known/acme-challenge/ { root /var/www/html; }
-    location / { return 301 https://\$host\$request_uri; }
-}
-EOF
-ln -sf /etc/nginx/sites-available/mrrc-hub /etc/nginx/sites-enabled/mrrc-hub
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl reload nginx
-
-if [[ ! -d "/etc/letsencrypt/live/${SUBDOMAIN}" ]]; then
-    certbot certonly --webroot -w /var/www/html -d "$SUBDOMAIN" \
-        --non-interactive --agree-tos --register-unsafely-without-email \
-        --keep-until-expiring
+log "TLS material for ${SUBDOMAIN}"
+install -d -m 0750 /etc/mrrc-hub/tls
+install -d -m 0750 /etc/letsencrypt
+CERT_CRT="/etc/mrrc-hub/tls/fullchain.pem"
+CERT_KEY="/etc/mrrc-hub/tls/privkey.pem"
+if [[ -s "/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem" ]]; then
+    echo "    using the Let's Encrypt certificate for ${SUBDOMAIN}"
+    CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
+    CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
+elif [[ -s /etc/mrrc-hub/aliyun.ini ]]; then
+    # DNS-01 is the only route to a publicly trusted certificate when 80/443 are
+    # closed - and the only route to a *wildcard*, which is what 200 instances
+    # will need. Credentials: an Aliyun RAM user limited to AliyunDNSFullAccess.
+    echo "    issuing via DNS-01 (Aliyun credentials found)"
+    apt-get install -y -qq python3-pip >/dev/null 2>&1 || true
+    pip3 install --quiet --break-system-packages certbot-dns-aliyun 2>/dev/null || true
+    certbot certonly --non-interactive --agree-tos \
+        --register-unsafely-without-email \
+        --dns-aliyun --dns-aliyun-credentials /etc/mrrc-hub/aliyun.ini \
+        -d "$SUBDOMAIN" --keep-until-expiring
+    CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
+    CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
 else
-    echo "    certificate already present"
+    echo "    !! no DNS-01 credentials (/etc/mrrc-hub/aliyun.ini): generating a"
+    echo "    !! SELF-SIGNED certificate. Browsers will warn; this is a smoke test"
+    echo "    !! fixture, not a deployment. Steps to a real certificate:"
+    echo "    !!   1. create an Aliyun RAM user with AliyunDNSFullAccess"
+    echo "    !!   2. write /etc/mrrc-hub/aliyun.ini (chmod 600):"
+    echo "    !!        dns_aliyun_access_key = <id>"
+    echo "    !!        dns_aliyun_access_key_secret = <secret>"
+    echo "    !!   3. re-run this script - it then issues a real wildcard"
+    if [[ ! -s "$CERT_CRT" ]]; then
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -keyout "$CERT_KEY" -out "$CERT_CRT" \
+            -subj "/CN=${SUBDOMAIN}" \
+            -addext "subjectAltName=DNS:${SUBDOMAIN},DNS:*.mrrc.vlsc.net,DNS:*.vlsc.net" 2>/dev/null
+        chmod 600 "$CERT_KEY"
+    fi
 fi
 
 log "nginx: TLS vhost fronting the tunnel (upstream VERIFIED, not skipped)"
@@ -169,22 +196,21 @@ cat >/etc/nginx/sites-available/mrrc-hub <<EOF
 # \`proxy_ssl_verify off\` because the instance used a self-signed cert; this host
 # verifies instead, so a wrong or expired instance certificate fails loudly.
 server {
-    listen 80;
-    listen [::]:80;
+    listen ${HTTP_PORT};
+    listen [::]:${HTTP_PORT};
     server_name ${SUBDOMAIN};
 
-    location /.well-known/acme-challenge/ { root /var/www/html; }
-    location / { return 301 https://\$host\$request_uri; }
+    location / { return 301 https://\$host:${HTTPS_PORT}\$request_uri; }
 }
 
 server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
+    listen ${HTTPS_PORT} ssl;
+    listen [::]:${HTTPS_PORT} ssl;
     http2 on;
     server_name ${SUBDOMAIN};
 
-    ssl_certificate     /etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem;
+    ssl_certificate     ${CERT_CRT};
+    ssl_certificate_key ${CERT_KEY};
     ssl_protocols TLSv1.2 TLSv1.3;
 
     # MRRC's own session cookie is host-only and JS-readable; do not add a
@@ -212,6 +238,8 @@ server {
     }
 }
 EOF
+ln -sf /etc/nginx/sites-available/mrrc-hub /etc/nginx/sites-enabled/mrrc-hub
+rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
 log "done"
@@ -234,8 +262,9 @@ Instance side — put this in ~/mrrc-frpc.toml and run \`frpc -c ~/mrrc-frpc.tom
 
 Then verify from a machine that is NOT this host:
 
-    curl -sI  https://${SUBDOMAIN}/login        # expect 200
-    curl -s   https://${SUBDOMAIN}/api/health   # expect 401 until a session exists
+    curl -sI  https://${SUBDOMAIN}:${HTTPS_PORT}/login        # expect 200
+    curl -s   https://${SUBDOMAIN}:${HTTPS_PORT}/api/health   # expect 401 until a session exists
+    # add -k if the certificate is the self-signed smoke-test fixture
 
 Proof that upstream verification is real (do it once, keep the habit):
 temporarily set \`proxy_ssl_name example.com;\`, reload, and confirm the request

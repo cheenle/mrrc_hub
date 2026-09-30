@@ -8,7 +8,7 @@
 # 这正是 hub SDD AD-H01 要验证的第一条。
 
 serverAddr = "8.160.161.80"     # 换成你的 hub；域名解析正常后也可写域名
-serverPort = 7000               # frps bindPort（安全组需放行）
+serverPort = 8989               # frps bindPort（安全组需放行；非标端口，见 deploy/README.md）
 auth.method = "token"
 auth.token = "REPLACE_WITH_TOKEN_FROM_BOOTSTRAP"
 

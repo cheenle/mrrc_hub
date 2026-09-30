@@ -16,7 +16,7 @@
 |---|---|
 | `www.vlsc.net/mrrc_modern/` | 产品介绍、下载与现有文档入口（**现状，保留**） |
 | `portal.mrrc.vlsc.net` | Fleet Portal、账号与实例管理 |
-| `<instance-id>.mrrc.vlsc.net` | 单实例远程访问入口；通配 DNS/TLS |
+| `<instance-id>.mrrc.vlsc.net` **:9988** | 单实例远程访问入口；通配 DNS/TLS。**入口携带非标准端口**（明文 8899 只跳转，隧道控制 8989）—— 见 AD-H02 的 port 修订 |
 | `tunnel.mrrc.vlsc.net` | Fleet Agent 出站隧道入口，可用独立 SNI 或端口 |
 
 **Cookie 规则**：实例子域会话必须 host-only，不设 `Domain=.mrrc.vlsc.net`；

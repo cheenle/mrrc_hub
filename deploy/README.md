@@ -24,9 +24,16 @@
 
 ## 解除阻塞（三件，只有你能做）
 
-1. **阿里云控制台 → 安全组入方向**放行：`80/tcp`、`443/tcp`、`7000/tcp`
-   （80/443 给用户入口与 Let's Encrypt HTTP-01；7000 是 frps 的控制端口，实例要出站连它。
-   只放行 `7000` 的话用户侧 443 仍然不通。）
+1. **阿里云控制台 → 安全组入方向**放行：**`8899/tcp`、`9988/tcp`、`8989/tcp`**
+
+   | 端口 | 用途 |
+   |---|---|
+   | **8899** | 用户入口的明文口（只做 301 跳转；**不能**用于 ACME，见下） |
+   | **9988** | 用户入口的 TLS 口 —— 用户实际访问 `https://test1.mrrc.vlsc.net:9988` |
+   | **8989** | frps 控制口，实例出站连它 |
+
+   非标端口的代价已写进设计记录（AD-H02 的 port 修订、风险 R-H12）：**入口 URL 带端口**，
+   且**只放行 80/443 出站的用户网络完全连不上**。收益是国内 ECS 在 80/443 上需要 ICP 备案。
 2. **给 `cheenle` 免密 sudo**（在控制台用 VNC/其它 root 通道执行一次）：
    ```bash
    echo 'cheenle ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/cheenle
@@ -43,19 +50,19 @@
   │  https://test1.mrrc.vlsc.net   ← TLS 由 hub 的 nginx 终结（Let's Encrypt，HTTP-01）
   ▼
 Hub ECS 8.160.161.80
-  nginx :443  server_name test1.mrrc.vlsc.net
+  nginx :9988 server_name test1.mrrc.vlsc.net
      └─ proxy_pass https://127.0.0.1:18888
            proxy_ssl_verify on                       ← 这一步是刻意的：
            proxy_ssl_name radio.vlsc.net                B2 现状是 proxy_ssl_verify off，
            proxy_ssl_trusted_certificate <系统 CA 库>    hub 侧必须开着校验证书
-  nginx :80   ACME challenge + 301 → https
-  frps :7000  bindPort（实例出站连它；token 鉴权 + TLS）
+  nginx :8899 301 → https://…:9988（明文口只跳转）
+  frps :8989  bindPort（实例出站连它；token 鉴权 + TLS）
        :18888 tcp 代理端口（**只绑 127.0.0.1**，不暴露到公网）
        ▲
        │ 出站 WSS/TLS，客户侧零入站
        │
 家宽 Mac（实例侧）
-  frpc → 8.160.161.80:7000
+  frpc → 8.160.161.80:8989
       local 127.0.0.1:8888  ← MRRC_modern（真的 Let's Encrypt 证书）
 ```
 
@@ -77,15 +84,15 @@ cp deploy/frpc-instance.toml.example ~/mrrc-frpc.toml   # 填 token
 frpc -c ~/mrrc-frpc.toml
 
 # 3) 验证
-curl -sI https://test1.mrrc.vlsc.net/login            # 期望 200（实例登录页）
-curl -s  https://test1.mrrc.vlsc.net/api/health       # 期望 401（鉴权生效）
+curl -sI https://test1.mrrc.vlsc.net:9988/login            # 期望 200（自签阶段加 -k）
+curl -s  https://test1.mrrc.vlsc.net:9988/api/health       # 期望 401（鉴权生效）
 ```
 
 ## 这次验证要检查什么（不只是"能连上"）
 
 | # | 检查项 | 期望 | 对应设计主张 |
 |---|---|---|---|
-| V-a | 登录页可达 | `https://test1.mrrc.vlsc.net/login` 200 | AD-H01 / SC-H1（客户侧零入站） |
+| V-a | 登录页可达 | `https://test1.mrrc.vlsc.net:9988/login` 200 | AD-H01 / SC-H1（客户侧零入站） |
 | V-b | 五个 WS 端点全通 | `/WSradio` `/WSspectrum` `/WSaudioRX` `/WSaudioTX` `/WSatr1000` 均完成握手（浏览器不复现"控制/频谱在、音频缺席"） | 透明代理契约 |
 | V-c | **WS URL 里没有 `?token=`** | 浏览器 DevTools 的 Network→WS 请求 URL 无 token；`journalctl -u nginx` grep `token=` 无命中 | AD-H07 / NFR-H020 |
 | V-d | **上游证书校验为真** | nginx 配置无 `proxy_ssl_verify off`；证书不匹配时链路应失败（可临时把 `proxy_ssl_name` 改错验证它真的会失败） | NFR-H021 |
@@ -98,8 +105,12 @@ curl -s  https://test1.mrrc.vlsc.net/api/health       # 期望 401（鉴权生�
 
 ## 尚未覆盖
 
-- 通配证书（`*.mrrc.vlsc.net` 一张覆盖所有实例）需要 DNS-01，即 DNS 服务商 API 凭证；
-  本目录用**每个名字一张 HTTP-01 证书**，够验证、不够 200 实例规模化。需要你确认 DNS 托管在哪、
-  是否给 API 凭证。
+- **证书当前是自签的**（脚本在无 DNS 凭证时明确吼一声并生成自签证书，SAN 覆盖
+  `test1.mrrc.vlsc.net` + `*.mrrc.vlsc.net` + `*.vlsc.net`）。这是硬约束，不是偷懒：
+  **Let's Encrypt 的 HTTP-01 固定走 80、TLS-ALPN-01 固定走 443**，两个口都不开就没有自动签发路径。
+- `vlsc.net` 的 DNS 托管在**阿里云万网**（`dns25/dns26.hichina.com`）。要真证书/通配证书：
+  建一个只带 `AliyunDNSFullAccess` 的 RAM 用户，把 AccessKey 写进 `/etc/mrrc-hub/aliyun.ini`
+  （0600），重跑 `bootstrap-hub.sh` —— 脚本自动切 DNS-01，那时可一次签 **`*.mrrc.vlsc.net` 通配**，
+  200 个实例共用一张。
 - 多实例（`test2`…）可直接复用：再加一条 frpc 代理 + 一条 nginx server 块。
 - Fleet Agent、设备证书、Portal、租约都还没实现（hub SDD 的阶段 2），本次只验证阶段 1 通路。

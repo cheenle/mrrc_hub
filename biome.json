@@ -8,9 +8,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "website/css/octen.css"
-      ],
+      "includes": ["website/css/octen.css"],
       "formatter": {
         "enabled": false
       },

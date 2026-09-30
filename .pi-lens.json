@@ -1,5 +1,3 @@
 {
-  "ignore": [
-    "website/css/octen.css"
-  ]
+  "ignore": ["website/css/octen.css"]
 }

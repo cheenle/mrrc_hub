@@ -22,7 +22,9 @@ import hmac
 import html
 import json
 import os
+import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -105,6 +107,37 @@ class Portal:
         return {"callsign": normalized, "label": app.label, "entry_removed": removed, "status": "revoked"}
 
 
+def _cert_days(path=None) -> str:
+    """入口证书剩余天数。
+
+    读的是证书任务写的摘要文件（`/var/lib/mrrc-hub/portal/cert.txt`），而不是直接读
+    `/etc/mrrc-hub/tls/fullchain.pem` —— 那个目录是私有的，Portal 以 mrrcportal 运行，
+    读不到。**收紧权限是对的，所以改写入方，而不是放宽读取方。**
+    """
+    path = Path(path or os.environ.get("MRRC_PORTAL_CERT_INFO", "/var/lib/mrrc-hub/portal/cert.txt"))
+    if not path.exists():
+        return "未生成（证书任务下次运行时会写）"
+    try:
+        text = path.read_text(encoding="utf-8")
+        stamp = [ln.split("=", 1)[1] for ln in text.splitlines() if ln.startswith("notAfter=")][0]
+        end = time.mktime(time.strptime(" ".join(stamp.split()[:4]), "%b %d %H:%M:%S %Y"))
+        days = int((end - time.time()) // 86400)
+        return f"{days} 天（{stamp}）" + ("　⚠️ 需检查续期" if days < 14 else "")
+    except Exception:                                  # noqa: BLE001
+        return "（摘要文件无法解析）"
+
+
+def _clublog_info() -> str:
+    """Club Log 库的文件时间与规模（不解析 36MB，只 stat；条数由核验器缓存提供）。"""
+    from portal.verify import ClubLogVerifier
+    path = Path(DEFAULT_CLUBLOG)
+    if not path.exists():
+        return "未就位（核验将全部转人工）"
+    size = path.stat().st_size
+    age_h = (time.time() - path.stat().st_mtime) / 3600
+    return f"{size / 1048576:.1f} MB，更新于 {age_h:.1f} 小时前" + ("　⚠️ 超过 48 小时" if age_h > 48 else "")
+
+
 def make_handler(portal: Portal, token: str, base: str = ""):
     """base 是挂载前缀（如 `/mrrc_portal`），空串表示挂在根。
 
@@ -159,56 +192,125 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 supplied = str(body.get("token") or "").strip()
             return hmac.compare_digest(supplied, token)
 
-        # ---- operator UI ----
-        def _forms(self, token_value: str, msg: str = "") -> str:
-            """运维页：待核验/待分配/已授予 三个清单 + 每行动作按钮。
+        # ---- operator console ----
+        def _admin(self, view: str, token_value: str, msg: str = "") -> str:
+            """后台管理台：五个视图，全部服务端渲染。
 
-            安全姿态（有意为之）：
-              * **不用 cookie、不做重定向** —— 每个动作表单都带隐藏的 token 字段。
-                于是不存在会话可被 CSRF 借用的问题：伪造的请求拿不到令牌。
-              * 令牌只出现在**响应体**里，不进 URL、不进 Location 头、不进日志。
+            安全姿态（延续全过程的不变量）：
+              * **不用 cookie、不做重定向** —— 导航与动作都靠表单里的隐藏令牌字段。
+                没有会话可被借用，CSRF 因此没有着力点。
+              * 令牌只出现在响应体里，不进 URL、不进 Location、不进访问日志。
+              * **需要 root 的操作不由本服务执行**：Web 服务解析外网输入，给它
+                nginx reload / 拉库的权限是自找麻烦。这里只把命令打出来让运维执行。
             """
-            store, registry = portal.store, portal.registry
-            data = store._load()["applications"]
-
-            def row(callsign, app, actions):
-                return (f"<tr><td><code>{html.escape(callsign)}</code></td>"
-                        f"<td>{html.escape(app['status'])}</td>"
-                        f"<td>{html.escape(app.get('product') or '主产品')}</td>"
-                        f"<td>{html.escape(app.get('contact') or '—')}</td>"
-                        f"<td>{html.escape(app.get('evidence') or '')[:60]}</td>"
-                        f"<td>{actions}</td></tr>")
-
-            def btn(route, callsign, label, extra=""):
+            token_attr = html.escape(token_value)
+            def nav(label, target):
+                state = " style='font-weight:700'" if target == view else ""
+                return (f"<form method=post style='display:inline'>"
+                        f"<input type=hidden name=token value='{token_attr}'>"
+                        f"<input type=hidden name=view value='{target}'>"
+                        f"<button{state}>{html.escape(label)}</button></form>")
+            def act(route, callsign, label, extra=""):
                 return (f"<form method=post action={route} style='display:inline'>"
                         f"<input type=hidden name=callsign value='{html.escape(callsign)}'>"
-                        f"<input type=hidden name=token value='{html.escape(token_value)}'>"
-                        f"{extra}<button>{html.escape(label)}</button></form>")
+                        f"<input type=hidden name=token value='{token_attr}'>"
+                        f"<input type=hidden name=view value='{view}'>{extra}"
+                        f"<button>{html.escape(label)}</button></form>")
 
-            pending = [row(c, a, btn("/verify", c, "核验通过", "<input type=hidden name=evidence value='人工核验通过'>")
-                          + btn("/reject", c, "拒绝", "<input type=hidden name=reason value='材料不足'>"))
-                       for c, a in sorted(data.items()) if a["status"] == "applied"]
-            verified = [row(c, a, btn("/grant", c, "分配入口") + btn("/reject", c, "拒绝", "<input type=hidden name=reason value='核验后驳回'>"))
-                        for c, a in sorted(data.items()) if a["status"] == "verified"]
-            granted = [row(c, a, btn("/revoke", c, "撤销", "<input type=hidden name=reason value='撤销'>"))
-                       for c, a in sorted(data.items()) if a["status"] == "granted"]
-            empty = "<tr><td colspan=6>（无）</td></tr>"
+            apps = portal.store._load()["applications"]
+            registry = portal.registry
+            entries = registry.entries()
+            body = ""
+
+            if view == "overview":
+                by = {}
+                for a in apps.values():
+                    by[a["status"]] = by.get(a["status"], 0) + 1
+                cert = _cert_days()
+                cl = _clublog_info()
+                def probe(port):                       # 隧道在线探测：TCP 连通即在线
+                    import socket
+                    try:
+                        with socket.create_connection(("127.0.0.1", int(port)), timeout=1.5):
+                            return True
+                    except OSError:
+                        return False
+                online = sum(1 for _, p in entries if probe(p))
+                body = f"""<h2>总览</h2>
+<table><tr><th>项</th><th>值</th></tr>
+<tr><td>申请</td><td>{'　'.join(f"{k}={v}" for k, v in sorted(by.items())) or '（无）'}</td></tr>
+<tr><td>注册表实例</td><td>{len(entries)} 个，其中隧道在线 <b>{online}</b> 个</td></tr>
+<tr><td>入口证书剩余</td><td>{cert}</td></tr>
+<tr><td>Club Log 呼号库</td><td>{cl}</td></tr>
+<tr><td>端口池</td><td>{registry.first}-{registry.last}，已用 {len(entries)}，空闲 {registry.last - registry.first + 1 - len(entries)}</td></tr>
+</table>
+<p><small>需要 root 的动作不在此执行，请照抄命令：<br>
+<code>sudo /usr/local/sbin/gen_hub_routes.py &amp;&amp; sudo systemctl reload nginx</code>（新增/撤销实例后）<br>
+<code>sudo /usr/local/sbin/mrrc-portal-sync-clublog.sh</code>（立即刷新呼号库）</small></p>"""
+
+            elif view == "applications":
+                def rows(statuses, actions):
+                    out = []
+                    for c, a in sorted(apps.items()):
+                        if a["status"] not in statuses:
+                            continue
+                        out.append(f"<tr><td><code>{html.escape(c)}</code></td><td>{html.escape(a['status'])}</td>"
+                                   f"<td>{html.escape(a.get('product') or '主产品')}</td>"
+                                   f"<td>{html.escape(a.get('label') or '—')}</td><td>{a.get('port') or '—'}</td>"
+                                   f"<td>{html.escape((a.get('evidence') or '')[:70])}</td><td>{actions(c)}</td></tr>")
+                    return ''.join(out) or "<tr><td colspan=7>（无）</td></tr>"
+                body = "<h2>申请（全部状态）</h2><table><tr><th>呼号</th><th>状态</th><th>产品</th><th>标签</th><th>端口</th><th>依据</th><th>动作</th></tr>" \
+                    + rows({"applied"}, lambda c: act("/verify", c, "核验通过", "<input type=hidden name=evidence value='人工核验通过'>") + act("/reject", c, "拒绝", "<input type=hidden name=reason value='材料不足'>")) \
+                    + rows({"verified"}, lambda c: act("/grant", c, "分配入口") + act("/reject", c, "拒绝", "<input type=hidden name=reason value='核验后驳回'>")) \
+                    + rows({"granted"}, lambda c: act("/revoke", c, "撤销", "<input type=hidden name=reason value='撤销'>")) \
+                    + rows({"rejected", "revoked"}, lambda c: "") + "</table>"
+
+            elif view == "instances":
+                def probe(port):
+                    import socket
+                    try:
+                        with socket.create_connection(("127.0.0.1", int(port)), timeout=1.5):
+                            return "<b style='color:#2e7d32'>在线</b>"
+                    except OSError:
+                        return "<span style='color:#b71c1c'>未连接</span>"
+                rows_ = ''.join(
+                    f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td><td>{probe(p)}</td>"
+                    f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net:8899/' target=_blank>打开入口</a></td></tr>"
+                    for l, p in sorted(entries)) or "<tr><td colspan=4>（注册表为空）</td></tr>"
+                body = ("<h2>实例</h2><table><tr><th>标签</th><th>端口</th><th>隧道</th><th>入口</th></tr>"
+                        + rows_ + "</table><p><small>「在线」= hub 回环上该端口可连接 ⇒ frpc 隧道已建立。<br>"
+                        "新增后仍需：<code>sudo /usr/local/sbin/gen_hub_routes.py &amp;&amp; sudo systemctl reload nginx</code></small></p>")
+
+            elif view == "audit":
+                entries_a = list(reversed(portal.store.audit()))[:60]
+                rows_ = ''.join(
+                    f"<tr><td>{time.strftime('%m-%d %H:%M', time.localtime(e['at']))}</td>"
+                    f"<td><code>{html.escape(e['callsign'])}</code></td><td>{html.escape(e['event'])}</td>"
+                    f"<td>{html.escape((e.get('detail') or '')[:90])}</td></tr>" for e in entries_a)
+                body = ("<h2>审计（最近 60 条，追加式）</h2><table><tr><th>时间</th><th>呼号</th><th>事件</th><th>细节</th></tr>"
+                        + (rows_ or "<tr><td colspan=4>（无）</td></tr>") + "</table>")
+
+            else:  # clublog
+                cl = _clublog_info()
+                body = (f"<h2>呼号库</h2><table><tr><th>项</th><th>值</th></tr>"
+                        f"<tr><td>来源</td><td>Club Log（与站内留言版 www.vlsc.net/feedback 同源）</td></tr>"
+                        f"<tr><td>状态</td><td>{cl}</td></tr>"
+                        f"<tr><td>路径</td><td><code>{html.escape(str(DEFAULT_CLUBLOG))}</code></td></tr></table>"
+                        f"<p><small>hub 每天 04:30 从 www 拉取（受限命令：只能读那一个文件）。<br>"
+                        f"立即刷新：<code>sudo /usr/local/sbin/mrrc-portal-sync-clublog.sh</code></small></p>")
+
             return f"""<!doctype html><meta charset="utf-8"><meta name=robots content=noindex>
-<title>MRRC Portal — 运维</title>
-<style>body{{font:15px/1.6 -apple-system,sans-serif;max-width:1100px;margin:32px auto;padding:0 16px}}
-table{{border-collapse:collapse;width:100%;margin:8px 0 24px}}td,th{{border-bottom:1px solid #ddd;padding:6px;text-align:left;font-size:14px}}
-button{{font:inherit;padding:4px 10px;margin-right:4px}}code{{background:#f4f4f4;padding:1px 4px}}
-.msg{{background:#e8f5e9;border:1px solid #a5d6a7;padding:8px 12px}}h2{{margin-top:28px}}</style>
-<h1>呼号自助 — 运维审批</h1>
+<title>MRRC Portal — 后台管理</title>
+<style>body{{font:15px/1.6 -apple-system,sans-serif;max-width:1100px;margin:28px auto;padding:0 16px}}
+table{{border-collapse:collapse;width:100%;margin:10px 0 22px}}td,th{{border-bottom:1px solid #ddd;padding:6px;text-align:left;font-size:14px}}
+button{{font:inherit;padding:5px 11px;margin-right:4px}}code{{background:#f4f4f4;padding:1px 4px}}
+.msg{{background:#e8f5e9;border:1px solid #a5d6a7;padding:8px 12px}}h2{{margin-top:22px}}</style>
+<h1>呼号自助 — 后台管理</h1>
 {f'<p class=msg>{html.escape(msg)}</p>' if msg else ''}
-<p><small>令牌只在本页表单里提交（不进 URL）✓ 核验依据：Club Log 呼号库 ✓ 未命中 ⇒ 人工判断 ✓
-　·　注册表：{html.escape(str(registry.path))}（分配后仍需 root 执行 <code>gen_hub_routes.py</code> + <code>nginx reload</code>）</small></p>
-<h2>待核验（{len(pending)}）</h2><table><tr><th>呼号</th><th>状态</th><th>产品</th><th>联系</th><th>依据</th><th>动作</th></tr>{''.join(pending) or empty}</table>
-<h2>已核验待分配（{len(verified)}）</h2><table><tr><th>呼号</th><th>状态</th><th>产品</th><th>联系</th><th>依据</th><th>动作</th></tr>{''.join(verified) or empty}</table>
-<h2>已授予（{len(granted)}）</h2><table><tr><th>呼号</th><th>状态</th><th>标签</th><th>端口</th><th>—</th><th>动作</th></tr>
-{''.join(granted) or empty}</table>"""
+<p>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('审计','audit')}{nav('呼号库','clublog')}</p>
+{body}"""
 
-        # ---- routes ----
+        # ---- routes ----        # ---- routes ----
         def do_GET(self):                        # noqa: N802
             if self._route() == "/admin":
                 return self._send(200, f"""<!doctype html><meta charset="utf-8"><meta name=robots content=noindex>
@@ -263,7 +365,7 @@ code{{background:#f4f4f4;padding:1px 4px}}</style>
                 if route == "/admin":
                     if not self._operator_ok(body):
                         return self._send(403, {"error": "令牌不正确"})
-                    return self._send(200, self._forms(body.get("token", "").strip()),
+                    return self._send(200, self._admin(body.get("view") or "overview", body.get("token", "").strip()),
                                       ctype="text/html; charset=utf-8")
                 if route not in ("/verify", "/reject", "/grant", "/revoke"):
                     return self._send(404, {"error": "not found"})
@@ -273,7 +375,7 @@ code{{background:#f4f4f4;padding:1px 4px}}</style>
                 from_page = bool(body.get("token"))
                 def done(msg):
                     if from_page:
-                        return self._send(200, self._forms(body.get("token", "").strip(), msg),
+                        return self._send(200, self._admin(body.get("view") or "overview", body.get("token", "").strip(), msg),
                                           ctype="text/html; charset=utf-8")
                     return None
                 if route == "/verify":

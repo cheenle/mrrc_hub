@@ -104,6 +104,21 @@ def test_clublog_verifier_semantics():
         check(missing.check("BG1SB").outcome is VerificationOutcome.UNVERIFIED, "库文件缺失应转人工而非抛错")
 
 
+def test_cert_days_reads_the_summary_file():
+    """证书天数：读摘要文件；缺失/损坏一律给可读文案，不抛异常。"""
+    from portal.app import _cert_days
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        missing = tmp / "none.txt"
+        check("未生成" in _cert_days(missing), "缺失时给可读文案")
+        bad = tmp / "bad.txt"; bad.write_text("not a cert", encoding="utf-8")
+        check("无法解析" in _cert_days(bad), "损坏时给可读文案")
+        ok = tmp / "cert.txt"
+        ok.write_text("notAfter=Dec 29 11:59:08 2026 GMT\nsubject=CN=*.mrrc.vlsc.net\n", encoding="utf-8")
+        result = _cert_days(ok)
+        check("天（" in result and "2026" in result, f"正常解析: {result}")
+
+
 def test_admin_ui_flow_and_no_csrf_surface():
     """运维审批页：令牌换页面；动作必须带令牌字段（无 cookie 可借用 ⇒ 免 CSRF）。"""
     with tempfile.TemporaryDirectory() as tmp:
@@ -128,8 +143,15 @@ def test_admin_ui_flow_and_no_csrf_surface():
             # 未带令牌进不了审批台
             check(post("/admin", {"token": "wrong"})[0] == 403, "错令牌进不了审批台")
             status, page = post("/admin", {"token": "tok"})
-            check(status == 200 and "运维审批" in page, "正确令牌进得去")
-            check("BG1ZZZ" in page and "核验通过" in page, "待核验申请出现在审批台")
+            check(status == 200 and "后台管理" in page, "正确令牌进得去")
+            check("总览" in page and "注册表实例" in page, "默认进入总览视图")
+            # 五个视图各自可渲染（导航同样走 POST + 令牌字段，不改用 cookie）
+            for view, needle in (("applications", "申请（全部状态）"), ("instances", "实例"),
+                                 ("audit", "审计（最近"), ("clublog", "呼号库")):
+                st, vp = post("/admin", {"token": "tok", "view": view})
+                check(st == 200 and needle in vp, f"{view} 视图可渲染")
+            st, ap = post("/admin", {"token": "tok", "view": "applications"})
+            check("BG1ZZZ" in ap and "核验通过" in ap, "待核验申请出现在申请视图")
             check('name=token value=\'tok\'' in page or 'name=token value="tok"' in page, "动作表单自带令牌字段")
             # 动作不带令牌（模拟被借用会话/CSRF）→ 拒绝
             check(post("/verify", {"callsign": "BG1ZZZ", "evidence": "x"})[0] == 403, "无令牌的动作被拒（免 CSRF）")

@@ -53,6 +53,13 @@
 | NFR-H023 | 运维权限 | Owner/Fleet Admin 强制 MFA；远程诊断默认关闭，Owner 授权后限时开启并全量审计；Fleet Admin 默认无权进入控制台或收听音频 | High | 权限矩阵测试 |
 | NFR-H024 | 合规提示 | 首次启用 Operator 能力时提示用户确认执照与遥控台站合规；保留地区策略与紧急禁用入口 | Medium | UI 流程检查 |
 
+## 5.6 Identity & Tenancy Requirements
+
+| ID | Requirement | Target | Priority | Verification |
+| --- | --- | --- | --- | --- |
+| NFR-H028 | **呼号即身份**：注册实例与注册用户都必须提供真实呼号；呼号即账号标识符，大小写不敏感；同一呼号同一时刻只能绑定一个 Owner | 无呼号不得注册；重复绑定被拒 | Critical | 阶段 2 注册流程测试：伪呼号/重复呼号/大小写变体 |
+| NFR-H029 | 呼号核验手段：注册时以呼号库比对或执照材料人工审核为准，并保留审计记录；冒用他人呼号的账号可被撤销 | 核验失败即拒绝 | High | 审核流程演练 + 撤销演练 |
+
 ## 5.6 Maintainability Requirements
 
 | ID | Requirement | Target | Priority | Verification |

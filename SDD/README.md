@@ -41,7 +41,7 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.7 |
+| SDD Version | V0.8 |
 | Baseline Date | 2026-09-30 |
 | Status | **阶段 1 通路已在真实公网跑通**（`test1.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。MVP 前必修项：I-H6/AD-H07/AD-H09 已实现（mrrc_modern V2.62/V2.63）；剩余为通配真证书（DNS-01）与备案 |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |

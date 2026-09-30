@@ -171,6 +171,9 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较 |
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
 | 测试 | `python3 tests/test_portal.py` |
+| 入口 | `https://portal.mrrc.vlsc.net:8899/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
+| 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |
+| 限流 | `/apply` 上 `limit_req zone=mrrc_portal_apply burst=5 nodelay`（10 r/m/来源）。**这里能用真实客户端 IP** —— 与被隧道合并来源的实例侧不同 |
 
 **要记住的一条**：`grant` 只写注册表并打印实例侧命令，**不自动重生成路由** ——
 `gen_hub_routes.py` + `nginx reload` 仍需 root 手工执行，这是有意的分工。
@@ -178,3 +181,18 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 **核验为何必须在授予之前**：呼号是公开标识、入口可枚举（I-H9 接受），
 所以防线只能放在"核验通过才给访问"，不能放在"别人猜不到"。完整论证见
 `../portal/README.md` 与 `../portal/callsign.py`。
+
+### 12.9.1 Portal 上线的端到端验收（2026-10-01）
+
+| 项 | 实测 |
+|----|------|
+| 入口与证书 | `GET https://portal.mrrc.vlsc.net:8899/` → 200，**不带 `-k` 亦通过**（通配证书覆盖） |
+| 自助申请（库外呼号） | `POST /apply` `bg1test` → `applied`，理由"呼号库中未收录，转人工核验" |
+| 自动核验（库内呼号） | `POST /apply` `bg1sb` → `verified`，"命中呼号库" |
+| 未核验不得授予 | 无令牌 `POST /grant` → **403**；状态未到 `verified` 亦拒绝（代码硬前置） |
+| 限流 | 14 连击 → `200×4` 后持续 **429**（按来源 IP，真实生效） |
+| 既有服务未受影响 | `bg1sb` 实例入口 401 ✓、www 边缘 401 ✓、未知名字 404 unknown instance ✓ |
+
+运维动作两种用法：脚本/curl 用请求头 `X-Portal-Token`；浏览器用表单里的同名字段
+（**令牌走请求体，不进 URL** —— URL 会进访问日志与浏览器历史）。
+授予之后仍需 root 手工执行 `gen_hub_routes.py` + `nginx reload`（有意分工，见 §12.9）。

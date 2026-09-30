@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_REGISTRY = Path("/etc/mrrc-hub/instances.tsv")
+DEFAULT_TLS_NAME = "radio.vlsc.net"
 DEFAULT_OUT = Path("/etc/nginx/conf.d/mrrc-hub-map.conf")
 FRPS_CONFIG = Path("/etc/frp/frps.toml")
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
@@ -70,10 +71,11 @@ def load_registry(path: Path) -> tuple[dict[str, int], list[str]]:
         if not line:
             continue
         parts = line.split()
-        if len(parts) != 2:
-            problems.append(f"{path}:{lineno}: expected '<name> <port>', got {raw!r}")
+        if len(parts) < 2:
+            # 第三列（tls_name）可选：见 load_tls_names()。老行不写它，行为不变。
+            problems.append(f"{path}:{lineno}: expected '<name> <port> [tls_name]', got {raw!r}")
             continue
-        name, port_text = parts
+        name, port_text = parts[0], parts[1]
         name = name.lower()          # callsigns arrive upper-case; DNS is case-insensitive
         if not NAME_RE.match(name):
         # after lower-casing, so BG1SB is accepted and bg1sb is what gets routed
@@ -102,11 +104,46 @@ def load_registry(path: Path) -> tuple[dict[str, int], list[str]]:
     return mapping, problems
 
 
-def render(mapping: dict[str, int]) -> str:
+def load_tls_names(path: Path) -> tuple[dict[str, str], list[str]]:
+    """注册表第三列：hub 校验该实例证书时要用的名字。
+
+    租户没有自己的域名，安装器给的是自签证书 —— 按本项目的约定，证书签给实例**自己的
+    入口名**（<label>.mrrc.vlsc.net）。老行不写这一列时沿用 radio.vlsc.net：操作者自己
+    那条实例注册的就是它，这也是本次改动保持向后兼容的地方。
+    """
+    names: dict[str, str] = {}
+    notes: list[str] = []
+    if not path.exists():
+        return names, notes
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        label = parts[0].lower()
+        if len(parts) >= 3:
+            names[label] = parts[2]
+        else:
+            names[label] = DEFAULT_TLS_NAME
+            notes.append(f"{path}:{lineno}: {label} 未写 tls_name，按 {DEFAULT_TLS_NAME} 校验"
+                         f"（新实例应写自己的入口名，如 {label}.mrrc.vlsc.net）")
+    return names, notes
+
+
+def render(mapping: dict[str, int], tls_names: dict[str, str] | None = None) -> str:
+    tls_names = tls_names or {}
     lines = [HEADER, "map $mrrc_instance $mrrc_port {"]
-    lines.append("    default 0;")          # unknown instance
+    lines.append("    default 0;")
     for name in sorted(mapping):
         lines.append(f"    {name} {mapping[name]};")
+    lines.append("}")
+    lines.append("")
+    lines.append("# 校验用的名字：hub 用它（SNI + 验证名）核对实例证书。")
+    lines.append("# 自签租户的证书签给各自入口名，靠信任包里的公钥通过校验 —— 校验始终开着。")
+    lines.append("map $mrrc_instance $mrrc_tls_name {")
+    lines.append(f"    default {DEFAULT_TLS_NAME};")
+    for name in sorted(mapping):
+        lines.append(f"    {name} {tls_names.get(name, DEFAULT_TLS_NAME)};")
     lines.append("}")
     lines.append("")
     return "\n".join(lines)
@@ -117,6 +154,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--check", action="store_true", help="validate only; write nothing")
+    ap.add_argument("--bundle", type=Path, default=Path("/etc/mrrc-hub/trust-bundle.pem"),
+                    help="信任包：系统 CA + 各实例证书（自签租户靠钉住它通过校验）")
+    ap.add_argument("--cert-dir", type=Path, default=Path("/etc/mrrc-hub/instance-certs"))
+    ap.add_argument("--system-ca", type=Path, default=Path("/etc/ssl/certs/ca-certificates.crt"))
     args = ap.parse_args(argv)
 
     mapping, problems = load_registry(args.registry)
@@ -129,7 +170,10 @@ def main(argv: list[str] | None = None) -> int:
               "404 every instance)", file=sys.stderr)
         return 2
 
-    rendered = render(mapping)
+    tls_names, notes = load_tls_names(args.registry)
+    for n in notes:
+        print(f"note: {n}", file=sys.stderr)
+    rendered = render(mapping, tls_names)
     if args.check:
         current = args.out.read_text(encoding="utf-8") if args.out.exists() else ""
         print(f"{len(mapping)} instance(s): " + ", ".join(f"{n}→{p}" for n, p in sorted(mapping.items())))
@@ -138,10 +182,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.out.exists() and args.out.read_text(encoding="utf-8") == rendered:
         print(f"{args.out}: unchanged ({len(mapping)} instance(s))")
-        return 0
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(rendered, encoding="utf-8")
-    print(f"{args.out}: written ({len(mapping)} instance(s))")
+        # 注意：**不在此返回** —— 信任包必须无条件生成，否则 vhost 会引用一个不存在的文件
+        # （实测踩过：map 未变时提前 return ⇒ nginx -t 失败 ⇒ reload 被拒）。
+    else:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(rendered, encoding="utf-8")
+        print(f"{args.out}: written ({len(mapping)} instance(s))")
+
+    # 信任包 = 系统 CA + 每个**仍在注册表里**的实例证书。
+    # 撤销实例 = 删掉它的证书并重跑生成器 ⇒ 不再被信任。
+    cert_dir = args.cert_dir
+    certs = sorted(cert_dir.glob("*.pem")) if cert_dir.exists() else []
+    wanted = {f"{name}.pem" for name in mapping}
+    kept = [c for c in certs if c.name in wanted]
+    extra = [c for c in certs if c.name not in wanted]
+    bundle = args.system_ca.read_text(encoding="utf-8", errors="replace") if args.system_ca.exists() else ""
+    for cert in kept:
+        bundle += "\n" + cert.read_text(encoding="utf-8", errors="replace").rstrip() + "\n"
+    args.bundle.write_text(bundle, encoding="utf-8")
+    print(f"{args.bundle}: {len(kept)} 份实例证书"
+          + (f"（另有 {len(extra)} 份不属于任何已注册实例，未并入）" if extra else ""))
     return 0
 
 

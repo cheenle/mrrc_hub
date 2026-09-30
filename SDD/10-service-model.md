@@ -59,3 +59,13 @@
 | `_verify_auth`（cookie 或 `?token=`） | **阶段 2 改为信任隧道签名上下文；MVP 期必须停止把 token 放 URL** | 继续把 token 放 URL（AD-H07） |
 | PTT Layer 0 + 1–8 | 直接复用，并为 Hub 增加一层（远程会话活性） | 让 Hub 成为释放路径的必要环节 |
 | `upgrade_core.py` | 复用为 OTA 客户端核心 | 另建并行升级通道（AD-H13） |
+
+## 10.8 实况指认（as-built，2026-09-30）
+
+**已上线的服务面**：隧道网关（frps 0.71.0，控制口 8989，代理端口显式绑回环）、
+入口 nginx（呼号通配 vhost + 海外边缘路径反代两条入口，Let's Encrypt 真证书）、
+注册表与路由生成（`/etc/mrrc-hub/instances.tsv` ＋ `gen_hub_routes.py`）、
+证书服务（DNS-01，自建 hook，每日 8:00 cron 自动续期）。
+
+**尚未实现**：租户管理 Portal、实例清单服务、Operator 租约、配额与计费 —— 属阶段 2/3。
+本节与 §12.8 分工：本节只列"服务面有没有"，运维细节在 §12.8。

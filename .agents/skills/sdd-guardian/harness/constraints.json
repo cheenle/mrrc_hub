@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "sdd_version": "V0.1",
+  "description": "Machine-readable constraint registry distilled from SDD/ (IBM TeamSD) for the mrrc_hub cloud-hub codebase. Consumed by sdd_context.py (context | check | hook). severity: block = reject the edit, warn = allow but surface, info = guidance shown in context output only. Patterns target the anti-patterns proven to exist in the current 4 remote-access mechanisms (see SDD/01 §1.2 and docs/2026-09-30-fleet-hub-design-review.md); they are intentionally narrow so they do not fire on prose or on the mrrc_modern repo, whose own registry governs instance-side code.",
+  "rules": [
+    {
+      "id": "hub-no-direct-ptt-write",
+      "title": "Hub 永远不是 PTT 写者 —— 只能关流通知（TX_ABORT），释放由实例本地执行",
+      "severity": "block",
+      "sdd_ref": "AD-H06; SDD/15 §15.3.2; NFR-H006; SC-H4",
+      "scope": [
+        "**/*.py",
+        "**/*.js",
+        "**/*.ts",
+        "**/*.go"
+      ],
+      "exclude_scope": [
+        "**/test_*.py",
+        "**/*_test.py",
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "set_ptt\\s*\\(\\s*(?:True|False)\\s*\\)",
+        "[\"']TX[012];[\"']",
+        "sendCommand\\(\\s*[\"']ptt[\"']",
+        "[\"']ptt[\"']\\s*,\\s*(?:true|false)"
+      ],
+      "message": "PTT 释放的权威是 MRRC 实例本地（Layer 0 + 1-8 加 Hub 模式的远程会话活性层）。Hub/Tunnel 只能发送 TX_ABORT 之类的关流通知并回收租约；直接下发 TX0 或 ptt:false 会产生第二个写者，破坏实例侧的 key-owner 仲裁。"
+    },
+    {
+      "id": "hub-token-not-in-url",
+      "title": "会话 token / launch code 不得进入 URL query",
+      "severity": "block",
+      "sdd_ref": "AD-H07; NFR-H020; SC-H6",
+      "scope": [
+        "**/*.py",
+        "**/*.js",
+        "**/*.ts",
+        "**/*.html",
+        "**/*.go"
+      ],
+      "exclude_scope": [
+        "**/test_*.py",
+        "**/*_test.py",
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)[?&](?:token|code|ticket)=",
+        "(?i)[\"'`]\\?(?:token|code|ticket)",
+        "(?i)(?:token|code|ticket)=\\s*\\+"
+      ],
+      "message": "现状 mrrc_modern 前端把 30 天会话令牌拼进 ?token=，配合 uvicorn 默认访问日志必然泄露到代理与实例日志（该项目已知：support_bundle.py 的脱敏正则注释点了 '?token= inside a URL'）。Hub 侧一律用 Cookie 或 Sec-WebSocket-Protocol；log_format 也不得直接使用 $request_uri。"
+    },
+    {
+      "id": "hub-tls-verify-off",
+      "title": "公网链路必须校验对端证书 —— 禁止关闭校验",
+      "severity": "block",
+      "sdd_ref": "NFR-H021; R-H8",
+      "scope": [
+        "**/*.py",
+        "**/*.conf",
+        "**/*.go",
+        "**/*.js",
+        "**/*.sh"
+      ],
+      "exclude_scope": [
+        "**/test_*.py",
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)proxy_ssl_verify\\s+off",
+        "(?i)ssl_verify\\s*=\\s*False",
+        "(?i)verify\\s*=\\s*False",
+        "(?i)InsecureSkipVerify\\s*:\\s*true",
+        "(?i)--insecure\\b",
+        "(?i)check_hostname\\s*=\\s*False"
+      ],
+      "message": "现状 B2 的 deploy_listen_proxy.sh 用 proxy_ssl_verify off 绕过实例自签证书，等于公网链路上没有 TLS 保证；这一点不得在 Hub 复现。实例侧应使用受信证书（或由 Hub 终结 TLS 后用受信通道回源）。"
+    },
+    {
+      "id": "hub-log-no-raw-request-uri",
+      "title": "访问日志不得直接记录 $request_uri（含 query string）",
+      "severity": "block",
+      "sdd_ref": "AD-H07; NFR-H014; SC-H6",
+      "scope": [
+        "**/*.conf",
+        "**/nginx/**",
+        "**/*.sh"
+      ],
+      "exclude_scope": [
+        ".agents/**",
+        "**/tests/**"
+      ],
+      "patterns": [
+        "\\$request_uri"
+      ],
+      "message": "直接记录 $request_uri 会把 query string 里的凭证写进日志。使用脱敏后的变量（例如 args 经 map/if 过滤掉 token|code|ticket），或改造前端不再把凭证放 URL（AD-H07）。"
+    },
+    {
+      "id": "hub-shared-static-token",
+      "title": "禁止 fleet 共享静态 token / 全局密钥",
+      "severity": "block",
+      "sdd_ref": "AD-H11; NFR-H012",
+      "scope": [
+        "**/*.py",
+        "**/*.js",
+        "**/*.go",
+        "**/*.sh"
+      ],
+      "exclude_scope": [
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)fleet[_-]?(?:token|secret|key)\\s*=\\s*[\"'][^\"']+[\"']",
+        "(?i)global[_-]?(?:auth|api)[_-]?(?:token|secret|key)\\s*=\\s*[\"'][^\"']+[\"']",
+        "(?i)shared[_-]?(?:token|secret)\\s*=\\s*[\"'][^\"']+[\"']"
+      ],
+      "message": "必须一实例一证（设备 mTLS）。共享静态凭证一旦泄露即全 fleet 失守且无法定点吊销。现状 B4（support receiver）用共享口令，升级到 Hub 时必须替换为设备证书。"
+    },
+    {
+      "id": "hub-cookie-name-not-instance-auth",
+      "title": "Hub 票证 Cookie 不得使用实例的 AUTH_COOKIE 名",
+      "severity": "block",
+      "sdd_ref": "AD-H09; NFR-H013; R-H7",
+      "scope": [
+        "**/*.py",
+        "**/*.js",
+        "**/*.ts",
+        "**/*.go"
+      ],
+      "exclude_scope": [
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)set_cookie\\(\\s*[\"']mrrc_auth[\"']",
+        "(?i)COOKIE[A-Z_]*\\s*=\\s*[\"']mrrc_auth[\"']"
+      ],
+      "message": "通配子域下 Access Gateway 与实例共享同一 origin，Cookie 命名空间公用。Hub 票证必须用独立名称（例如 hub_ticket），否则与实例 mrrc_auth 互相覆盖，或让实例读到 Hub 的票证。"
+    },
+    {
+      "id": "hub-ticket-cookie-httponly",
+      "title": "Hub 票证 Cookie 必须 HttpOnly + Secure",
+      "severity": "warn",
+      "sdd_ref": "AD-H09; NFR-H013; R-H7",
+      "scope": [
+        "**/*.py",
+        "**/*.js",
+        "**/*.ts",
+        "**/*.go"
+      ],
+      "exclude_scope": [
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)set_cookie\\([^)]*httponly\\s*=\\s*False",
+        "(?i)set_cookie\\([^)]*secure\\s*=\\s*False"
+      ],
+      "message": "实例会话 Cookie 之所以 httponly=False 是因为前端 JS 需要读取它做 WS 鉴权（server.py 注释即如此）；Hub 票证没有这个约束，必须 HttpOnly + Secure，否则一次 XSS 即长期接管。"
+    },
+    {
+      "id": "hub-lease-not-release-path",
+      "title": "租约到期不得作为 PTT 释放路径",
+      "severity": "warn",
+      "sdd_ref": "AD-H06; 第15章 §15.4; NFR-H006",
+      "scope": [
+        "**/*.py",
+        "**/*.go",
+        "**/*.js"
+      ],
+      "exclude_scope": [
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)lease[^\\n]{0,40}expir[^\\n]{0,60}(?:release|unkey|rx\\b|ptt)",
+        "(?i)(?:release|unkey|ptt)[^\\n]{0,60}lease[^\\n]{0,40}expir"
+      ],
+      "message": "租约 TTL 是 20-30 s 的授权互斥机制。把释放挂在租约到期上，等于给半开连接留 20-30 s 的发射窗口。释放必须由隧道层心跳失效 + 实例侧活性闸门在 ≤1.5 s 内触发。"
+    },
+    {
+      "id": "hub-secrets-hardcoded",
+      "title": "禁止硬编码凭据",
+      "severity": "block",
+      "sdd_ref": "NFR-H012; NFR-H014",
+      "scope": [
+        "**/*.py",
+        "**/*.js",
+        "**/*.go",
+        "**/*.sh",
+        "**/*.conf"
+      ],
+      "exclude_scope": [
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)(?:passwd|password|secret|api[_-]?key|private[_-]?key)\\s*=\\s*[\"'][^\"']{8,}[\"']"
+      ],
+      "message": "凭据通过环境变量或 0600 root-only EnvironmentFile 注入（沿用现状 deploy 脚本的做法：不打印、不入 git）。"
+    },
+    {
+      "id": "hub-bandwidth-budget-sync",
+      "title": "改动码率/帧率必须同步带宽预算与文档",
+      "severity": "warn",
+      "sdd_ref": "AD-H14; NFR-H007; NFR-H008",
+      "scope": [
+        "**/*.py",
+        "**/*.js",
+        "**/*.ts"
+      ],
+      "exclude_scope": [
+        "**/tests/**",
+        ".agents/**",
+        "**/venv/**"
+      ],
+      "patterns": [
+        "(?i)DEFAULT_BITRATE\\s*=|LISTEN_SPECTRUM_DIVIDER|SPECTRUM_(?:FPS|FRAME)|1701\\b"
+      ],
+      "message": "频谱 ≈408 kbps 占单会话 ~86%，是首要带宽杠杆；音频 64 kbps 只占 14%。改这些常量必须同步 NFR-H007/H008、第 9 章容量模型与第 14 章版本历史。"
+    },
+    {
+      "id": "hub-instance-binding",
+      "title": "隧道与虚拟流必须与 instance_id 一对一绑定",
+      "severity": "info",
+      "sdd_ref": "NFR-H022; AD-H03; AD-H11",
+      "scope": [],
+      "patterns": [],
+      "message": "每个隧道只绑定一个 instance_id；任何虚拟流都必须与该实例映射一致。跨实例错绑是 Critical 缺陷：A 实例的流量被路由到 B 实例（SC-H5）。Registry 的 lookup 在 MISS 时必须明确失败，不得回退到旧节点。"
+    },
+    {
+      "id": "hub-lease-atomicity",
+      "title": "租约获取必须原子",
+      "severity": "info",
+      "sdd_ref": "AD-H05; SC-H3; UC-H06",
+      "scope": [],
+      "patterns": [],
+      "message": "按 instance_id 原子竞争（Redis 单命令或 Lua）。read-then-write 会在并发下签发第二个 Operator 凭证 —— 这是 SC-H3 的直接违反。"
+    },
+    {
+      "id": "hub-observability-first",
+      "title": "观测先于优化：并发与上行数据是条件启用的前提",
+      "severity": "info",
+      "sdd_ref": "AD-H12; I-H1; I-H2; NFR-H009",
+      "scope": [],
+      "patterns": [],
+      "message": "AD-H12（RX 扇出）的触发门槛依赖单实例 Listener 并发与客户上行利用率。实例侧已有 spectrum_clients / audio_rx_clients / _listen_tokens 集合，采集成本极低 —— 在实现扇出之前先采集，否则是在猜。"
+    },
+    {
+      "id": "hub-reuse-before-build",
+      "title": "优先复用既有资产，不重复建设",
+      "severity": "info",
+      "sdd_ref": "AD-H13; 第11章 §11.5",
+      "scope": [],
+      "patterns": [],
+      "message": "OTA 拉取复用 mrrc_modern/upgrade_core.py；诊断上报复用 deploy_support_receiver.sh 的部署形态（独立 systemd unit/端口/存储/0600 凭据）；日志脱敏照搬 support_bundle.py 的 SECRET_VALUE_RE（它已处理 ?token=）。"
+    },
+    {
+      "id": "hub-deploy-idempotent",
+      "title": "部署脚本必须幂等且块级替换",
+      "severity": "info",
+      "sdd_ref": "第12章 §12.2; B2 事故记录",
+      "scope": [],
+      "patterns": [],
+      "message": "沿用现状风格：幂等、块级替换而非追加（deploy_listen_proxy.sh 曾因正则漏掉 ^~ 形式留下重复块导致 nginx -t 失败）、变更前先探测后端可达、改完必须 nginx -t && reload。"
+    },
+    {
+      "id": "hub-testing-conventions",
+      "title": "测试在硬件-free 边界 mock",
+      "severity": "info",
+      "sdd_ref": "NFR-H027; 第13章 §13.4",
+      "scope": [],
+      "patterns": [],
+      "message": "隧道、Registry、Ticket、Lease 都必须能用内存实现替换以便单元测试；PTT 安全路径需可按第 15 章 §15.5 的 V1-V10 注入矩阵回归。"
+    },
+    {
+      "id": "hub-docs-sync",
+      "title": "文档同步是变更的一部分",
+      "severity": "info",
+      "sdd_ref": "第14章; NFR-H025",
+      "scope": [],
+      "patterns": [],
+      "message": "任何行为变更 → 同步相关 SDD 章节 + 第 14 章新增条目 + SDD/README.md 版本号。若 SDD 与运行事实矛盾，以运行事实为准并在同一变更里修正 SDD。"
+    }
+  ]
+}

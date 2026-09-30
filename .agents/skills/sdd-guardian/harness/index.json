@@ -1,0 +1,373 @@
+{
+  "version": 1,
+  "description": "Routing index for the mrrc_hub SDD knowledge layer. Maps engineering areas (by file globs and keywords) to typed SDD references. Contains NO duplicated content — sdd_context.py resolves refs by slicing the live SDD/*.md files, so the harness can never drift stale from the design record. Ref grammar: ad:AD-Hxx | nfr:NFR-Hxxx | uc:UC-Hxx | risk:R-Hx | issue:I-Hx | assume:A-Hx | sc:SC-Hx | sec:N.N (chapter section) | ch:NN (whole chapter, manual use). Engine-fixed chapter mapping: ad→8, uc→6, nfr→5, risk/issue/assume→13, sc→3.",
+  "chapters": {
+    "1": {
+      "file": "SDD/01-executive-summary.md",
+      "title": "Executive Summary (incl. §1.2 现状基线 B1-B4)"
+    },
+    "2": {
+      "file": "SDD/02-business-direction.md",
+      "title": "Business Direction (value proposition, positioning, privacy stance)"
+    },
+    "3": {
+      "file": "SDD/03-project-definition.md",
+      "title": "Project Definition (scope, success criteria SC-H1…SC-H9, release gates G1-G4)"
+    },
+    "4": {
+      "file": "SDD/04-system-context.md",
+      "title": "System Context (layers, domains, interfaces, trust boundaries, data flows)"
+    },
+    "5": {
+      "file": "SDD/05-non-functional-requirements.md",
+      "title": "Non-Functional Requirements (NFR-H001…NFR-H027)"
+    },
+    "6": {
+      "file": "SDD/06-use-case-model.md",
+      "title": "Use Case Model (UC-H01…UC-H09)"
+    },
+    "7": {
+      "file": "SDD/07-subject-area-model.md",
+      "title": "Subject Area Model (entities, state authority matrix, state machines)"
+    },
+    "8": {
+      "file": "SDD/08-architecture-decisions.md",
+      "title": "Architecture Decisions (AD-H01…AD-H14)"
+    },
+    "9": {
+      "file": "SDD/09-architecture-overview.md",
+      "title": "Architecture Overview (routing, transparent-proxy contract, capacity, HA)"
+    },
+    "10": {
+      "file": "SDD/10-service-model.md",
+      "title": "Service Model (Portal REST, Ticket, Lease, Registry, Tunnel frames, instance contract)"
+    },
+    "11": {
+      "file": "SDD/11-component-model.md",
+      "title": "Component Model (hub components, instance-side changes C1-C6, reuse list)"
+    },
+    "12": {
+      "file": "SDD/12-operational-model.md",
+      "title": "Operational Model (deploy, config, alerting, quotas, OTA, troubleshooting)"
+    },
+    "13": {
+      "file": "SDD/13-feasibility-assessment.md",
+      "title": "Feasibility Assessment (risks R-H1…R-H11, assumptions A-H1…A-H4, issues I-H1…I-H8)"
+    },
+    "14": {
+      "file": "SDD/14-version-history.md",
+      "title": "Version History"
+    },
+    "15": {
+      "file": "SDD/15-ptt-safety-hub-mode.md",
+      "title": "PTT Safety in Hub Mode (half-open release contract, timing matrix, V1-V10)"
+    }
+  },
+  "topics": [
+    {
+      "id": "ptt-safety",
+      "globs": [
+        "**/*ptt*",
+        "**/*safety*",
+        "**/*heartbeat*",
+        "**/session/**"
+      ],
+      "keywords": [
+        "ptt",
+        "tx",
+        "tx0",
+        "释放",
+        "release",
+        "deadman",
+        "dead-man",
+        "半开",
+        "half-open",
+        "心跳",
+        "heartbeat",
+        "活性",
+        "liveness",
+        "租约"
+      ],
+      "refs": [
+        "ad:AD-H06",
+        "nfr:NFR-H006",
+        "nfr:NFR-H019",
+        "sc:SC-H4",
+        "uc:UC-H05",
+        "risk:R-H1",
+        "issue:I-H6",
+        "sec:15.3",
+        "sec:15.4",
+        "sec:15.5"
+      ]
+    },
+    {
+      "id": "auth-session-cookie",
+      "globs": [
+        "**/auth/**",
+        "**/*cookie*",
+        "**/*session*",
+        "**/*ticket*",
+        "**/iam/**"
+      ],
+      "keywords": [
+        "token",
+        "cookie",
+        "ticket",
+        "launch code",
+        "令牌",
+        "会话",
+        "鉴权",
+        "auth",
+        "mfa",
+        "host-only",
+        "httponly",
+        "secure",
+        "referer",
+        "日志脱敏"
+      ],
+      "refs": [
+        "ad:AD-H07",
+        "ad:AD-H09",
+        "nfr:NFR-H010",
+        "nfr:NFR-H013",
+        "nfr:NFR-H014",
+        "nfr:NFR-H020",
+        "risk:R-H2",
+        "risk:R-H7",
+        "uc:UC-H03",
+        "sc:SC-H6"
+      ]
+    },
+    {
+      "id": "roles-lease",
+      "globs": [
+        "**/lease/**",
+        "**/acl/**",
+        "**/*role*",
+        "**/quota/**"
+      ],
+      "keywords": [
+        "operator",
+        "listener",
+        "lease",
+        "租约",
+        "角色",
+        "排队",
+        "降级",
+        "冲突",
+        "调频",
+        "tune",
+        "memrecall"
+      ],
+      "refs": [
+        "ad:AD-H05",
+        "ad:AD-H08",
+        "sc:SC-H3",
+        "uc:UC-H04",
+        "uc:UC-H06",
+        "nfr:NFR-H008",
+        "risk:R-H3"
+      ]
+    },
+    {
+      "id": "tunnel-gateway",
+      "globs": [
+        "**/tunnel/**",
+        "**/*tunnel*",
+        "**/gateway/**",
+        "**/registry/**",
+        "**/agent/**"
+      ],
+      "keywords": [
+        "tunnel",
+        "gateway",
+        "mtls",
+        "隧道",
+        "归属",
+        "映射",
+        "route",
+        "resolver",
+        "重连",
+        "reconnect",
+        "心跳",
+        "register",
+        "多路复用"
+      ],
+      "refs": [
+        "ad:AD-H01",
+        "ad:AD-H03",
+        "nfr:NFR-H002",
+        "nfr:NFR-H003",
+        "nfr:NFR-H016",
+        "uc:UC-H02",
+        "uc:UC-H07",
+        "risk:R-H4",
+        "sec:9.1"
+      ]
+    },
+    {
+      "id": "onboarding-credentials",
+      "globs": [
+        "**/bind/**",
+        "**/onboarding/**",
+        "**/ca/**",
+        "**/cert*/**"
+      ],
+      "keywords": [
+        "bind",
+        "绑定",
+        "绑定码",
+        "证书",
+        "certificate",
+        "轮换",
+        "rotate",
+        "吊销",
+        "revoke",
+        "dpapi",
+        "keychain",
+        "tpm",
+        "上线"
+      ],
+      "refs": [
+        "ad:AD-H11",
+        "sc:SC-H2",
+        "nfr:NFR-H011",
+        "nfr:NFR-H012",
+        "uc:UC-H01",
+        "uc:UC-H08",
+        "risk:R-H10"
+      ]
+    },
+    {
+      "id": "access-proxy-edge",
+      "globs": [
+        "**/access/**",
+        "**/proxy/**",
+        "**/nginx/**",
+        "**/*.conf"
+      ],
+      "keywords": [
+        "proxy",
+        "代理",
+        "子域",
+        "subdomain",
+        "websocket",
+        "ws",
+        "tls",
+        "wildcard",
+        "通配",
+        "waf",
+        "alb",
+        "proxy_ssl_verify",
+        "request_uri"
+      ],
+      "refs": [
+        "ad:AD-H02",
+        "ad:AD-H04",
+        "nfr:NFR-H021",
+        "nfr:NFR-H022",
+        "sc:SC-H5",
+        "risk:R-H8",
+        "sec:9.2"
+      ]
+    },
+    {
+      "id": "bandwidth-spectrum",
+      "globs": [
+        "**/relay/**",
+        "**/*spectrum*",
+        "**/*audio*",
+        "**/*opus*",
+        "**/metrics/**"
+      ],
+      "keywords": [
+        "带宽",
+        "bandwidth",
+        "频谱",
+        "spectrum",
+        "waterfall",
+        "瀑布",
+        "opus",
+        "码率",
+        "bitrate",
+        "并发",
+        "fanout",
+        "扇出",
+        "上行"
+      ],
+      "refs": [
+        "ad:AD-H12",
+        "ad:AD-H14",
+        "nfr:NFR-H007",
+        "nfr:NFR-H008",
+        "nfr:NFR-H009",
+        "risk:R-H5",
+        "issue:I-H1",
+        "sec:9.3"
+      ]
+    },
+    {
+      "id": "telemetry-ota",
+      "globs": [
+        "**/ota/**",
+        "**/telemetry/**",
+        "**/*upgrade*",
+        "**/*release*",
+        "**/diagnostics/**"
+      ],
+      "keywords": [
+        "ota",
+        "upgrade",
+        "升级",
+        "灰度",
+        "回滚",
+        "rollback",
+        "遥测",
+        "telemetry",
+        "latest.json",
+        "state.json",
+        "support receiver",
+        "诊断"
+      ],
+      "refs": [
+        "ad:AD-H13",
+        "nfr:NFR-H017",
+        "nfr:NFR-H018",
+        "uc:UC-H09",
+        "risk:R-H9",
+        "sec:12.4",
+        "sec:12.6"
+      ]
+    },
+    {
+      "id": "baseline-migration",
+      "globs": [
+        "**/deploy/**",
+        "**/*deploy*",
+        "**/docs/**",
+        "**/migration/**"
+      ],
+      "keywords": [
+        "ipv6",
+        "nginx",
+        "deploy",
+        "部署",
+        "现状",
+        "迁移",
+        "基线",
+        "frp",
+        "回退",
+        "退化",
+        "lan"
+      ],
+      "refs": [
+        "ad:AD-H10",
+        "sc:SC-H8",
+        "issue:I-H7",
+        "sec:1.2",
+        "sec:12.2"
+      ]
+    }
+  ]
+}

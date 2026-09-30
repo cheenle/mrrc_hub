@@ -1,0 +1,49 @@
+# 13. Feasibility Assessment
+
+## 13.1 Assumptions
+
+| ID | Assumption | 若否证的后果 | 现状证据 |
+| --- | --- | --- | --- |
+| A-H1 | 客户网络允许出站 TCP 443（或产品明确的隧道端口） | 公网可达不成立，需回退到 IPv6 直连（B2）或客户自带网络 | 待试点验证（10 实例） |
+| A-H2 | 目标家宽上行足以支撑 1 个 Operator + 1–2 个 Listener（约 0.2–0.9 Mbps） | 多 Listener 场景必须提前启用 RX 扇出（AD-H12） | 单会话带宽已实测（NFR-H007）；上行实测缺失（I-H1） |
+| A-H3 | 相当比例目标用户具备可用 IPv6，或至少有稳定的 IPv4 出站 | B2 退化路径的价值下降，Hub 变成唯一通路（压力更大） | B2 已在生产运行（`radio.vlsc.net` + nginx 自愈） |
+| A-H4 | 客户可接受音频经作者侧服务器中转（隐私边界见源文档 §10.2） | 必须提供自建 Hub 或保留 B2 直连 | 待产品/法务确认（I-H4 相关） |
+
+## 13.2 Risks
+
+| ID | Risk | Probability | Impact | Mitigation |
+| --- | --- | --- | --- | --- |
+| R-H1 | **半开连接导致 PTT 不释放**（既有 dead-man switch 不触发、`MRRC_PTT_MAX_TX_SECONDS` 默认关闭） | High | Critical | AD-H06 + 第 [15](15-ptt-safety-hub-mode.md) 章：TX 期间 500 ms 心跳、隧道层主动关流、实例侧活性闸门、V1–V10 注入矩阵 |
+| R-H2 | **会话令牌经 URL 进入代理/实例日志**（前端把 30 天令牌拼进 `?token=`；实例跑 uvicorn 默认访问日志） | High | Critical | AD-H07：前端改传参方式 + 全链路日志脱敏；同期修正 B2 的同类问题 |
+| R-H3 | Listener 调谐并发冲突（调频是对射频状态的写，而"写"被设计为 Operator 独占） | Medium | High | AD-H08：定稿"受限操作"语义 + Operator 持租约期间以其调谐为权威 + 审计调谐来源 |
+| R-H4 | Tunnel Gateway 故障导致活动会话中断（有状态组件无法无损迁移） | Medium | High | UC-H07 快速重连与状态恢复；≥2 节点；主/备 Hub 地址；不承诺零中断 |
+| R-H5 | 多 Listener 打满客户上行（频谱 408 kbps 占单会话 ~86%） | High | Medium | AD-H12 触发门槛 + AD-H14 先降瀑布（`LISTEN_SPECTRUM_DIVIDER` 现成闸门）+ NFR-H009 上行护栏 |
+| R-H6 | 通配 DNS/TLS 与 200 子域的证书运维复杂度 | Low | Medium | 通配证书 + 自动化签发与续期；实例 ID 命名空间规划 |
+| R-H7 | **同 origin 双会话 Cookie 冲突**（Access 票证 vs 实例 `AUTH_COOKIE`；实例 Cookie 无 `Secure`、30 天有效） | Medium | High | AD-H09：独立命名 + 短时效 + `Secure`；发布门禁 G4 |
+| R-H8 | 运维误配关闭 TLS 校验（现状 B2 即 `proxy_ssl_verify off`） | Medium | Critical | NFR-H021 禁止性约束 + 配置审计 + 约束规则 `hub-tls-verify` |
+| R-H9 | OTA 灰度批次失败或升级打断会话/PTT 路径 | Medium | High | UC-H09：签名校验、5%→25%→100%、失败率 >5% 暂停回滚、TX/会话中延后升级 |
+| R-H10 | 设备私钥泄露或客户换机导致凭证失控 | Low | High | AD-H11 一机一证 + UC-H08 轮换/吊销 |
+| R-H11 | 开源许可边界（GPLv3 客户端 vs 独立网络服务）与遥控台站合规 | Medium | Medium | 源文档 §10.3/§10.4：上线前正式合规审查 + 首次启用 Operator 时的合规提示（NFR-H024） |
+
+## 13.3 Open Issues
+
+| ID | Issue | 为什么阻塞 | 需要的决策/数据 |
+| --- | --- | --- | --- |
+| I-H1 | **单实例典型与峰值 Listener 并发未知** | 决定 AD-H12 是否触发、NFR-H009 护栏取值、上行规划 | 实例侧已有 `spectrum_clients` / `audio_rx_clients` / `_listen_tokens` 集合，加一条定期打点即可——**可立即开始采集** |
+| I-H2 | 日均远程访问时长与同时活跃实例比例未知 | 直接决定公网出带宽与数据面规格（源文档 §8.3/§8.4） | Portal 上线后的会话统计；可用 B2 现有流量先粗估 |
+| I-H3 | 跨洲用户占比未知 | 决定是否评估多地域与 QUIC/WebRTC | 登录 IP 归属统计（阶段 2 后） |
+| I-H4 | 是否提供云端 QSO 录音备份 | 影响存储成本、隐私政策与 OSS 生命周期 | 产品决策（默认关闭） |
+| I-H5 | Fleet Agent 在 Windows/macOS/Raspberry Pi 的发布与 OTA 方式 | 决定签名、包格式与灰度通道设计 | 复用 `mrrc_modern` 现有三平台打包经验（AD-H13） |
+| I-H6 | **Hub 场景下的 PTT 半开释放机制尚未在实例侧落地** | 第 15 章已给出机制与时限，但需 `mrrc_modern` 跨仓变更与回归 | 决策 G1；实现后必须重跑 V1–V10 |
+| I-H7 | B2/B3 现状的长期定位（过渡期主力 vs 逐步下线） | 影响投入分配与"是否自建 nginx 自动化" | AD-H10 已定"不回退"，但"是否投入自动化"待定 |
+| I-H8 | 自建 Hub / 私有部署是否作为开源承诺 | 影响许可边界与运维成本 | 产品与许可审查（D9） |
+
+## 13.4 可行性结论
+
+| 维度 | 结论 | 依据 |
+|---|---|---|
+| 技术可行性 | **高** | 透明代理不改实例协议；5 个 WS 端点、`/listen` 角色、PTT 本地释放均可直接复用 |
+| 安全可行性 | **有条件** | 必须以 AD-H07（令牌）、AD-H09（Cookie）、AD-H06（半开释放）为发布门禁；否则 MVP 会以凭证泄露与 PTT 粘键为代价 |
+| 规模可行性 | **待实测** | 单会话带宽与容量上限已量化（NFR-H007/H017），但活跃率与 Listener 并发缺失（I-H1、I-H2） |
+| 运营可行性 | **中** | 现状 B2 证明"每实例人工改中心配置"不可持续；Hub 的核心价值正是消除这一成本（AD-H02、AD-H10） |
+| 组织可行性 | **中** | 跨两仓（`mrrc_modern` 实例侧改动）+ 三平台打包 + 合规审查，需要明确的发布门禁（`03-project-definition.md` §3.5） |

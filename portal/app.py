@@ -123,10 +123,17 @@ def make_handler(portal: Portal, token: str):
             self.end_headers()
             self.wfile.write(data)
 
-        def _operator_ok(self) -> bool:
+        def _operator_ok(self, body: dict | None = None) -> bool:
+            """令牌可来自请求头（curl/脚本）或表单字段（浏览器）。
+
+            表单字段是刻意加的：运维在浏览器里点按钮时无法自定义请求头。
+            令牌走 **请求体** 而不是 URL —— URL 会进访问日志与浏览器历史。
+            """
             if not token:
                 return False
             supplied = (self.headers.get("X-Portal-Token") or "").strip()
+            if not supplied and body:
+                supplied = str(body.get("token") or "").strip()
             return hmac.compare_digest(supplied, token)
 
         # ---- routes ----
@@ -170,7 +177,7 @@ code{{background:#f4f4f4;padding:1px 4px}}</style>
                                                         body.get("contact", ""), body.get("product", "")))
                 if route not in ("/verify", "/reject", "/grant", "/revoke"):
                     return self._send(404, {"error": "not found"})
-                if not self._operator_ok():
+                if not self._operator_ok(body):
                     return self._send(403, {"error": "运维动作需要 X-Portal-Token"})
                 who = cs.normalize(body.get("callsign", ""))
                 if route == "/verify":

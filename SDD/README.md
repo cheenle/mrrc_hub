@@ -41,9 +41,9 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.2 |
+| SDD Version | V0.3 |
 | Baseline Date | 2026-09-30 |
-| Status | 架构评审稿已冻结；MVP 前必修项进展：**I-H6（PTT 半开释放）已在 mrrc_modern V2.63 实现**，AD-H07/AD-H09 在 V2.62 实现；验证环境待控制台解阻（见 [deploy/README.md](../deploy/README.md)） |
+| Status | **阶段 1 通路已在真实公网跑通**（`test1.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。MVP 前必修项：I-H6/AD-H07/AD-H09 已实现（mrrc_modern V2.62/V2.63）；剩余为通配真证书（DNS-01）与备案 |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
 | 客户侧前提 | 实例仅需出站 TCP **8989**（隧道口）；无公网 IP、无端口映射、无 UPnP（SC-H1）。**用户侧需能出站 9988** —— 两条不同的约束，见 NFR-H001 / R-H12 |
 | 入口规划 | `portal.mrrc.vlsc.net`、`<instance-id>.mrrc.vlsc.net`（通配 DNS/TLS）、`tunnel.mrrc.vlsc.net`。**入口带非标端口**：明文 8899 / TLS 9988 / 隧道 8989（AD-H02 port 修订——国内 ECS 在 80/443 上需 ICP 备案） |

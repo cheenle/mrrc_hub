@@ -103,6 +103,48 @@ curl -s  https://test1.mrrc.vlsc.net:9988/api/health       # 期望 401（鉴权
 **V-d 的做法值得保留**：故意改错 `proxy_ssl_name` 看它失败，是"校验真的开着"的唯一证据——
 这正是当初 B2 那行 `proxy_ssl_verify off` 能在生产里活下来的原因（没人验证过它会失败）。
 
+## 两级入口：主路走 hub，退化路走海外 www（迂回方案）
+
+境内地域的 80/443 在没有备案时不可用，而**明文 HTTP 到未备案域名会被途中改写**（实测见 R-H13）。
+所以入口分两级，脚本对应用户所处的网络：
+
+| | 主路（低延迟） | 退化路（兼容性） |
+|---|---|---|
+| URL | `https://test1.mrrc.vlsc.net:9988` | `https://test1.mrrc.vlsc.net`（443） |
+| 落点 | 阿里云 hub（乌兰察布） | 海外 www.vlsc.net → 反代回 hub 的 9988 |
+| 证书 | 自签 → 待 DNS-01 通配真证书 | **真证书**（www 上 certbot HTTP-01，80/443 在此可用） |
+| 实测 RTT | **0.13 s**（`/login`） | **0.69 s**（`/login`，多一跳海外往返） |
+| 适用 | 绝大多数用户 | 只放行 80/443 出站的网络（公司/访客 Wi-Fi） |
+
+**为什么要"反代"而不是"302 跳转"**：跳转只换了个好看的地址，浏览器最终仍落在非标端口上、仍看到
+不信任的证书。只有把整条会话（HTTP + 5 个 WS）反代进来，才同时解决"标准端口"和"真证书"两件事。
+
+**代价必须写在明处**：境外边缘对"用户在国内、实例也在国内"的场景是绕路，音频与 PTT 的往返
+多约 **0.4–0.6 s**。因此它定位为**退化路径**，不是主路 —— 主路应当是 hub 上的 DNS-01 真证书
+（低延迟），这样两级都能免掉证书警告。
+
+### 部署退化路径
+
+```bash
+# 1) 把 hub 的自签证书作为信任锚送到 www（不关校验，而是 pin 住它）
+ssh hub 'sudo cat /etc/mrrc-hub/tls/fullchain.pem' | ssh www 'sudo tee /etc/nginx/mrrc-hub-ca.pem'
+# 2) 推送并执行（幂等、marker 分块替换、改前备份、nginx -t 后才 reload）
+scp deploy/deploy_www_edge.sh www:/tmp/
+ssh www 'sudo bash /tmp/deploy_www_edge.sh test1.mrrc.vlsc.net tunnel.mrrc.vlsc.net:9988'
+```
+
+**验证结果（经 www 全程实测，2026-09-30）**：`/login` 200、`/api/health` 401、`/listen` 302；
+**五个 WS 端点全部 `101 Switching Protocols`**（Cookie 鉴权，无凭据对照 403）。
+
+### 还差你一条 DNS 记录
+
+```
+test1.mrrc.vlsc.net  →  A  193.111.30.163   （即 www，显式记录会覆盖 *.mrrc.vlsc.net 通配）
+```
+
+加完之后我可以 `certbot certonly --webroot -w /var/www/html -d test1.mrrc.vlsc.net`（www 上 80 口可用，
+HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告。加之前用 `--resolve` 模拟已可全程验证。
+
 ## 已验证（2026-09-30 真实公网，安全组放行后）
 
 安全组放行 8899/9988/8989 之后，**真实公网路径**（本机 → hub nginx:9988 → frps:8989 → frpc → 实例）

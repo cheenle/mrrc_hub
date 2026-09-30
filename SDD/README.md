@@ -41,12 +41,12 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.3 |
+| SDD Version | V0.4 |
 | Baseline Date | 2026-09-30 |
 | Status | **阶段 1 通路已在真实公网跑通**（`test1.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。MVP 前必修项：I-H6/AD-H07/AD-H09 已实现（mrrc_modern V2.62/V2.63）；剩余为通配真证书（DNS-01）与备案 |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
 | 客户侧前提 | 实例仅需出站 TCP **8989**（隧道口）；无公网 IP、无端口映射、无 UPnP（SC-H1）。**用户侧需能出站 9988** —— 两条不同的约束，见 NFR-H001 / R-H12 |
-| 入口规划 | `portal.mrrc.vlsc.net`、`<instance-id>.mrrc.vlsc.net`（通配 DNS/TLS）、`tunnel.mrrc.vlsc.net`。**入口带非标端口**：明文 8899 / TLS 9988 / 隧道 8989（AD-H02 port 修订——国内 ECS 在 80/443 上需 ICP 备案） |
+| 入口规划 | **两级**：主路 `<instance-id>.mrrc.vlsc.net:9988`（hub，低延迟）；退化路 `www.vlsc.net` 反代（443 + 真证书，供只放行 80/443 的网络，+0.4~0.6 s）。隧道 `tunnel.mrrc.vlsc.net:8989`；明文 8899 不可依赖（R-H13） |
 | 角色 | Owner / Operator / Listener / Fleet Admin（**语义以 AD-H08 为准**） |
 | 单实例写者 | 同时最多 1 个有效 Operator 租约（AD-H05） |
 | 安全基线 | 一实例一证（设备 mTLS）、一次性 launch code、host-only Cookie、令牌不进 URL/日志（AD-H07、AD-H11） |

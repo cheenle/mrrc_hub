@@ -15,7 +15,7 @@
 | ID | Requirement | Target | Priority | Verification |
 | --- | --- | --- | --- | --- |
 | NFR-H004 | 新会话建立（Hub 控制路径，不含互联网 RTT） | P95 ≤ 2 s | High | 会话建立计时埋点 |
-| NFR-H005 | Hub 引入的控制路径额外延迟（同地域） | P95 ≤ 50 ms | High | 端到端 RTT 对比（同地域直连 vs 经 Hub） |
+| NFR-H005 | Hub 引入的控制路径额外延迟（同地域） | P95 ≤ 50 ms | High | 端到端 RTT 对比（同地域直连 vs 经 Hub） | **（V0.4：该目标针对同地域直连路径；经海外 www 边缘的退化路径实测多一跳 0.4–0.6 s，仅用于只放行 80/443 的网络）**
 | NFR-H007 | 单会话带宽预算 | 全控 ≈ 0.48 Mbps（RX Opus 64 kbps + 频谱 408 kbps）；Listener ≈ 0.20 Mbps | Critical | 代码实测：`opus_rx.py` `DEFAULT_BITRATE=64000`；`server.py` `/WSspectrum` 1701 B/帧 × 30 fps |
 | NFR-H008 | 频谱帧预算 | 1701 B/帧（1 B 版本 + 850 B wf1 + 850 B wf2）、~30 fps、二进制 `send_bytes`（无 base64 膨胀）；Listener 按 `LISTEN_SPECTRUM_DIVIDER=3` 降为 1/3 帧率 | Critical | `server.py` `/WSspectrum` docstring 与 `LISTEN_SPECTRUM_DIVIDER` |
 | NFR-H009 | 客户上行护栏 | 实例上行利用率告警线 60%，扩容/降级线 80% | High | 实例侧 `send_bytes` 计数上报（AD-H13） |

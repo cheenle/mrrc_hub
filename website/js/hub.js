@@ -7,82 +7,91 @@
    .vlsc-reveal.in），所以本站的观感与 www.vlsc.net 同源。
    ══════════════════════════════════════════════════════════════════════ */
 (() => {
-  
+	/* ── 移动菜单（navbar 上用的是 onclick="toggleMobileMenu()"，保持上游约定） ── */
+	window.toggleMobileMenu = () => {
+		var nav = document.querySelector(".nav-links");
+		if (nav) nav.classList.toggle("active");
+	};
 
-  /* ── 移动菜单（navbar 上用的是 onclick="toggleMobileMenu()"，保持上游约定） ── */
-  window.toggleMobileMenu = () => {
-    var nav = document.querySelector('.nav-links');
-    if (nav) nav.classList.toggle('active');
-  };
+	document.addEventListener("DOMContentLoaded", () => {
+		/* ── navbar 滚动加深 + 进度条 + 回到顶部 ── */
+		var navbar = document.querySelector(".navbar");
+		var progress = document.getElementById("scrollProgress");
+		var backTop = document.getElementById("backTop");
 
-  document.addEventListener('DOMContentLoaded', () => {
+		function onScroll() {
+			var y = window.scrollY || document.documentElement.scrollTop;
+			if (navbar) navbar.classList.toggle("scrolled", y > 8);
+			if (backTop) backTop.classList.toggle("show", y > 500);
+			if (progress) {
+				var max = document.documentElement.scrollHeight - window.innerHeight;
+				progress.style.width = (max > 0 ? (y / max) * 100 : 0) + "%";
+			}
+		}
+		window.addEventListener("scroll", onScroll, { passive: true });
+		onScroll();
 
-    /* ── navbar 滚动加深 + 进度条 + 回到顶部 ── */
-    var navbar = document.querySelector('.navbar');
-    var progress = document.getElementById('scrollProgress');
-    var backTop = document.getElementById('backTop');
+		if (backTop) {
+			backTop.addEventListener("click", () => {
+				window.scrollTo({ top: 0, behavior: "smooth" });
+			});
+		}
 
-    function onScroll() {
-      var y = window.scrollY || document.documentElement.scrollTop;
-      if (navbar) navbar.classList.toggle('scrolled', y > 8);
-      if (backTop) backTop.classList.toggle('show', y > 500);
-      if (progress) {
-        var max = document.documentElement.scrollHeight - window.innerHeight;
-        progress.style.width = (max > 0 ? (y / max) * 100 : 0) + '%';
-      }
-    }
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-
-    if (backTop) {
-      backTop.addEventListener('click', () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-    }
-
-    /* 注：不用 octen.css 的 .vlsc-reveal。它默认 opacity:0、必须靠 JS 加 .in 才可见，
+		/* 注：不用 octen.css 的 .vlsc-reveal。它默认 opacity:0、必须靠 JS 加 .in 才可见，
        JS 一旦加载失败正文会整段隐形。入场动画改用纯 CSS 的 .animate（octen.css 已有）。 */
 
-    /* ── 目录高亮（只在有 .hub-toc 的页面生效） ── */
-    var tocLinks = Array.prototype.slice.call(document.querySelectorAll('.hub-toc a'));
-    if (tocLinks.length && 'IntersectionObserver' in window) {
-      var byId = {};
-      var targets = [];
-      tocLinks.forEach((a) => {
-        var id = (a.getAttribute('href') || '').replace(/^#/, '');
-        var el = id ? document.getElementById(id) : null;
-        if (el) { byId[id] = a; targets.push(el); }
-      });
-      var so = new IntersectionObserver((entries) => {
-        entries.forEach((e) => {
-          if (!e.isIntersecting) return;
-          tocLinks.forEach((a) => { a.classList.remove('active'); });
-          var a = byId[e.target.id];
-          if (a) a.classList.add('active');
-        });
-      }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
-      targets.forEach((el) => { so.observe(el); });
-    }
+		/* ── 目录高亮（只在有 .hub-toc 的页面生效） ── */
+		var tocLinks = Array.prototype.slice.call(
+			document.querySelectorAll(".hub-toc a"),
+		);
+		if (tocLinks.length && "IntersectionObserver" in window) {
+			var byId = {};
+			var targets = [];
+			tocLinks.forEach((a) => {
+				var id = (a.getAttribute("href") || "").replace(/^#/, "");
+				var el = id ? document.getElementById(id) : null;
+				if (el) {
+					byId[id] = a;
+					targets.push(el);
+				}
+			});
+			var so = new IntersectionObserver(
+				(entries) => {
+					entries.forEach((e) => {
+						if (!e.isIntersecting) return;
+						tocLinks.forEach((a) => {
+							a.classList.remove("active");
+						});
+						var a = byId[e.target.id];
+						if (a) a.classList.add("active");
+					});
+				},
+				{ rootMargin: "-15% 0px -70% 0px", threshold: 0 },
+			);
+			targets.forEach((el) => {
+				so.observe(el);
+			});
+		}
 
-    /* ── 代码块一键复制 ── */
-    document.querySelectorAll('.hub-code').forEach((box) => {
-      var pre = box.querySelector('pre');
-      if (!pre || !navigator.clipboard) return;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'hub-copy';
-      btn.textContent = '复制';
-      btn.addEventListener('click', () => {
-        navigator.clipboard.writeText(pre.innerText).then(() => {
-          btn.textContent = '已复制';
-          btn.classList.add('done');
-          setTimeout(() => {
-            btn.textContent = '复制';
-            btn.classList.remove('done');
-          }, 1600);
-        });
-      });
-      box.appendChild(btn);
-    });
-  });
+		/* ── 代码块一键复制 ── */
+		document.querySelectorAll(".hub-code").forEach((box) => {
+			var pre = box.querySelector("pre");
+			if (!pre || !navigator.clipboard) return;
+			var btn = document.createElement("button");
+			btn.type = "button";
+			btn.className = "hub-copy";
+			btn.textContent = "复制";
+			btn.addEventListener("click", () => {
+				navigator.clipboard.writeText(pre.innerText).then(() => {
+					btn.textContent = "已复制";
+					btn.classList.add("done");
+					setTimeout(() => {
+						btn.textContent = "复制";
+						btn.classList.remove("done");
+					}, 1600);
+				});
+			});
+			box.appendChild(btn);
+		});
+	});
 })();

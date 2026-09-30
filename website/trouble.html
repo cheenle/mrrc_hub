@@ -1,172 +1,215 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="MRRC Cloud Hub 排障手册：症状到原因的对照表、两条诊断命令、日志位置，含实测抓到过的真实问题。">
-<meta name="author" content="BG1SB">
-<meta name="theme-color" content="#000000">
-<title>排障 · MRRC Cloud Hub</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/octen.css?v=1">
-<link rel="stylesheet" href="css/hub.css?v=1">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>">
-</head>
-<body>
-<a href="#main" class="hub-skip">跳到主要内容</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="MRRC Cloud Hub 排障手册：症状到原因的对照表、两条诊断命令、日志位置，含实测抓到过的真实问题。"
+    />
+    <meta name="author" content="BG1SB" />
+    <meta name="theme-color" content="#000000" />
+    <title>排障 · MRRC Cloud Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/octen.css?v=1" />
+    <link rel="stylesheet" href="css/hub.css?v=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>"
+    />
+  </head>
+  <body>
+    <a href="#main" class="hub-skip">跳到主要内容</a>
 
-<nav class="navbar">
-  <div class="container navbar-content">
-    <a href="index.html" class="logo">
-      <span class="logo-icon"><i class="fas fa-satellite-dish"></i></span>
-      <span>MRRC <span style="color: var(--accent)">Cloud Hub</span></span>
-    </a>
-    <ul class="nav-links">
-      <li><a href="index.html">概览</a></li>
-      <li><a href="start.html">接入</a></li>
-      <li><a href="use.html">使用与分享</a></li>
-      <li><a href="trouble.html" class="active" aria-current="page">排障</a></li>
-      <li><a href="design.html">设计与实现</a></li>
-      <li><a href="https://github.com/cheenle/mrrc_hub" target="_blank" rel="noopener"><i class="fab fa-github"></i> 源码</a></li>
-    </ul>
-    <div class="nav-actions">
-      <a href="https://www.vlsc.net/mrrc_modern/" class="lang-btn">MRRC Modern</a>
-      <button class="mobile-menu-toggle" aria-label="打开菜单" onclick="toggleMobileMenu()"><i class="fas fa-bars"></i></button>
-    </div>
-  </div>
-</nav>
-
-<header class="hub-hero">
-  <h1>排障</h1>
-  <p>
-    先按症状对表，再用两条命令定位。表中每一条都来自真实发生过的问题，
-    不是"可能的原因"清单。
-  </p>
-</header>
-
-<main id="main" class="hub-shell">
-
-  <nav class="hub-toc" aria-label="本页目录">
-    <h4>本页</h4>
-    <ul>
-      <li><a href="#symptoms">症状对照表</a></li>
-      <li><a href="#diag">两条诊断命令</a></li>
-      <li><a href="#logs">日志在哪</a></li>
-      <li><a href="#isolation">怎么区分三层</a></li>
-    </ul>
-  </nav>
-
-  <div class="hub-prose">
-
-    <section id="symptoms">
-      <h2>症状对照表</h2>
-      <div class="hub-table-wrap">
-        <table>
-          <thead>
-            <tr><th scope="col">症状</th><th scope="col">优先检查</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>浏览器打不开</td>
-              <td>
-                地址里<b>端口不能省</b>：是 <code>:9988</code> 或 <code>:8899</code>。
-                海外边缘入口的路径要用<b>大写呼号</b>。
-                别用明文端口拼 <code>https://</code>。
-              </td>
-            </tr>
-            <tr>
-              <td>证书警告</td>
-              <td>
-                主路与边缘路都是真实证书，正常情况<b>不应该有警告</b>。
-                有警告通常说明你连到了别的地址（或中间有个改流量的网络）。
-              </td>
-            </tr>
-            <tr>
-              <td><b>502 Bad Gateway</b></td>
-              <td>
-                两件事，按顺序查：<br>
-                ① <b>隧道在不在</b> —— 看隧道日志里还有没有 <code>start proxy success</code>；<br>
-                ② <b>电台服务在不在</b> —— 本机 <code>8888</code> 是否在监听。
-                隧道活着但服务没起，就是 502。
-              </td>
-            </tr>
-            <tr>
-              <td>404 unknown instance</td>
-              <td>
-                这个呼号在 Hub 的注册表里没有对应条目，或者隧道端口与注册表不一致。
-                去问管理员核对 —— 自己猜端口没用。
-              </td>
-            </tr>
-            <tr>
-              <td>登录页出来了，但控制台黑屏</td>
-              <td>
-                看浏览器控制台里是哪一条数据通道被拒：<br>
-                <b>4001</b> = 未授权（口令/会话问题）<br>
-                <b>4003</b> = 角色拒绝（最常见：拿监听口令去连了发射音频那条通道，这是设计如此）
-              </td>
-            </tr>
-            <tr>
-              <td>能听，不能发</td>
-              <td>
-                你用的是<b>监听口令</b>，或者进的是 <code>/listen</code> 页面。
-                改用主口令从根路径登录。
-              </td>
-            </tr>
-            <tr>
-              <td>登录反复 429</td>
-              <td>
-                限流是 5 次失败 / 300 秒。注意隧道方式下这是<b>全局桶</b>：
-                别人输错会连带锁住你。等 5 分钟，或换主路口令前先确认对方没在试。
-              </td>
-            </tr>
-            <tr>
-              <td>音频卡顿 / 断续</td>
-              <td>
-                依次看：上行带宽占用、同时在收听的人数、瀑布图帧率。
-                带宽紧张时<b>先降瀑布帧率</b>（频谱比音频更吃带宽），再考虑减少收听人数。
-              </td>
-            </tr>
-            <tr>
-              <td>海外边缘入口时通时不通</td>
-              <td>
-                <b>已复现的现网问题</b>（2026-10-01）：6 次请求中 3 次 20 秒无响应。
-                改用主路。详见<a href="use.html#entries" style="color: var(--accent);">使用与分享 · 三个入口</a>。
-              </td>
-            </tr>
-            <tr>
-              <td>主路突然全站 502，但隧道日志正常</td>
-              <td>
-                去查 Hub 到你的实例这一跳的证书校验。Hub <b>校验你的实例证书</b>，
-                证书过期或不匹配会以 502 表现，而不是给出证书错误。
-              </td>
-            </tr>
-            <tr>
-              <td>重启电脑后连不上</td>
-              <td>
-                <b>隧道会自动回来，电台服务不会。</b>
-                按<a href="start.html#restart" style="color: var(--accent);">接入四步 · 重启之后</a>手动起服务。
-              </td>
-            </tr>
-            <tr>
-              <td>换 Wi-Fi / 切 5G 后掉线</td>
-              <td>
-                隧道会自动重连，通常几秒内恢复。
-                掉线瞬间 PTT 已在本地强制释放，<b>不需要担心电台还在发射</b>。
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <nav class="navbar">
+      <div class="container navbar-content">
+        <a href="index.html" class="logo">
+          <span class="logo-icon"><i class="fas fa-satellite-dish"></i></span>
+          <span>MRRC <span style="color: var(--accent)">Cloud Hub</span></span>
+        </a>
+        <ul class="nav-links">
+          <li><a href="index.html">概览</a></li>
+          <li><a href="start.html">接入</a></li>
+          <li><a href="use.html">使用与分享</a></li>
+          <li>
+            <a href="trouble.html" class="active" aria-current="page">排障</a>
+          </li>
+          <li><a href="design.html">设计与实现</a></li>
+          <li>
+            <a
+              href="https://github.com/cheenle/mrrc_hub"
+              target="_blank"
+              rel="noopener"
+              ><i class="fab fa-github"></i> 源码</a
+            >
+          </li>
+        </ul>
+        <div class="nav-actions">
+          <a href="https://www.vlsc.net/mrrc_modern/" class="lang-btn"
+            >MRRC Modern</a
+          >
+          <button
+            class="mobile-menu-toggle"
+            aria-label="打开菜单"
+            onclick="toggleMobileMenu()"
+          >
+            <i class="fas fa-bars"></i>
+          </button>
+        </div>
       </div>
-    </section>
+    </nav>
 
-    <section id="diag">
-      <h2>两条诊断命令</h2>
-      <p>90% 的问题用这两条就能定位到是哪一层。</p>
-      <div class="hub-code">
-        <pre><code># 1) 隧道这一跳健康吗
+    <header class="hub-hero">
+      <h1>排障</h1>
+      <p>
+        先按症状对表，再用两条命令定位。表中每一条都来自真实发生过的问题，
+        不是"可能的原因"清单。
+      </p>
+    </header>
+
+    <main id="main" class="hub-shell">
+      <nav class="hub-toc" aria-label="本页目录">
+        <h4>本页</h4>
+        <ul>
+          <li><a href="#symptoms">症状对照表</a></li>
+          <li><a href="#diag">两条诊断命令</a></li>
+          <li><a href="#logs">日志在哪</a></li>
+          <li><a href="#isolation">怎么区分三层</a></li>
+        </ul>
+      </nav>
+
+      <div class="hub-prose">
+        <section id="symptoms">
+          <h2>症状对照表</h2>
+          <div class="hub-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">症状</th>
+                  <th scope="col">优先检查</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>浏览器打不开</td>
+                  <td>
+                    地址里<b>端口不能省</b>：是 <code>:9988</code> 或
+                    <code>:8899</code>。 海外边缘入口的路径要用<b>大写呼号</b>。
+                    别用明文端口拼 <code>https://</code>。
+                  </td>
+                </tr>
+                <tr>
+                  <td>证书警告</td>
+                  <td>
+                    主路与边缘路都是真实证书，正常情况<b>不应该有警告</b>。
+                    有警告通常说明你连到了别的地址（或中间有个改流量的网络）。
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>502 Bad Gateway</b></td>
+                  <td>
+                    两件事，按顺序查：<br />
+                    ① <b>隧道在不在</b> —— 看隧道日志里还有没有
+                    <code>start proxy success</code>；<br />
+                    ② <b>电台服务在不在</b> —— 本机
+                    <code>8888</code> 是否在监听。 隧道活着但服务没起，就是
+                    502。
+                  </td>
+                </tr>
+                <tr>
+                  <td>404 unknown instance</td>
+                  <td>
+                    这个呼号在 Hub
+                    的注册表里没有对应条目，或者隧道端口与注册表不一致。
+                    去问管理员核对 —— 自己猜端口没用。
+                  </td>
+                </tr>
+                <tr>
+                  <td>登录页出来了，但控制台黑屏</td>
+                  <td>
+                    看浏览器控制台里是哪一条数据通道被拒：<br />
+                    <b>4001</b> = 未授权（口令/会话问题）<br />
+                    <b>4003</b> =
+                    角色拒绝（最常见：拿监听口令去连了发射音频那条通道，这是设计如此）
+                  </td>
+                </tr>
+                <tr>
+                  <td>能听，不能发</td>
+                  <td>
+                    你用的是<b>监听口令</b>，或者进的是
+                    <code>/listen</code> 页面。 改用主口令从根路径登录。
+                  </td>
+                </tr>
+                <tr>
+                  <td>登录反复 429</td>
+                  <td>
+                    限流是 5 次失败 / 300 秒。注意隧道方式下这是<b>全局桶</b>：
+                    别人输错会连带锁住你。等 5
+                    分钟，或换主路口令前先确认对方没在试。
+                  </td>
+                </tr>
+                <tr>
+                  <td>音频卡顿 / 断续</td>
+                  <td>
+                    依次看：上行带宽占用、同时在收听的人数、瀑布图帧率。
+                    带宽紧张时<b>先降瀑布帧率</b>（频谱比音频更吃带宽），再考虑减少收听人数。
+                  </td>
+                </tr>
+                <tr>
+                  <td>海外边缘入口时通时不通</td>
+                  <td>
+                    <b>已复现的现网问题</b>（2026-10-01）：6 次请求中 3 次 20
+                    秒无响应。 改用主路。详见<a
+                      href="use.html#entries"
+                      style="color: var(--accent)"
+                      >使用与分享 · 三个入口</a
+                    >。
+                  </td>
+                </tr>
+                <tr>
+                  <td>主路突然全站 502，但隧道日志正常</td>
+                  <td>
+                    去查 Hub 到你的实例这一跳的证书校验。Hub
+                    <b>校验你的实例证书</b>， 证书过期或不匹配会以 502
+                    表现，而不是给出证书错误。
+                  </td>
+                </tr>
+                <tr>
+                  <td>重启电脑后连不上</td>
+                  <td>
+                    <b>隧道会自动回来，电台服务不会。</b>
+                    按<a href="start.html#restart" style="color: var(--accent)"
+                      >接入四步 · 重启之后</a
+                    >手动起服务。
+                  </td>
+                </tr>
+                <tr>
+                  <td>换 Wi-Fi / 切 5G 后掉线</td>
+                  <td>
+                    隧道会自动重连，通常几秒内恢复。 掉线瞬间 PTT
+                    已在本地强制释放，<b>不需要担心电台还在发射</b>。
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="diag">
+          <h2>两条诊断命令</h2>
+          <p>90% 的问题用这两条就能定位到是哪一层。</p>
+          <div class="hub-code">
+            <pre><code># 1) 隧道这一跳健康吗
 tail -20 "$HOME/Library/Application Support/mrrc-fleet/frpc-&lt;呼号&gt;.log"
 #   看到 login to server success + start proxy success  = 隧道正常
 
@@ -175,129 +218,180 @@ curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net:99
 #   401 = 隧道 + Hub 路由 + 实例鉴权 三层全通
 #   502 = 隧道在，但电台服务没起
 #   404 = Hub 不认这个呼号（注册表没这行）</code></pre>
-      </div>
-      <div class="hub-callout warn">
-        <span class="hub-callout-title">用 <code>curl -s</code>，不要用 <code>curl -sI</code></span>
-        <p>
-          <code>-I</code> 发的是 HEAD 请求。登录页只接受 GET，用 HEAD 去问会拿到
-          <b>405</b>，看起来像出错，其实站点是好的。
-          想看状态码就用上面这种 <code>-s -o /dev/null -w</code> 的写法。
+          </div>
+          <div class="hub-callout warn">
+            <span class="hub-callout-title"
+              >用 <code>curl -s</code>，不要用 <code>curl -sI</code></span
+            >
+            <p>
+              <code>-I</code> 发的是 HEAD 请求。登录页只接受 GET，用 HEAD
+              去问会拿到 <b>405</b>，看起来像出错，其实站点是好的。
+              想看状态码就用上面这种 <code>-s -o /dev/null -w</code> 的写法。
+            </p>
+          </div>
+        </section>
+
+        <section id="logs">
+          <h2>日志在哪</h2>
+          <div class="hub-table-wrap">
+            <table class="hub-facts">
+              <tbody>
+                <tr>
+                  <td>隧道</td>
+                  <td>
+                    <code
+                      >~/Library/Application
+                      Support/mrrc-fleet/frpc-&lt;呼号&gt;.log</code
+                    >（另有 <code>.out.log</code> / <code>.err.log</code>）
+                  </td>
+                </tr>
+                <tr>
+                  <td>电台服务</td>
+                  <td>
+                    按接入页方式启动时在 <code>/tmp/mrrc-src/server.log</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Hub 侧访问日志</td>
+                  <td>
+                    Hub 上的 <code>/var/log/nginx/mrrc-hub.access.log</code> ——
+                    只记路径，<b>不记查询串</b>
+                  </td>
+                </tr>
+                <tr>
+                  <td>证书续期</td>
+                  <td>
+                    Hub 上的 <code>/var/log/mrrc-hub-cert.log</code>（每天 8:00
+                    自动跑）
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="isolation">
+          <h2>怎么区分是哪一层出问题</h2>
+          <p>链路上有四跳，每一跳的失败表现都不一样。按这张表对号入座：</p>
+          <div class="hub-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">表现</th>
+                  <th scope="col">问题在哪</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>局域网 <code>8888</code> 都打不开</td>
+                  <td>
+                    <b>最底层</b> —— 电台服务本身。跟 Hub 无关，先去产品站排障。
+                  </td>
+                </tr>
+                <tr>
+                  <td>局域网正常，公网 502</td>
+                  <td><b>隧道这一跳</b> —— 看隧道日志，或服务没起来。</td>
+                </tr>
+                <tr>
+                  <td>公网 404</td>
+                  <td>
+                    <b>Hub 路由</b> —— 注册表里没有这个呼号，或端口不一致。
+                  </td>
+                </tr>
+                <tr>
+                  <td>公网能出登录页，但数据通道连不上</td>
+                  <td><b>角色或鉴权</b> —— 看 4001 / 4003。</td>
+                </tr>
+                <tr>
+                  <td>主路正常，边缘路时通时不通</td>
+                  <td>
+                    <b>边缘 → Hub 这一跳</b> —— 已复现的现网问题，用主路。
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="hub-callout ok">
+            <span class="hub-callout-title">一条通用的分诊顺序</span>
+            <p>
+              从最靠近电台的一端往外查：<b>局域网 → 隧道 → Hub 路由 → 角色</b>。
+              反过来从外往里查，会在"是网络问题还是配置问题"之间反复摇摆。
+            </p>
+          </div>
+        </section>
+
+        <p class="hub-note">
+          还是解决不了 →
+          <a
+            href="https://github.com/cheenle/mrrc_hub/issues"
+            style="color: var(--accent)"
+            >提 issue</a
+          >， 附上隧道日志与 <code>api/health</code> 的状态码。
+          <br />
+          本页事实基线：2026-10-01 现场取证。表中"已复现"的条目均来自当次实测。
         </p>
       </div>
-    </section>
+    </main>
 
-    <section id="logs">
-      <h2>日志在哪</h2>
-      <div class="hub-table-wrap">
-        <table class="hub-facts">
-          <tbody>
-            <tr>
-              <td>隧道</td>
-              <td><code>~/Library/Application Support/mrrc-fleet/frpc-&lt;呼号&gt;.log</code>（另有 <code>.out.log</code> / <code>.err.log</code>）</td>
-            </tr>
-            <tr>
-              <td>电台服务</td>
-              <td>按接入页方式启动时在 <code>/tmp/mrrc-src/server.log</code></td>
-            </tr>
-            <tr>
-              <td>Hub 侧访问日志</td>
-              <td>Hub 上的 <code>/var/log/nginx/mrrc-hub.access.log</code> —— 只记路径，<b>不记查询串</b></td>
-            </tr>
-            <tr>
-              <td>证书续期</td>
-              <td>Hub 上的 <code>/var/log/mrrc-hub-cert.log</code>（每天 8:00 自动跑）</td>
-            </tr>
-          </tbody>
-        </table>
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-section">
+            <h4>MRRC Cloud Hub</h4>
+            <p>
+              把 MRRC Modern
+              实例接入云端统一入口：实例主动出站、一个呼号一个入口、PTT
+              释放永远在电台本地执行。
+            </p>
+          </div>
+          <div class="footer-section">
+            <h4>文档</h4>
+            <ul>
+              <li><a href="index.html">概览</a></li>
+              <li><a href="start.html">接入四步</a></li>
+              <li><a href="use.html">使用与分享</a></li>
+              <li><a href="trouble.html">排障</a></li>
+              <li><a href="design.html">设计与层层实现</a></li>
+            </ul>
+          </div>
+          <div class="footer-section">
+            <h4>相关</h4>
+            <ul>
+              <li>
+                <a href="https://www.vlsc.net/mrrc_modern/"
+                  >MRRC Modern 产品站</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://github.com/cheenle/mrrc_hub"
+                  target="_blank"
+                  rel="noopener"
+                  >源码（GitHub）</a
+                >
+              </li>
+              <li>
+                <a href="https://www.vlsc.net/" target="_blank" rel="noopener"
+                  >VLSC Projects</a
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2026 MRRC Cloud Hub · BG1SB</p>
+          <p>
+            事实基线：2026-10-01 现场取证 · 运营事实以
+            <code>SDD/12 §12.8</code> 为准
+          </p>
+        </div>
       </div>
-    </section>
+    </footer>
 
-    <section id="isolation">
-      <h2>怎么区分是哪一层出问题</h2>
-      <p>链路上有四跳，每一跳的失败表现都不一样。按这张表对号入座：</p>
-      <div class="hub-table-wrap">
-        <table>
-          <thead>
-            <tr><th scope="col">表现</th><th scope="col">问题在哪</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>局域网 <code>8888</code> 都打不开</td>
-              <td><b>最底层</b> —— 电台服务本身。跟 Hub 无关，先去产品站排障。</td>
-            </tr>
-            <tr>
-              <td>局域网正常，公网 502</td>
-              <td><b>隧道这一跳</b> —— 看隧道日志，或服务没起来。</td>
-            </tr>
-            <tr>
-              <td>公网 404</td>
-              <td><b>Hub 路由</b> —— 注册表里没有这个呼号，或端口不一致。</td>
-            </tr>
-            <tr>
-              <td>公网能出登录页，但数据通道连不上</td>
-              <td><b>角色或鉴权</b> —— 看 4001 / 4003。</td>
-            </tr>
-            <tr>
-              <td>主路正常，边缘路时通时不通</td>
-              <td><b>边缘 → Hub 这一跳</b> —— 已复现的现网问题，用主路。</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="hub-callout ok">
-        <span class="hub-callout-title">一条通用的分诊顺序</span>
-        <p>
-          从最靠近电台的一端往外查：<b>局域网 → 隧道 → Hub 路由 → 角色</b>。
-          反过来从外往里查，会在"是网络问题还是配置问题"之间反复摇摆。
-        </p>
-      </div>
-    </section>
-
-    <p class="hub-note">
-      还是解决不了 → <a href="https://github.com/cheenle/mrrc_hub/issues" style="color: var(--accent);">提 issue</a>，
-      附上隧道日志与 <code>api/health</code> 的状态码。
-      <br>
-      本页事实基线：2026-10-01 现场取证。表中"已复现"的条目均来自当次实测。
-    </p>
-
-  </div>
-</main>
-
-<footer class="footer">
-  <div class="container">
-    <div class="footer-grid">
-      <div class="footer-section">
-        <h4>MRRC Cloud Hub</h4>
-        <p>把 MRRC Modern 实例接入云端统一入口：实例主动出站、一个呼号一个入口、PTT 释放永远在电台本地执行。</p>
-      </div>
-      <div class="footer-section">
-        <h4>文档</h4>
-        <ul>
-          <li><a href="index.html">概览</a></li>
-          <li><a href="start.html">接入四步</a></li>
-          <li><a href="use.html">使用与分享</a></li>
-          <li><a href="trouble.html">排障</a></li>
-          <li><a href="design.html">设计与层层实现</a></li>
-        </ul>
-      </div>
-      <div class="footer-section">
-        <h4>相关</h4>
-        <ul>
-          <li><a href="https://www.vlsc.net/mrrc_modern/">MRRC Modern 产品站</a></li>
-          <li><a href="https://github.com/cheenle/mrrc_hub" target="_blank" rel="noopener">源码（GitHub）</a></li>
-          <li><a href="https://www.vlsc.net/" target="_blank" rel="noopener">VLSC Projects</a></li>
-        </ul>
-      </div>
-    </div>
-    <div class="footer-bottom">
-      <p>© 2026 MRRC Cloud Hub · BG1SB</p>
-      <p>事实基线：2026-10-01 现场取证 · 运营事实以 <code>SDD/12 §12.8</code> 为准</p>
-    </div>
-  </div>
-</footer>
-
-<button class="vlsc-to-top" id="backTop" aria-label="回到顶部"><i class="fas fa-arrow-up"></i></button>
-<div class="vlsc-scroll-progress" id="scrollProgress"></div>
-<script src="js/hub.js"></script>
-</body>
+    <button class="vlsc-to-top" id="backTop" aria-label="回到顶部">
+      <i class="fas fa-arrow-up"></i>
+    </button>
+    <div class="vlsc-scroll-progress" id="scrollProgress"></div>
+    <script src="js/hub.js"></script>
+  </body>
 </html>

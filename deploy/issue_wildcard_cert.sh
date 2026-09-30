@@ -36,10 +36,13 @@ HOOK="/usr/local/sbin/mrrc-hub-cert-hook.sh"
 CHECK_ONLY=0
 [[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
 
-[[ $EUID -eq 0 ]] || { echo "must run as root (sudo)" >&2; exit 2; }
+[[ $EUID -eq 0 ]] || {
+	echo "must run as root (sudo)" >&2
+	exit 2
+}
 
 if [[ ! -s "$CREDS" ]]; then
-    cat >&2 <<EOF
+	cat >&2 <<EOF
 missing $CREDS — the wildcard needs DNS-01, and DNS-01 needs DNS API credentials.
 
 Create a RAM user (Aliyun console → 访问控制 → 用户) with a single policy,
@@ -56,18 +59,21 @@ Manual alternative if you would rather not create a key: run
 on any host, add the printed TXT record in the Aliyun DNS console, and repeat every
 90 days — manual mode cannot renew itself.
 EOF
-    exit 2
+	exit 2
 fi
 perms=$(stat -c '%a' "$CREDS")
-[[ "$perms" == "600" ]] || { echo "$CREDS must be 0600 (is $perms)" >&2; exit 2; }
+[[ "$perms" == "600" ]] || {
+	echo "$CREDS must be 0600 (is $perms)" >&2
+	exit 2
+}
 
 echo "==> DNS plugin"
 if ! python3 -c "import certbot_dns_aliyun" 2>/dev/null; then
-    pip3 install --quiet --break-system-packages certbot-dns-aliyun || {
-        echo "could not install certbot-dns-aliyun; if pip is blocked, use the" >&2
-        echo "manual route in this script's error message instead." >&2
-        exit 2
-    }
+	pip3 install --quiet --break-system-packages certbot-dns-aliyun || {
+		echo "could not install certbot-dns-aliyun; if pip is blocked, use the" >&2
+		echo "manual route in this script's error message instead." >&2
+		exit 2
+	}
 fi
 
 echo "==> renew hook: install the certificate where nginx already reads it"
@@ -85,19 +91,19 @@ EOF
 chmod 755 "$HOOK"
 
 if [[ $CHECK_ONLY -eq 1 ]]; then
-    echo "==> check only: credentials present, plugin importable, hook written"
-    exit 0
+	echo "==> check only: credentials present, plugin importable, hook written"
+	exit 0
 fi
 
 echo "==> issuing *.${BASE_DOMAIN} (+ the apex) via DNS-01"
 certbot certonly \
-    --cert-name "$CERT_NAME" \
-    --dns-aliyun \
-    --dns-aliyun-credentials "$CREDS" \
-    --deploy-hook "$HOOK" \
-    --non-interactive --agree-tos --register-unsafely-without-email \
-    --keep-until-expiring \
-    -d "*.${BASE_DOMAIN}" -d "${BASE_DOMAIN}"
+	--cert-name "$CERT_NAME" \
+	--dns-aliyun \
+	--dns-aliyun-credentials "$CREDS" \
+	--deploy-hook "$HOOK" \
+	--non-interactive --agree-tos --register-unsafely-without-email \
+	--keep-until-expiring \
+	-d "*.${BASE_DOMAIN}" -d "${BASE_DOMAIN}"
 
 echo
 echo "==> done. Verify from anywhere (no -k, no warning expected):"
@@ -105,5 +111,5 @@ echo "    curl -sI https://test1.${BASE_DOMAIN}:9988/login   # 200, real certifi
 echo "    openssl s_client -connect $(hostname -I | awk '{print $1}'):9988 -servername test1.${BASE_DOMAIN} </dev/null 2>/dev/null | openssl x509 -noout -issuer -ext subjectAltName"
 echo
 echo "renewal: certbot.timer runs twice daily and triggers the hook above."
-systemctl list-timers certbot.timer --no-pager 2>/dev/null | head -2 || \
-    echo " (no certbot.timer — add a cron entry: 0 3 * * * certbot renew -q)"
+systemctl list-timers certbot.timer --no-pager 2>/dev/null | head -2 ||
+	echo " (no certbot.timer — add a cron entry: 0 3 * * * certbot renew -q)"

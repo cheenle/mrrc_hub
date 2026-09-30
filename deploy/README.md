@@ -103,6 +103,34 @@ curl -s  https://test1.mrrc.vlsc.net:9988/api/health       # 期望 401（鉴权
 **V-d 的做法值得保留**：故意改错 `proxy_ssl_name` 看它失败，是"校验真的开着"的唯一证据——
 这正是当初 B2 那行 `proxy_ssl_verify off` 能在生产里活下来的原因（没人验证过它会失败）。
 
+## 通配真证书：`*.mrrc.vlsc.net`（就差一个 AccessKey）
+
+**先说清为什么绕不过 DNS-01**：现有的续订是标准 certbot + **HTTP-01**（www 上 `/etc/cron.d/certbot`
+与 `certbot.timer`，renewal 配置里是 `authenticator = nginx/webroot`），**产不出通配证书** ——
+Let's Encrypt 的通配只走 DNS-01。而 hub 在境内，80/443 本来就不可用（R-H13），所以 DNS-01 是唯一路径。
+
+**也不需要跨机分发**：www→hub 没有免密 SSH，但 **DNS-01 不用任何入站端口**，所以让 **hub 自己签发和续订**
+最干净 —— 证书正好就是它自己 nginx 要用的（www 现在只是跳转，用自己那张 `www.vlsc.net` 证书即可）。
+
+**你要给的一样东西**：一个阿里云 **RAM 用户**（访问控制 → 用户），**只挂 `AliyunDNSFullAccess`**，
+不要用主账号 key。拿到后：
+
+```bash
+# 在 hub 上
+sudo install -d -m 700 /root/.secrets
+sudo sh -c 'printf "dns_aliyun_access_key = %s\ndns_aliyun_access_key_secret = %s\n" \
+    "<AccessKeyId>" "<AccessKeySecret>" > /root/.secrets/aliyun.ini && chmod 600 /root/.secrets/aliyun.ini'
+sudo bash deploy/issue_wildcard_cert.sh
+```
+
+脚本会：装 `certbot-dns-aliyun` → 签 `*.mrrc.vlsc.net` + 裸域 → 写一个 **deploy hook** 把证书装到
+`/etc/mrrc-hub/tls/`（nginx 已在读这个路径，**无需改任何 nginx 配置**）并 reload → 之后由
+`certbot.timer` 每 90 天自动续订，hook 自动生效。
+
+**不想建 key 的话**：`certbot certonly --manual --preferred-challenges dns -d '*.mrrc.vlsc.net'`
+在任何机器上跑，把打印出的 TXT 记录加到阿里云 DNS 控制台即可 —— 但**每 90 天要手工来一次**，
+manual 模式不会自动续订（脚本的错误信息里也写了这条退路）。
+
 ## 正式形态（2026-09-30 落地）
 
 **hub 侧：一条通配 vhost 服务所有实例，注册表是唯一的每实例事实。**

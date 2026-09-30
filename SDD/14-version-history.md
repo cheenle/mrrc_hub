@@ -2,6 +2,23 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.6 — 2026-09-30 — 通配证书的签发改由 hub 自理（等凭证）
+
+**触发**：要 `*.mrrc.vlsc.net`，并让我参考现有 crontab 的续订程序。
+
+**勘察结论（重要）**：现有续订就是**标准 certbot + HTTP-01**（www 的 `/etc/cron.d/certbot` +
+`certbot.timer`，renewal 里 `authenticator = nginx/webroot`），**无法产出通配证书** ——
+LE 的通配只走 DNS-01；也没有 acme.sh、没有 DNS 凭证文件、w3/w6/l6 均不可达（无可复用装置）。
+结合 R-H13（境内 80/443 不可用），**DNS-01 是唯一路径**。
+
+**决策**：签发与续订放在 **hub 自己**（`deploy/issue_wildcard_cert.sh`），而不是 www。理由：
+www→hub 无免密 SSH（跨机分发要先建信任），而 **DNS-01 不需要任何入站端口**，所以 hub 能自签自续；
+证书正好就是 hub 自己的 nginx 在用的，deploy hook 把它装到 `/etc/mrrc-hub/tls/` 并 reload
+（**nginx 配置零改动**，因为该路径本就是它读的）。www 当前只是跳转，继续用它自己的 `www.vlsc.net` 证书。
+
+**未完成，阻塞在一个 RAM AccessKey**：需一个只挂 `AliyunDNSFullAccess` 的 RAM 用户凭证写入
+`/root/.secrets/aliyun.ini`（0600）。退路是 `certbot --manual` 手工加 TXT（每 90 天一次，不自动续订）。
+
 ## V0.5 — 2026-09-30 — 阶段 1 正式化（通配路由 + 注册表 + 常驻隧道）
 
 **触发**："证书后边再搞，其他都正式搞"。

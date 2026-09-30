@@ -33,11 +33,14 @@ PLIST="$HOME/Library/LaunchAgents/com.mrrc.fleet-tunnel.$NAME.plist"
 LABEL="com.mrrc.fleet-tunnel.$NAME"
 FRPC="$(command -v frpc || echo "$HOME/bin/frpc")"
 
-[[ -x "$FRPC" ]] || { echo "frpc not found — install it first (brew install frp, or a release tarball)" >&2; exit 2; }
+[[ -x "$FRPC" ]] || {
+	echo "frpc not found — install it first (brew install frp, or a release tarball)" >&2
+	exit 2
+}
 
 if pgrep -f "frpc -c .*mrrc" >/dev/null 2>&1 && [[ "${MRRC_FORCE:-0}" != "1" ]]; then
-    echo "a manually started frpc is already running; stop it first (or set MRRC_FORCE=1)" >&2
-    exit 2
+	echo "a manually started frpc is already running; stop it first (or set MRRC_FORCE=1)" >&2
+	exit 2
 fi
 
 mkdir -p "$CONF_DIR" "$HOME/Library/LaunchAgents"

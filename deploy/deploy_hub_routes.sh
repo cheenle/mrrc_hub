@@ -23,11 +23,14 @@ GENERATOR="/usr/local/sbin/gen_hub_routes.py"
 VHOST="/etc/nginx/sites-available/mrrc-hub"
 UPSTREAM_SSL_NAME="${MRRC_UPSTREAM_SSL_NAME:-radio.vlsc.net}"
 
-[[ $EUID -eq 0 ]] || { echo "must run as root (sudo)" >&2; exit 2; }
+[[ $EUID -eq 0 ]] || {
+	echo "must run as root (sudo)" >&2
+	exit 2
+}
 mkdir -p /etc/mrrc-hub
 
 if [[ ! -s "$REGISTRY" ]]; then
-    cat >"$REGISTRY" <<EOF
+	cat >"$REGISTRY" <<EOF
 # MRRC Cloud Hub instance registry — one line per instance.
 #
 #   <subdomain-label>   <loopback port for its tunnel>
@@ -39,7 +42,7 @@ if [[ ! -s "$REGISTRY" ]]; then
 # After editing: sudo gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx
 test1		18800
 EOF
-    echo "==> seeded $REGISTRY"
+	echo "==> seeded $REGISTRY"
 fi
 
 install -m 0755 "$(dirname "$0")/gen_hub_routes.py" "$GENERATOR"

@@ -103,7 +103,8 @@
 
 - `https://<呼号>.mrrc.vlsc.net:8899/` —— 直连 hub，真证书，浏览器零警告
 - `https://www.vlsc.net/mrrc_modern/<呼号>/` —— 海外边缘，真证书（境内无备案的迂回入口）
-- 注册表 `/etc/mrrc-hub/instances.tsv`（现仅 `bg1sb → 18802`）；加实例 = 一行 + 重跑 `gen_hub_routes.py`
+- 注册表 `/etc/mrrc-hub/instances.tsv`（现仅 `bg1sb → 18802`）；加实例 = 一行 + 重跑 `gen_hub_routes.py`。**标签规则**：主产品用裸呼号（`bg1sb`），附加产品加产品后缀（`bg1sb-legacy`）——
+见 `07-subject-area-model.md` §7.x.1
 
 ### 证书（NFR-H030 的落地）
 

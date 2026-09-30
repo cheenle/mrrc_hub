@@ -74,7 +74,9 @@ def load_registry(path: Path) -> tuple[dict[str, int], list[str]]:
             problems.append(f"{path}:{lineno}: expected '<name> <port>', got {raw!r}")
             continue
         name, port_text = parts
+        name = name.lower()          # callsigns arrive upper-case; DNS is case-insensitive
         if not NAME_RE.match(name):
+        # after lower-casing, so BG1SB is accepted and bg1sb is what gets routed
             problems.append(f"{path}:{lineno}: {name!r} is not a usable subdomain label")
         try:
             port = int(port_text)

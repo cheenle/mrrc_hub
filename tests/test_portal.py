@@ -68,7 +68,8 @@ def test_callsign_rules_match_the_feedback_board():
     check(cs.base_callsign("SOS") == "", "SOS → 空（提取失败）")
     for good in ("BG1SB", "9M2ABC", "4X1AB", "W1AW", "JA1XYZ"):
         check(cs.is_valid_format(good), f"{good} 应判合法")
-    for bad in ("BG1SB2", "BG1S", "B1SB", "BG1SBXX", "9M21ABC", "SO1S"):
+    # 真正非法的样例：无数字分区 / 后缀带数字 / 字母数越界 / 两位前缀数字
+    for bad in ("SOS", "BGSB", "BG1SB2", "BG1SBMORE", "9M21ABC", "W1AWWW"):
         check(not cs.is_valid_format(bad), f"{bad} 应判不合法")
 
 

@@ -19,6 +19,24 @@ REMOTE_WEBROOT="/var/www/vlsc.net/mrrc_hub"
 SITE_URL="https://www.vlsc.net/mrrc_hub"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 
+# --yes / -y ：跳过确认提示。没有它、且 stdin 不是终端时（比如被代理或 CI 调用），
+# 以前会静静退在 `read` 上 —— 因为 `set -e` 会在 read 遇 EOF 返回非零时终结脚本，
+# 结果就是“两道闸门都绿了、然后退出码 1、什么也没发生”。这个坑实测踩过。
+ASSUME_YES=0
+case "${1:-}" in
+-y | --yes) ASSUME_YES=1 ;;
+-h | --help)
+	echo "用法: bash deploy.sh [--yes]"
+	echo "  --yes   跳过确认提示（非交互调用时必须带）"
+	exit 0
+	;;
+"") ;;
+*)
+	echo "未知参数: $1（只接受 --yes）" >&2
+	exit 2
+	;;
+esac
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -63,10 +81,16 @@ fi
 echo -e "${GREEN}✓${NC} upstream 样式表逐字节一致"
 
 echo ""
-read -rp "继续发布？(y/N): " confirm
-if [[ "$confirm" != [yY] ]]; then
-	echo "已取消"
-	exit 0
+if [[ "$ASSUME_YES" == "1" ]]; then
+	echo "--yes：跳过确认，直接发布"
+else
+	# `|| true` 是必需的：read 遇 EOF 返回非零，而 set -e 会把整个脚本干掉。
+	# 我们要的是“干净的取消”，不是“崩溃在提示行上”。
+	read -rp "继续发布？(y/N): " confirm || confirm=""
+	if [[ ! "$confirm" =~ ^[yY] ]]; then
+		echo "已取消（没有改动远端）。要跳过此提示：bash deploy.sh --yes"
+		exit 0
+	fi
 fi
 
 PACKAGE="/tmp/mrrc_hub_website_${STAMP}.tar.gz"

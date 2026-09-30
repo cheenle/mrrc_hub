@@ -51,7 +51,7 @@
 LE 的通配只走 DNS-01；也没有 acme.sh、没有 DNS 凭证文件、w3/w6/l6 均不可达（无可复用装置）。
 结合 R-H13（境内 80/443 不可用），**DNS-01 是唯一路径**。
 
-**决策**：签发与续订放在 **hub 自己**（`deploy/issue_wildcard_cert.sh`），而不是 www。理由：
+**决策**：签发与续订放在 **hub 自己**（起初的 `deploy/issue_wildcard_cert.sh`，V0.8 起由 `deploy/mrrc-hub-cert.sh` 取代），而不是 www。理由：
 www→hub 无免密 SSH（跨机分发要先建信任），而 **DNS-01 不需要任何入站端口**，所以 hub 能自签自续；
 证书正好就是 hub 自己的 nginx 在用的，deploy hook 把它装到 `/etc/mrrc-hub/tls/` 并 reload
 （**nginx 配置零改动**，因为该路径本就是它读的）。www 当前只是跳转，继续用它自己的 `www.vlsc.net` 证书。

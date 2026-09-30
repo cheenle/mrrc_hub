@@ -86,3 +86,57 @@
 | 音频卡顿 | 上行利用率是否 > 60%；按 AD-H14 先降瀑布帧率；查看 Listener 并发是否超过 AD-H12 门槛 |
 | PTT 未释放 | **安全事件**：区分 EOF 型 / 半开型（第 15 章 §15.4），核对心跳参数与 `MRRC_PTT_MAX_TX_SECONDS` |
 | 升级后行为没变 | 核对清单版本、包 SHA、实例实际运行版本（沿用 `upgrade_core.py` 的 `state.json` 可证明性） |
+
+## 12.8 实况记录（as-built，2026-09-30）
+
+本节记录**实际部署的事实**，与前面各节的"设计意图"区分；两者不一致时以本节为准并回改设计。
+
+### 主机
+
+| 角色 | 位置 | 说明 |
+|------|------|------|
+| Hub | 阿里云乌兰察布 `8.160.161.80`（Ubuntu 26.04） | nginx（8899/9988 TLS 入口 + 通配 vhost）、frps 0.71.0（控制口 8989，`proxyBindAddr=127.0.0.1`）、Let's Encrypt 证书与每日 cron |
+| Edge | 海外 `www.vlsc.net`（193.111.30.163） | 443 路径反代 `/mrrc_modern/<呼号>/` → hub 9988；上游校验用**系统 CA** |
+| Instance | 操作者本机（macOS） | launchd 常驻 frpc 隧道；MRRC 服务本身**不常驻**（见下） |
+
+### 入口（当前）
+
+- `https://<呼号>.mrrc.vlsc.net:8899/` —— 直连 hub，真证书，浏览器零警告
+- `https://www.vlsc.net/mrrc_modern/<呼号>/` —— 海外边缘，真证书（境内无备案的迂回入口）
+- 注册表 `/etc/mrrc-hub/instances.tsv`（现仅 `bg1sb → 18802`）；加实例 = 一行 + 重跑 `gen_hub_routes.py`
+
+### 证书（NFR-H030 的落地）
+
+- 签发：hub 上 `mrrc-hub-cert.sh`，DNS-01，覆盖 `*.mrrc.vlsc.net` 与 `mrrc.vlsc.net`
+- 验证方式：certbot `manual` 插件 + **自建 hook** `aliyun-acme-dns-hook.py`（纯标准库自算阿里云 RPC 签名，直接调 DNS API）。**刻意不用 `certbot-dns-aliyun`**：第三方、年久失修，本机 Python 版本已超前
+- 凭证：`/root/.secrets/aliyun.ini`（0600）。存在 ⇒ 真证书；不存在 ⇒ 回退自签通配（脚本自动切换）
+- 续期：root crontab 每天 8:00 跑 `mrrc-hub-cert.sh`，剩余 <30 天自动续；日志 `/var/log/mrrc-hub-cert.log`；退出码 0/1/2（<14 天为告警）
+- 安装：`mrrc-hub-cert-hook.sh` 拷贝证书到 `/etc/mrrc-hub/tls/` 并 reload nginx
+- **www 边缘不再需要同步信任锚**：上游校验信任源是系统 CA。此前钉自签证书的做法咬过两次（换证书未同步 ⇒ 立即 502），已废弃
+
+### 实例侧运行（重要运维事实）
+
+frpc 隧道是 **launchd 常驻**（`com.mrrc.fleet-tunnel.<呼号>`），重启自动恢复；
+**MRRC 服务本身不是常驻服务**（当前以源码方式运行，打包版尚未带本轮前端能力）。重启后需手动起：
+
+```bash
+cd mrrc_modern
+while IFS='=' read -r k v; do case "$k" in ''|\#*) continue;; esac; export "$k=$v"; done \
+    < "$HOME/Library/Application Support/MRRC-Modern/mrrc_modern.env"
+nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
+```
+
+用 `read` 循环而不是 `source`：env 文件含 `USB Audio Device` 这类带空格的值，`source` 会把它当命令执行。
+
+### 已知退化（有意接受，见 ch13）
+
+- **登录限流在隧道路径下退化为全局桶**：所有登录共享 `::ffff:127.0.0.1`（5 次失败 / 300 秒）。修法：边缘 `limit_req` 或实例信任 `X-Forwarded-For`（随下次发版）。用户已明确暂缓
+- **实例存在性可枚举**：I-H9 已结案接受（呼号是公开信息）；防御重心前移到"授予访问之前核验呼号"（UC-H10）
+
+### 排障增补
+
+| 现象 | 先查什么 |
+|------|----------|
+| 边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步） |
+| 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
+| 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |

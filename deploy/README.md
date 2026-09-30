@@ -120,7 +120,7 @@ Let's Encrypt 的通配只走 DNS-01。而 hub 在境内，80/443 本来就不�
 sudo install -d -m 700 /root/.secrets
 sudo sh -c 'printf "dns_aliyun_access_key = %s\ndns_aliyun_access_key_secret = %s\n" \
     "<AccessKeyId>" "<AccessKeySecret>" > /root/.secrets/aliyun.ini && chmod 600 /root/.secrets/aliyun.ini'
-sudo bash deploy/issue_wildcard_cert.sh
+sudo bash deploy/mrrc-hub-cert.sh     # 有凭证签真证书，无凭证自签（见 §证书）
 ```
 
 脚本会：装 `certbot-dns-aliyun` → 签 `*.mrrc.vlsc.net` + 裸域 → 写一个 **deploy hook** 把证书装到
@@ -261,3 +261,25 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
   200 个实例共用一张。
 - 多实例（`test2`…）可直接复用：再加一条 frpc 代理 + 一条 nginx server 块。
 - Fleet Agent、设备证书、Portal、租约都还没实现（hub SDD 的阶段 2），本次只验证阶段 1 通路。
+
+## 证书（实况，2026-09-30 起）
+
+`deploy/mrrc-hub-cert.sh` 是唯一入口；`issue_wildcard_cert.sh` 已被它取代并删除。
+
+| 文件 | 作用 |
+|------|------|
+| `mrrc-hub-cert.sh` | 体检 / 签发 / 续期；退出码 0/1/2（<14 天告警）；供每日 cron 调用 |
+| `aliyun-acme-dns-hook.py` | certbot `manual` 插件的 auth/cleanup hook；DNS-01 调阿里云 DNS API（纯标准库自算签名） |
+| （hub 上）`mrrc-hub-cert-hook.sh` | `--deploy-hook`：拷贝证书到 `/etc/mrrc-hub/tls/` 并 reload nginx |
+
+前置：`/root/.secrets/aliyun.ini`（0600，`access_key_id` / `access_key_secret`，兼容 certbot 插件命名）。
+**有它走真证书，没它回退自签通配** —— 脚本自行判断，无需改配置。
+
+三条会复发的坑（今天各付了一次失败的签发）：
+
+1. **certbot 调用 hook 不带参数**。phase 靠环境变量：auth 有 `CERTBOT_VALIDATION`，cleanup 有 `CERTBOT_AUTH_OUTPUT`。
+   假定 argv ⇒ 每次调用都以 usage 退出，表现为"有些挑战失败"，而手动 `hook auth` 却成功。
+2. **cleanup 不保证收到 `CERTBOT_VALIDATION`**。auth 把值写入状态文件，cleanup 按值精确删除自己的记录，绝不误删通配与裸域并存的兄弟记录。
+3. **只等权威解析不够**。CA 经公共解析器验证，hook 需轮询 DoH 直到可见。
+
+www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续期后无需任何跨机同步**。

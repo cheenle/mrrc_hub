@@ -141,3 +141,22 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步） |
 | 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
 | 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
+
+### 12.8.1 第二产品 `mrrc` 的接入现状（2026-09-30）
+
+除主产品 `mrrc_modern` 外，站点侧产品 `mrrc`（Tornado 应用，默认端口 **8877**，`auth = FILE`）
+也已具备接入条件，按标签规则以**附加产品**形式出现（如 `bg1sb-legacy`，见 §7.x.1）：
+
+| 能力 | 状态 |
+|------|------|
+| 子域根路径入口 | **开箱即用** —— 无需改造；其认证走会话（无 URL 令牌），故 fleet 评审的 P0-2 对它不适用 |
+| 路径前缀能力 | **已实现**（`mrrc` 分支 `feat/hub`）：`base_path.py` + `[SERVER] base_path`，**默认空 = 行为与改造前完全一致**；含 **Cookie path 限定**（路径入口下同 origin 多产品不再互踩会话，即 P0-3 在该产品上的落点）、HTML 8 处 / `fetch` 3 处 / WebSocket 10 处 / `sw.js` 预缓存的前缀化。守卫：`dev_tools/test_path_prefix.py` |
+| 会话遥测 | **已实现**：`GET /api/session_metrics` + `[SERVER] metrics_interval_s`（默认 60s 打印一行；0 = 关闭）；连接数直读既有 `*Clients` 列表，**不侵入 WS 生命周期** |
+| PTT 安全 | **已具备三层，无需新增**：① 活性闸门（连续未收帧 ≈5s 即收回，`[CTRL] tx_liveness_s` 可配，默认即原行为）② TOT 硬上限（`[CTRL] ptt_tot_seconds`，默认 120s）③ 释放失败每 2s 重试 |
+
+**尚未上线**：注册表条目、实例侧隧道、以及 www 的产品段（形如 `/mrrc_legacy/<呼号>/`）。
+前置条件是**一个能独立运行该产品的站点** —— 它要占用电台/音频/串口，不能与主产品同机并行，
+因此上线验证需独立硬件或经同意的停机窗口。
+
+改造记录与逐步计划：`../../mrrc/docs/current/design/hub-parity-plan.md`。
+

@@ -109,6 +109,12 @@ cat >/etc/frp/frps.toml <<EOF
 bindAddr = "0.0.0.0"
 bindPort = ${FRP_TLS_PORT}
 
+# frp binds each proxied remote port on bindAddr by default, i.e. on the public
+# interface. That is not what "loopback-only tunnel port" means in the design, so
+# say it explicitly - found by testing (the tcp proxy port was reachable on
+# 0.0.0.0 until this line existed).
+proxyBindAddr = "127.0.0.1"
+
 auth.method = "token"
 auth.token = "$(cat /etc/frp/frps.token)"
 

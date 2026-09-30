@@ -104,6 +104,43 @@ def test_clublog_verifier_semantics():
         check(missing.check("BG1SB").outcome is VerificationOutcome.UNVERIFIED, "库文件缺失应转人工而非抛错")
 
 
+def test_admin_ui_flow_and_no_csrf_surface():
+    """运维审批页：令牌换页面；动作必须带令牌字段（无 cookie 可借用 ⇒ 免 CSRF）。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        from http.server import ThreadingHTTPServer
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok", base=""))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        def post(path, fields):
+            data = urllib.parse.urlencode(fields).encode()
+            try:
+                with urllib.request.urlopen(base + path, data=data, timeout=5) as r:
+                    return r.status, r.read().decode()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read().decode()
+        try:
+            # 申请一个库外呼号 → 待核验
+            post("/apply", {"callsign": "BG1ZZZ"})
+            # 未带令牌进不了审批台
+            check(post("/admin", {"token": "wrong"})[0] == 403, "错令牌进不了审批台")
+            status, page = post("/admin", {"token": "tok"})
+            check(status == 200 and "运维审批" in page, "正确令牌进得去")
+            check("BG1ZZZ" in page and "核验通过" in page, "待核验申请出现在审批台")
+            check('name=token value=\'tok\'' in page or 'name=token value="tok"' in page, "动作表单自带令牌字段")
+            # 动作不带令牌（模拟被借用会话/CSRF）→ 拒绝
+            check(post("/verify", {"callsign": "BG1ZZZ", "evidence": "x"})[0] == 403, "无令牌的动作被拒（免 CSRF）")
+            # 带令牌 → 成功并重渲染审批台
+            status, page2 = post("/verify", {"callsign": "BG1ZZZ", "token": "tok", "evidence": "人工核验"})
+            check(status == 200 and "已核验" in page2, "带令牌核验成功并回到审批台")
+            check(portal.store.get("BG1ZZZ").status == "verified", "状态真的变了")
+        finally:
+            httpd.shutdown()
+
+
 def test_grant_requires_verification():
     """核心安全断言：未核验 ⇒ 拒绝授予（不是"提醒"，是异常）。"""
     with tempfile.TemporaryDirectory() as tmp:

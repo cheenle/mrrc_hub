@@ -159,8 +159,70 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 supplied = str(body.get("token") or "").strip()
             return hmac.compare_digest(supplied, token)
 
+        # ---- operator UI ----
+        def _forms(self, token_value: str, msg: str = "") -> str:
+            """运维页：待核验/待分配/已授予 三个清单 + 每行动作按钮。
+
+            安全姿态（有意为之）：
+              * **不用 cookie、不做重定向** —— 每个动作表单都带隐藏的 token 字段。
+                于是不存在会话可被 CSRF 借用的问题：伪造的请求拿不到令牌。
+              * 令牌只出现在**响应体**里，不进 URL、不进 Location 头、不进日志。
+            """
+            store, registry = portal.store, portal.registry
+            data = store._load()["applications"]
+
+            def row(callsign, app, actions):
+                return (f"<tr><td><code>{html.escape(callsign)}</code></td>"
+                        f"<td>{html.escape(app['status'])}</td>"
+                        f"<td>{html.escape(app.get('product') or '主产品')}</td>"
+                        f"<td>{html.escape(app.get('contact') or '—')}</td>"
+                        f"<td>{html.escape(app.get('evidence') or '')[:60]}</td>"
+                        f"<td>{actions}</td></tr>")
+
+            def btn(route, callsign, label, extra=""):
+                return (f"<form method=post action={route} style='display:inline'>"
+                        f"<input type=hidden name=callsign value='{html.escape(callsign)}'>"
+                        f"<input type=hidden name=token value='{html.escape(token_value)}'>"
+                        f"{extra}<button>{html.escape(label)}</button></form>")
+
+            pending = [row(c, a, btn("/verify", c, "核验通过", "<input type=hidden name=evidence value='人工核验通过'>")
+                          + btn("/reject", c, "拒绝", "<input type=hidden name=reason value='材料不足'>"))
+                       for c, a in sorted(data.items()) if a["status"] == "applied"]
+            verified = [row(c, a, btn("/grant", c, "分配入口") + btn("/reject", c, "拒绝", "<input type=hidden name=reason value='核验后驳回'>"))
+                        for c, a in sorted(data.items()) if a["status"] == "verified"]
+            granted = [row(c, a, btn("/revoke", c, "撤销", "<input type=hidden name=reason value='撤销'>"))
+                       for c, a in sorted(data.items()) if a["status"] == "granted"]
+            empty = "<tr><td colspan=6>（无）</td></tr>"
+            return f"""<!doctype html><meta charset="utf-8"><meta name=robots content=noindex>
+<title>MRRC Portal — 运维</title>
+<style>body{{font:15px/1.6 -apple-system,sans-serif;max-width:1100px;margin:32px auto;padding:0 16px}}
+table{{border-collapse:collapse;width:100%;margin:8px 0 24px}}td,th{{border-bottom:1px solid #ddd;padding:6px;text-align:left;font-size:14px}}
+button{{font:inherit;padding:4px 10px;margin-right:4px}}code{{background:#f4f4f4;padding:1px 4px}}
+.msg{{background:#e8f5e9;border:1px solid #a5d6a7;padding:8px 12px}}h2{{margin-top:28px}}</style>
+<h1>呼号自助 — 运维审批</h1>
+{f'<p class=msg>{html.escape(msg)}</p>' if msg else ''}
+<p><small>令牌只在本页表单里提交（不进 URL）✓ 核验依据：Club Log 呼号库 ✓ 未命中 ⇒ 人工判断 ✓
+　·　注册表：{html.escape(str(registry.path))}（分配后仍需 root 执行 <code>gen_hub_routes.py</code> + <code>nginx reload</code>）</small></p>
+<h2>待核验（{len(pending)}）</h2><table><tr><th>呼号</th><th>状态</th><th>产品</th><th>联系</th><th>依据</th><th>动作</th></tr>{''.join(pending) or empty}</table>
+<h2>已核验待分配（{len(verified)}）</h2><table><tr><th>呼号</th><th>状态</th><th>产品</th><th>联系</th><th>依据</th><th>动作</th></tr>{''.join(verified) or empty}</table>
+<h2>已授予（{len(granted)}）</h2><table><tr><th>呼号</th><th>状态</th><th>标签</th><th>端口</th><th>—</th><th>动作</th></tr>
+{''.join(granted) or empty}</table>"""
+
         # ---- routes ----
         def do_GET(self):                        # noqa: N802
+            if self._route() == "/admin":
+                return self._send(200, f"""<!doctype html><meta charset="utf-8"><meta name=robots content=noindex>
+<title>MRRC Portal — 运维登录</title>
+<style>body{{font:15px/1.6 -apple-system,sans-serif;max-width:520px;margin:60px auto;padding:0 16px}}
+input,button{{font:inherit;padding:8px;width:100%;box-sizing:border-box}}button{{margin-top:10px}}
+code{{background:#f4f4f4;padding:1px 4px}}</style>
+<h1>运维审批</h1>
+<form method=post action=admin>
+  <input type=password name=token placeholder="运维令牌（sudo cat /etc/mrrc-hub/portal.token）" autofocus>
+  <button>进入</button>
+</form>
+<p><small>令牌只随表单提交，不进 URL ✓ 本页与审批页均 <code>noindex</code> ✓</small></p>""",
+                               ctype="text/html; charset=utf-8")
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})
             rows = "".join(
@@ -198,18 +260,34 @@ code{{background:#f4f4f4;padding:1px 4px}}</style>
                 if route == "/apply":
                     return self._send(200, portal.apply(body.get("callsign", ""),
                                                         body.get("contact", ""), body.get("product", "")))
+                if route == "/admin":
+                    if not self._operator_ok(body):
+                        return self._send(403, {"error": "令牌不正确"})
+                    return self._send(200, self._forms(body.get("token", "").strip()),
+                                      ctype="text/html; charset=utf-8")
                 if route not in ("/verify", "/reject", "/grant", "/revoke"):
                     return self._send(404, {"error": "not found"})
                 if not self._operator_ok(body):
                     return self._send(403, {"error": "运维动作需要 X-Portal-Token"})
                 who = cs.normalize(body.get("callsign", ""))
+                from_page = bool(body.get("token"))
+                def done(msg):
+                    if from_page:
+                        return self._send(200, self._forms(body.get("token", "").strip(), msg),
+                                          ctype="text/html; charset=utf-8")
+                    return None
                 if route == "/verify":
-                    return self._send(200, {"status": portal.store.mark_verified(who, body.get("evidence", "人工核验通过")).status})
+                    result = portal.store.mark_verified(who, body.get("evidence", "人工核验通过"))
+                    rendered = done("已核验")
+                    return rendered or self._send(200, result if isinstance(result, dict) else {"status": result.status})
                 if route == "/reject":
-                    return self._send(200, {"status": portal.store.reject(who, body.get("reason", "")).status})
+                    result = portal.store.reject(who, body.get("reason", ""))
+                    rendered = done("已拒绝")
+                    return rendered or self._send(200, result if isinstance(result, dict) else {"status": result.status})
                 if route == "/grant":
                     return self._send(200, portal.grant(who))
-                return self._send(200, portal.revoke(who, body.get("reason", "")))
+                result = portal.revoke(who, body.get("reason", ""))
+                return done("已撤销") or self._send(200, result)
             except cs.InvalidCallsign as exc:
                 return self._send(400, {"error": str(exc)})
             except KeyError as exc:

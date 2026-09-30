@@ -41,7 +41,7 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.4 |
+| SDD Version | V0.5 |
 | Baseline Date | 2026-09-30 |
 | Status | **阶段 1 通路已在真实公网跑通**（`test1.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。MVP 前必修项：I-H6/AD-H07/AD-H09 已实现（mrrc_modern V2.62/V2.63）；剩余为通配真证书（DNS-01）与备案 |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
@@ -51,6 +51,7 @@
 | 单实例写者 | 同时最多 1 个有效 Operator 租约（AD-H05） |
 | 安全基线 | 一实例一证（设备 mTLS）、一次性 launch code、host-only Cookie、令牌不进 URL/日志（AD-H07、AD-H11） |
 | 数据面 | Access Gateway（无状态）×N + Tunnel Gateway（有状态）×≥2，归属映射经 Registry/Redis（AD-H03） |
+| 阶段 1 现网形态 | hub：**一条通配 vhost** + `/etc/mrrc-hub/instances.tsv` 注册表（名字→回环端口，生成器产出 nginx map）；实例：**launchd 常驻 frpc**（0600 配置 + KeepAlive）|
 | 复用而非新建 | OTA 拉取侧 `mrrc_modern/upgrade_core.py`；诊断上报 `deploy_support_receiver.sh`（AD-H13） |
 | 规模设计余量 | 500 在线隧道 / 1000 活跃会话 / 5000 用户 WS / 公网出带宽起步 200 Mbps（NFR-H017） |
 

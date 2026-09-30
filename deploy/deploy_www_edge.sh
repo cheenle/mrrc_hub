@@ -36,8 +36,11 @@ SUBDOMAIN="${1:?usage: deploy_www_edge.sh <instance-fqdn> [hub-upstream] [redire
 UPSTREAM="${2:-tunnel.mrrc.vlsc.net:9988}"
 MODE="${3:-redirect}"
 case "$MODE" in
-    redirect|proxy) ;;
-    *) echo "mode must be redirect or proxy" >&2; exit 2 ;;
+redirect | proxy) ;;
+*)
+	echo "mode must be redirect or proxy" >&2
+	exit 2
+	;;
 esac
 
 ENTRY_PATH="/mrrc_modern/${SUBDOMAIN%%.*}"
@@ -46,35 +49,44 @@ TLS_DIR="/etc/mrrc-edge/tls"
 SITE="/etc/nginx/sites-available/vlsc.net"
 MARKER_START="    # ── MRRC Cloud Hub edge (${SUBDOMAIN}) ──"
 
-[[ $EUID -eq 0 ]] || { echo "must run as root (sudo)" >&2; exit 2; }
-command -v nginx >/dev/null || { echo "nginx not installed here" >&2; exit 2; }
-[[ -s "$HUB_CA" ]] || { echo "missing $HUB_CA — copy the hub certificate there first" >&2; exit 2; }
+[[ $EUID -eq 0 ]] || {
+	echo "must run as root (sudo)" >&2
+	exit 2
+}
+command -v nginx >/dev/null || {
+	echo "nginx not installed here" >&2
+	exit 2
+}
+[[ -s "$HUB_CA" ]] || {
+	echo "missing $HUB_CA — copy the hub certificate there first" >&2
+	exit 2
+}
 
 if [[ "$MODE" == "proxy" ]]; then
-    install -d -m 0750 "$TLS_DIR"
-    if [[ -d "/etc/letsencrypt/live/${SUBDOMAIN}" ]]; then
-        CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
-        CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
-        echo "==> certificate: Let's Encrypt for ${SUBDOMAIN}"
-    else
-        CERT_CRT="$TLS_DIR/fullchain.pem"
-        CERT_KEY="$TLS_DIR/privkey.pem"
-        echo "==> certificate: none for ${SUBDOMAIN} yet (self-signed placeholder)"
-        echo "    once ${SUBDOMAIN} resolves here: certbot certonly --webroot -w /var/www/html -d ${SUBDOMAIN}"
-        if [[ ! -s "$CERT_CRT" ]]; then
-            openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-                -keyout "$CERT_KEY" -out "$CERT_CRT" -subj "/CN=${SUBDOMAIN}" \
-                -addext "subjectAltName=DNS:${SUBDOMAIN}" 2>/dev/null
-            chmod 600 "$CERT_KEY"
-        fi
-    fi
+	install -d -m 0750 "$TLS_DIR"
+	if [[ -d "/etc/letsencrypt/live/${SUBDOMAIN}" ]]; then
+		CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
+		CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
+		echo "==> certificate: Let's Encrypt for ${SUBDOMAIN}"
+	else
+		CERT_CRT="$TLS_DIR/fullchain.pem"
+		CERT_KEY="$TLS_DIR/privkey.pem"
+		echo "==> certificate: none for ${SUBDOMAIN} yet (self-signed placeholder)"
+		echo "    once ${SUBDOMAIN} resolves here: certbot certonly --webroot -w /var/www/html -d ${SUBDOMAIN}"
+		if [[ ! -s "$CERT_CRT" ]]; then
+			openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+				-keyout "$CERT_KEY" -out "$CERT_CRT" -subj "/CN=${SUBDOMAIN}" \
+				-addext "subjectAltName=DNS:${SUBDOMAIN}" 2>/dev/null
+			chmod 600 "$CERT_KEY"
+		fi
+	fi
 fi
 
 BLOCK_FILE="$(mktemp)"
 trap 'rm -f "$BLOCK_FILE"' EXIT
 
 if [[ "$MODE" == "redirect" ]]; then
-    cat >"$BLOCK_FILE" <<EOF
+	cat >"$BLOCK_FILE" <<EOF
 ${MARKER_START}
     # Managed by mrrc_hub/deploy/deploy_www_edge.sh (mode: redirect).
     #
@@ -96,9 +108,9 @@ ${MARKER_START}
     }
     # ── end MRRC Cloud Hub edge ──
 EOF
-    INSERT_MODE="into-443-block"
+	INSERT_MODE="into-443-block"
 else
-    cat >"$BLOCK_FILE" <<EOF
+	cat >"$BLOCK_FILE" <<EOF
 ${MARKER_START}
     # Managed by mrrc_hub/deploy/deploy_www_edge.sh (mode: proxy).
     # Terminates TLS here (real certificate, port 443) and proxies the whole
@@ -147,13 +159,13 @@ ${MARKER_START}
     }
     # ── end MRRC Cloud Hub edge ──
 EOF
-    INSERT_MODE="append"
+	INSERT_MODE="append"
 fi
 
 # ── idempotent placement ────────────────────────────────────────────────
 cp -a "$SITE" "$SITE.bak.$(date +%Y%m%d%H%M%S)"
 SITE="$SITE" BLOCK_FILE="$BLOCK_FILE" MARKER_START="$MARKER_START" \
-  INSERT_MODE="$INSERT_MODE" python3 - <<'PY'
+	INSERT_MODE="$INSERT_MODE" python3 - <<'PY'
 import os, re, sys
 
 site = os.environ["SITE"]
@@ -206,11 +218,11 @@ systemctl reload nginx
 echo "==> nginx reloaded (mode: $MODE)"
 echo
 if [[ "$MODE" == "redirect" ]]; then
-    echo "verify:"
-    echo "  curl -sI https://www.vlsc.net${ENTRY_PATH}/login   # 302 → https://${SUBDOMAIN}:9988/login"
-    echo "  curl -skL -o /dev/null -w '%{http_code}\\n' https://www.vlsc.net${ENTRY_PATH}/login   # 200"
+	echo "verify:"
+	echo "  curl -sI https://www.vlsc.net${ENTRY_PATH}/login   # 302 → https://${SUBDOMAIN}:9988/login"
+	echo "  curl -skL -o /dev/null -w '%{http_code}\\n' https://www.vlsc.net${ENTRY_PATH}/login   # 200"
 else
-    echo "verify:"
-    echo "  curl -sI  https://${SUBDOMAIN}/login        # 200 through hub + tunnel"
-    echo "  curl -s   https://${SUBDOMAIN}/api/health   # 401 until a session exists"
+	echo "verify:"
+	echo "  curl -sI  https://${SUBDOMAIN}/login        # 200 through hub + tunnel"
+	echo "  curl -s   https://${SUBDOMAIN}/api/health   # 401 until a session exists"
 fi

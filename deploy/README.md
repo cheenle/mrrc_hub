@@ -103,6 +103,31 @@ curl -s  https://test1.mrrc.vlsc.net:9988/api/health       # 期望 401（鉴权
 **V-d 的做法值得保留**：故意改错 `proxy_ssl_name` 看它失败，是"校验真的开着"的唯一证据——
 这正是当初 B2 那行 `proxy_ssl_verify off` 能在生产里活下来的原因（没人验证过它会失败）。
 
+## 正式形态（2026-09-30 落地）
+
+**hub 侧：一条通配 vhost 服务所有实例，注册表是唯一的每实例事实。**
+
+| 文件 | 作用 |
+|---|---|
+| `/etc/mrrc-hub/instances.tsv` | 注册表：`<名字> <回环端口>`，一行一个实例（权威） |
+| `/usr/local/sbin/gen_hub_routes.py` | 把注册表生成成 nginx `map`（`/etc/nginx/conf.d/mrrc-hub-map.conf`），并校验端口落在 frps 的 `allowPorts` 内 |
+| `/etc/nginx/sites-available/mrrc-hub` | **唯一**的 vhost：`~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$` → `https://127.0.0.1:$mrrc_port`；未知名字 **404**（不回退到别的实例） |
+
+**加实例 = 注册表加一行 + 重跑生成器 + reload**，不再"每实例改 nginx"—— 那正是 B2 的痛
+（每加一个前端资源就要动中心配置、还踩过正则优先级）。
+
+**实例侧：launchd 常驻服务**（`deploy/install_instance_tunnel.sh`）。配置落在
+`~/Library/Application Support/mrrc-fleet/frpc-<name>.toml`（0600，token 只在这里），
+LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"已有手工 frpc 在跑"时启动，
+避免两个客户端抢同一个名字导致抖动。**实例自己的电台服务不归它管** —— 隧道照常连，实例没起来就 502。
+
+**实测**：服务日志 `login to server success` + `start proxy success`；
+经通配 vhost `test1.mrrc.vlsc.net:9988` → `/api/health` **401**、`/login` **200**；
+`nope.mrrc.vlsc.net:9988` → **404**（未知实例不误路由，NFR-H022）。
+
+**本阶段已知限制（阶段 2 替换）**：frp 用**单个共享 token**（frp 的模型），不是一机一证；
+这正是 hub SDD 把 frp 定位为 MVP 验证通道、把设备证书/mTLS 留给自研 Agent 的原因（AD-H11/AD-H13）。
+
 ## 两级入口：主路走 hub，退化路走海外 www（迂回方案）
 
 境内地域的 80/443 在没有备案时不可用，而**明文 HTTP 到未备案域名会被途中改写**（实测见 R-H13）。

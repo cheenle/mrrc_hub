@@ -2,6 +2,31 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.5 — 2026-09-30 — 阶段 1 正式化（通配路由 + 注册表 + 常驻隧道）
+
+**触发**："证书后边再搞，其他都正式搞"。
+
+**改动**
+
+1. **hub 侧从"每实例一条 vhost"改为"一条通配 vhost + 注册表"**（`deploy/deploy_hub_routes.sh`
+   + `deploy/gen_hub_routes.py`）：`/etc/mrrc-hub/instances.tsv` 是唯一的每实例事实（名字 → 回环端口），
+   生成器产出 nginx `map` 并校验端口落在 frps `allowPorts` 内；vhost 用
+   `~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$`，**未知名字回 404**，不回退到别的实例
+   （NFR-H022）。加实例 = 注册表一行 + 重跑 + reload。
+   这直接消掉了 B2 的痛点：每加一个实例/一个前端资源就要改中心 nginx。
+2. **实例侧从手工 `nohup frpc` 改为 launchd 常驻服务**（`deploy/install_instance_tunnel.sh`）：
+   0600 配置文件放 `~/Library/Application Support/mrrc-fleet/`，LaunchAgent 带 `KeepAlive`
+   （崩溃/重启/换网自恢复），并拒绝在已有手工 frpc 运行时启动（两个客户端抢同一名字会抖动）。
+   实例自己的电台服务不归隧道管 —— 隧道常连，实例没起来就是 502。
+3. **进 hub 的那一跳保持证书校验**且现在是"端到端"的：frps 转发裸 TCP，所以 nginx 的
+   `proxy_ssl_verify on` + `proxy_ssl_name radio.vlsc.net` 校验的是**实例自己的真证书**。
+
+**实测**：服务日志握手成功；经通配 vhost `test1.mrrc.vlsc.net:9988` → `/api/health` 401、
+`/login` 200；`nope.mrrc.vlsc.net:9988` → 404。
+
+**本阶段已知限制**：frp 共享单 token（frp 的模型），非一机一证 —— 与 AD-H11/AD-H13 把 frp 定位为
+MVP 验证通道、设备证书留给自研 Agent 一致。
+
 ## V0.4 — 2026-09-30 — 海外边缘作为退化入口（443 + 真证书）
 
 **触发**：明确"443 在境内不用想、80/443 肯定不行，迂回一下"。因此不追求让 hub 拿到 80/443，

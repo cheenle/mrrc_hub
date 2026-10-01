@@ -450,6 +450,27 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 if route == "/apply":
                     return self._send(200, portal.apply(body.get("callsign", ""),
                                                         body.get("contact", ""), body.get("product", "")))
+                if route == "/status":
+                    # 申请方（应用）查询自己那条申请。用 POST 而不是 GET：令牌不进 URL/日志
+                    # （与 AD-H11/AD-024 一致）。凭申请令牌只能读自己这一条，改不了任何东西。
+                    callsign = cs.normalize(body.get("callsign", ""))
+                    app = portal.store.get(callsign)
+                    supplied = str(body.get("token") or "")
+                    if not app or not app.request_token or \
+                            not hmac.compare_digest(supplied, app.request_token):
+                        return self._send(403, {"error": "申请令牌无效"})
+                    reply = {
+                        "callsign": app.callsign,
+                        "status": app.status,
+                        # 批准后才给出的接入信息；未批准时为空，不泄露半个字段
+                        "label": app.label if app.status == "granted" else "",
+                        "port": int(app.port or 0) if app.status == "granted" else 0,
+                        "enroll_secret": app.enroll_secret if app.status == "granted" else "",
+                        "entry": (f"https://{app.label}.mrrc.vlsc.net:9988/"
+                                  if app.status == "granted" and app.label else ""),
+                    }
+                    return self._send(200, reply)
+
                 if route == "/enroll":
                     # 实例提交自签证书的公钥。这条路**对公网开放**，所以凭据是一次性口令，
                     # 而且要校验证书名字就是它自己的入口名 —— 否则可以拿别人的证书来冒充。

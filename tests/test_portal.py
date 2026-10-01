@@ -343,6 +343,59 @@ def test_base_path_mount():
             httpd.shutdown()
 
 
+def test_status_endpoint_returns_connection_info_only_when_granted():
+    """申请方凭申请令牌查自己那条申请：批准前不给接入信息，批准后才给（应用的自然用法）。"""
+    import http.server, json, threading, urllib.error, urllib.parse, urllib.request
+    from portal.app import Portal, make_handler
+    from portal.store import Store
+    from portal import registry as reg
+    from portal.verify import CallsignListVerifier
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "callsigns.txt").write_text("NOBODY\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/status"
+
+        def post(payload):
+            data = urllib.parse.urlencode(payload).encode()
+            req = urllib.request.Request(url, data=data,
+                                        headers={"Content-Type": "application/x-www-form-urlencoded"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+
+        try:
+            portal.apply("bg7zzz")
+            token = portal.store.get("BG7ZZZ").request_token
+            check(bool(token), "申请时生成了申请令牌")
+
+            code, _ = post({"callsign": "BG7ZZZ", "token": "wrong"})
+            check(code == 403, "错令牌查状态 → 403")
+            code, _ = post({"callsign": "BG9ZZZ", "token": token})
+            check(code == 403, "令牌查不了别人的申请 → 403")
+
+            code, body = post({"callsign": "BG7ZZZ", "token": token})
+            check(code == 200 and body.get("status") == "applied", "申请方能查到自己（applied）")
+            check(not body.get("label") and not body.get("enroll_secret"), "未批准时不泄露接入信息")
+            check(body.get("port") == 0 and body.get("entry") == "", "未批准时端口与入口为空")
+
+            portal.store.mark_verified("BG7ZZZ", "测试")
+            portal.grant("BG7ZZZ", "bg7zzz", 18888)
+            code, body = post({"callsign": "BG7ZZZ", "token": token})
+            check(code == 200 and body.get("status") == "granted", "批准后状态为 granted")
+            check(body.get("label") == "bg7zzz" and body.get("port") == 18888, "批准后给出 label 与端口")
+            check(len(body.get("enroll_secret", "")) >= 20, "批准后给出一次性登记口令")
+            check(body.get("entry", "").startswith("https://bg7zzz.mrrc.vlsc.net:9988"), "给出入口地址")
+        finally:
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

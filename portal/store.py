@@ -32,6 +32,9 @@ class Application:
     label: str = ""
     port: int = 0
     enroll_secret: str = ""      # 一次性登记口令：实例凭它提交自签证书（见 app.py 的 /enroll）
+    #: 申请方凭它查询自己这条申请的状态（应用在设置里申请后保存它；不进 URL，走 POST 体）。
+    #: 它只够读**自己**这条申请，拿不到别人的，也改不了任何状态。
+    request_token: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     history: list = field(default_factory=list)
@@ -88,7 +91,8 @@ class Store:
         existing = data["applications"].get(callsign)
         if existing and existing["status"] in (APPLIED, VERIFIED, GRANTED):
             raise ValueError(f"{callsign} 已存在申请（状态 {existing['status']}），走申诉/转移流程")
-        app = Application(callsign=callsign, contact=contact, product=product)
+        app = Application(callsign=callsign, contact=contact, product=product,
+                        request_token=secrets.token_urlsafe(24))
         app.touch("applied", f"contact={contact!r} product={product!r}")
         data["applications"][callsign] = asdict(app)
         self._audit(data, callsign, "applied", f"product={product!r}")

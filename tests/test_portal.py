@@ -286,7 +286,9 @@ def test_end_to_end_with_callsign_db():
         raises(PermissionError, portal.grant, "JA1XYZ")
         result = portal.grant("BG1SB")
         check(result["label"] == "bg1sb" and result["port"] == 18802, "分配标签与端口")
-        check("install_instance_tunnel.sh bg1sb 18802" in result["next_step"], "给出实例侧上线命令")
+        # 行为有意改变（v1.24.0）：租户不再跑命令，接入在应用设置菜单里完成。
+        check("接入云端" in result["next_step"] and "install_instance_tunnel.sh" not in result["next_step"],
+              "下一步指向应用而不是脚本命令")
         check(reg.Registry(tmp / "instances.tsv").entries() == [("bg1sb", 18802)], "注册表已落一行")
         revoked = portal.revoke("BG1SB", "冒用")
         check(revoked["entry_removed"] and reg.Registry(tmp / "instances.tsv").entries() == [], "撤销移除入口")

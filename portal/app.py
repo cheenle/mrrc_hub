@@ -180,7 +180,14 @@ class Portal:
             self.registry.remove(label)                   # 失败即回滚，不留孤儿条目
             raise
         return {"callsign": normalized, "label": label, "port": port,
-                "next_step": f"sudo bash deploy/install_instance_tunnel.sh {label} {port}",
+                # 给租户看的下一步。**不要**再写老式的脚本命令：v1.24.0 起接入在应用
+                # 设置菜单里完成（申请→批准→应用自动签证书/登记/起隧道），租户没有任何命令要跑。
+                # 只有旧版应用才需要那份脚本，所以按 product 分叉。
+                "next_step": (
+                    "在应用里：设置 → 接入云端（Cloud Hub）→ 点「刷新状态」即自动完成；无需命令"
+                    if (app.product or "").strip() in ("mrrc_modern", "")
+                    else f"在实例上运行 mrrc_hub/deploy/install_instance_tunnel.sh {label} {port}"
+                ),
                 "status": granted.status}
 
     def revoke(self, raw_callsign: str, reason: str) -> dict:

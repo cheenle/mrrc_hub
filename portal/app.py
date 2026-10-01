@@ -154,7 +154,10 @@ class Portal:
         elif result.outcome is VerificationOutcome.REJECTED:
             app = self.store.reject(normalized, result.evidence)
         return {"callsign": normalized, "status": app.status, "evidence": result.evidence,
-                "label": cs.label_for(normalized, product)}
+                "label": cs.label_for(normalized, product),
+                # 申请令牌只随这一次应答交给申请方本人：应用在设置里存下它，凭它轮询 /status。
+                # 它读不了别人的申请、也改不了任何状态（见 store.Application.request_token）。
+                "request_token": app.request_token}
 
     def grant(self, raw_callsign: str) -> dict:
         normalized = cs.normalize(raw_callsign)
@@ -210,6 +213,20 @@ def _cert_days(path=None) -> str:
         return "（摘要文件无法解析）"
 
 
+def _tunnel_online(port) -> bool:
+    """隧道是否在线：hub 回环上该端口可连接 ⇒ frpc 已建立。
+
+    总览与实例页都要问同一个问题，所以只在这里探一次 —— 两个视图里各写一个同名 `probe`
+    会互相遮蔽（同一个函数作用域），后人改动时很容易改错那一个。
+    """
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=1.5):
+            return True
+    except OSError:
+        return False
+
+
 def _clublog_info() -> str:
     """Club Log 库的文件时间与规模（不解析 36MB，只 stat；条数由核验器缓存提供）。"""
     from portal.verify import ClubLogVerifier
@@ -259,8 +276,9 @@ def make_handler(portal: Portal, token: str, base: str = ""):
     class Handler(BaseHTTPRequestHandler):
         server_version = "MRRC-Portal/1.0"
 
-        def log_message(self, fmt, *args):       # 不记录 query（可能含呼号/联系方式）
-            sys.stderr.write("portal: " + fmt % args + "\n")
+        def log_message(self, format, *args):    # noqa: A002 - 基类就是这么命名的
+            # 不记录 query（可能含呼号/联系方式）
+            sys.stderr.write("portal: " + format % args + "\n")
 
         def _route(self) -> str:
             """去掉挂载前缀后的路径；带前缀与不带前缀两种形式都接受。"""
@@ -271,10 +289,18 @@ def make_handler(portal: Portal, token: str, base: str = ""):
 
         # ---- helpers ----
         def _body(self) -> dict:
-            length = int(self.headers.get("Content-Length") or 0)
+            # 解析失败一律抛 ValueError：调用方把它变成 400「请求体无法解析」（而不是 500），
+            # 所以这里说清楚是哪一步失败，同时不让裸的 int()/json.loads() 逃出去。
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Content-Length 不是数字: {exc}") from exc
             raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
             if (self.headers.get("Content-Type") or "").startswith("application/json"):
-                return json.loads(raw or "{}")
+                try:
+                    return json.loads(raw or "{}")
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"JSON 无法解析: {exc}") from exc
             from urllib.parse import parse_qs
             return {k: v[0] for k, v in parse_qs(raw).items()}
 
@@ -337,14 +363,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     by[a["status"]] = by.get(a["status"], 0) + 1
                 cert = _cert_days()
                 cl = _clublog_info()
-                def probe(port):                       # 隧道在线探测：TCP 连通即在线
-                    import socket
-                    try:
-                        with socket.create_connection(("127.0.0.1", int(port)), timeout=1.5):
-                            return True
-                    except OSError:
-                        return False
-                online = sum(1 for _, p in entries if probe(p))
+                online = sum(1 for _, p in entries if _tunnel_online(p))
                 body = f"""<h2>总览</h2>
 <table><tr><th>项</th><th>值</th></tr>
 <tr><td>申请</td><td>{'　'.join(f"{k}={v}" for k, v in sorted(by.items())) or '（无）'}</td></tr>
@@ -378,15 +397,11 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     + rows({"rejected", "revoked"}, lambda c: "") + "</table>"
 
             elif view == "instances":
-                def probe(port):
-                    import socket
-                    try:
-                        with socket.create_connection(("127.0.0.1", int(port)), timeout=1.5):
-                            return "<b style='color:#34d399'>在线</b>"
-                    except OSError:
-                        return "<span style='color:#f87171'>未连接</span>"
+                def tunnel_cell(port):                 # 同一探测的 HTML 版本（实例页）
+                    return ("<b style='color:#34d399'>在线</b>" if _tunnel_online(port)
+                            else "<span style='color:#f87171'>未连接</span>")
                 rows_ = ''.join(
-                    f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td><td>{probe(p)}</td>"
+                    f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td><td>{tunnel_cell(p)}</td>"
                     f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net:8899/' target=_blank>打开入口</a></td></tr>"
                     for l, p in sorted(entries)) or "<tr><td colspan=4>（注册表为空）</td></tr>"
                 body = ("<h2>实例</h2><table><tr><th>标签</th><th>端口</th><th>隧道</th><th>入口</th></tr>"

@@ -37,6 +37,14 @@ def check(cond, label):
         FAILS.append(label)
 
 
+def stored(store, callsign):
+    """The stored application, with a clear failure instead of AttributeError on None."""
+    application = store.get(callsign)
+    if application is None:
+        raise AssertionError(f"store 里没有 {callsign}")
+    return application
+
+
 def raises(exc, fn, *a, **kw):
     try:
         fn(*a, **kw)
@@ -86,7 +94,7 @@ def test_dedupe_never_overwrites():
         store = Store(Path(tmp) / "portal.json")
         store.apply("BG1SB", contact="first")
         raises(ValueError, store.apply, "BG1SB", "second")   # 同一呼号第二次申请必须被拒
-        check(store.get("BG1SB").contact == "first", "首个申请的联系方式未被覆盖")
+        check(stored(store, "BG1SB").contact == "first", "首个申请的联系方式未被覆盖")
 
 
 def test_clublog_verifier_semantics():
@@ -163,7 +171,7 @@ def test_enroll_requires_secret_and_matching_name():
             post("/verify", {"callsign": "BG6LH", "token": "tok", "evidence": "人工"})
             st, body = post("/grant", {"callsign": "BG6LH", "token": "tok"})
             check(st == 200 and "enroll_secret" not in body, "分配返回 200")
-            secret = portal.store.get("BG6LH").enroll_secret
+            secret = stored(portal.store, "BG6LH").enroll_secret
             check(bool(secret), "分配后生成了登记口令")
             good = make_cert("bg6lh.mrrc.vlsc.net", tmp / "good.pem")
             bad = make_cert("evil.mrrc.vlsc.net", tmp / "bad.pem")
@@ -218,7 +226,7 @@ def test_admin_ui_flow_and_no_csrf_surface():
             # 带令牌 → 成功并重渲染审批台
             status, page2 = post("/verify", {"callsign": "BG1ZZZ", "token": "tok", "evidence": "人工核验"})
             check(status == 200 and "已核验" in page2, "带令牌核验成功并回到审批台")
-            check(portal.store.get("BG1ZZZ").status == "verified", "状态真的变了")
+            check(stored(portal.store, "BG1ZZZ").status == "verified", "状态真的变了")
         finally:
             httpd.shutdown()
 
@@ -358,11 +366,11 @@ def test_status_endpoint_returns_connection_info_only_when_granted():
                         CallsignListVerifier(tmp / "callsigns.txt"))
         httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        url = f"http://127.0.0.1:{httpd.server_address[1]}/status"
+        url = f"http://127.0.0.1:{httpd.server_address[1]}"
 
-        def post(payload):
+        def post(path, payload):
             data = urllib.parse.urlencode(payload).encode()
-            req = urllib.request.Request(url, data=data,
+            req = urllib.request.Request(url + path, data=data,
                                         headers={"Content-Type": "application/x-www-form-urlencoded"})
             try:
                 with urllib.request.urlopen(req, timeout=10) as r:
@@ -371,23 +379,27 @@ def test_status_endpoint_returns_connection_info_only_when_granted():
                 return e.code, json.loads(e.read() or b"{}")
 
         try:
-            portal.apply("bg7zzz")
-            token = portal.store.get("BG7ZZZ").request_token
-            check(bool(token), "申请时生成了申请令牌")
+            # 令牌必须从 **HTTP 应答** 里来：应用只能通过这一条路拿到它。
+            # 直接读 store 的旧写法掩盖过一次真实缺陷 —— /status 要令牌，而 /apply 从不交出它。
+            code, applied = post("/apply", {"callsign": "bg7zzz"})
+            check(code == 200 and applied.get("status") == "applied", "POST /apply 受理")
+            token = applied.get("request_token", "")
+            check(bool(token), "POST /apply 把申请令牌交给申请方（否则应用无法轮询状态）")
+            check(token == stored(portal.store, "BG7ZZZ").request_token, "应答里的令牌与 store 一致")
 
-            code, _ = post({"callsign": "BG7ZZZ", "token": "wrong"})
+            code, _ = post("/status", {"callsign": "BG7ZZZ", "token": "wrong"})
             check(code == 403, "错令牌查状态 → 403")
-            code, _ = post({"callsign": "BG9ZZZ", "token": token})
+            code, _ = post("/status", {"callsign": "BG9ZZZ", "token": token})
             check(code == 403, "令牌查不了别人的申请 → 403")
 
-            code, body = post({"callsign": "BG7ZZZ", "token": token})
+            code, body = post("/status", {"callsign": "BG7ZZZ", "token": token})
             check(code == 200 and body.get("status") == "applied", "申请方能查到自己（applied）")
             check(not body.get("label") and not body.get("enroll_secret"), "未批准时不泄露接入信息")
             check(body.get("port") == 0 and body.get("entry") == "", "未批准时端口与入口为空")
 
             portal.store.mark_verified("BG7ZZZ", "测试")
             portal.store.grant("BG7ZZZ", "bg7zzz", 18888)   # label/port 走 store（Portal.grant 只收呼号）
-            code, body = post({"callsign": "BG7ZZZ", "token": token})
+            code, body = post("/status", {"callsign": "BG7ZZZ", "token": token})
             check(code == 200 and body.get("status") == "granted", "批准后状态为 granted")
             check(body.get("label") == "bg7zzz" and body.get("port") == 18888, "批准后给出 label 与端口")
             check(len(body.get("enroll_secret", "")) >= 20, "批准后给出一次性登记口令")

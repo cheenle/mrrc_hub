@@ -22,7 +22,7 @@ param(
     [int]$LocalPort = 8888,
     [string]$HubHost = "tunnel.mrrc.vlsc.net",
     [int]$ControlPort = 8989,
-    [string]$FleetDir = $PSScriptRoot,                       # frpc.exe / openssl.exe 所在（安装包内置）
+    [string]$FleetDir = "",                                 # frpc.exe / openssl.exe 所在（安装包内置）
     [string]$DataDir = (Join-Path $env:LOCALAPPDATA "MRRC\fleet"),
     [string]$CertDir = (Join-Path $env:APPDATA "MRRC-Modern\certs"),
     [switch]$Force
@@ -33,6 +33,16 @@ param(
 # 在干净 VM 上装包真跑时实测到。本脚本对每一处关键调用都显式查 $LASTEXITCODE 并用 Fail 退出，
 # 所以 Continue 不会放过失败，只是不让 stderr 输出冒充失败。
 $ErrorActionPreference = "Continue"
+
+# Where this script lives. NOT as a param default: $PSScriptRoot is not reliably set while the
+# param block is being bound - invoked from within another PowerShell it comes back empty, and the
+# next Join-Path fails with 'parameter Path is an empty string' pointing at an innocent line.
+# (Measured: cmd /c "powershell -File …" works, & powershell -File … does not.)
+if (-not $FleetDir) {
+    $FleetDir = $PSScriptRoot
+    if (-not $FleetDir) { $FleetDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+    if (-not $FleetDir) { $FleetDir = (Get-Location).Path }
+}
 $taskName = "MRRC Fleet Tunnel ($Name)"
 $conf = Join-Path $DataDir "frpc-$Name.toml"
 $fqdn = "$($Name.ToLower()).mrrc.vlsc.net"

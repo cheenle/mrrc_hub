@@ -386,7 +386,7 @@ def test_status_endpoint_returns_connection_info_only_when_granted():
             check(body.get("port") == 0 and body.get("entry") == "", "未批准时端口与入口为空")
 
             portal.store.mark_verified("BG7ZZZ", "测试")
-            portal.grant("BG7ZZZ", "bg7zzz", 18888)
+            portal.store.grant("BG7ZZZ", "bg7zzz", 18888)   # label/port 走 store（Portal.grant 只收呼号）
             code, body = post({"callsign": "BG7ZZZ", "token": token})
             check(code == 200 and body.get("status") == "granted", "批准后状态为 granted")
             check(body.get("label") == "bg7zzz" and body.get("port") == 18888, "批准后给出 label 与端口")

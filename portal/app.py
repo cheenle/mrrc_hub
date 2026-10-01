@@ -510,7 +510,11 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 return self._send(400, {"error": str(exc)})
             except KeyError as exc:
                 return self._send(404, {"error": f"无此申请: {exc}"})
-            except (ValueError, PermissionError, RuntimeError) as exc:
+            except PermissionError as exc:            # noqa: BLE001
+                # 权限问题不是"冲突"：写成 409 会让运维以为是自己提交的东西不对，
+                # 而真相往往是 hub 上目录属主/权限没给服务账号（2026-10-01 实测误导了两轮排障）。
+                self._send(500, {"error": "hub writes failed (check the directory owner): " + str(exc)})
+            except (ValueError, RuntimeError) as exc:      # noqa: BLE001
                 return self._send(409, {"error": str(exc)})
 
     return Handler

@@ -118,6 +118,28 @@ if ($env:MRRC_ENROLL_SECRET) {
 [Environment]::SetEnvironmentVariable("MRRC_REMOTE_SESSION_TX_HEARTBEAT_S", "5", "User")
 Write-Host "set MRRC_SSL_CERT / MRRC_SSL_KEY / MRRC_REMOTE_SESSION_TX_HEARTBEAT_S=5 (user scope)"
 
+# 让应用用上新环境。写用户级环境变量**不会**改变已在运行的应用的环境块（从开始菜单启动的进程
+# 继承的是 Explorer 启动时的环境）：实测它因此继续用自己那张 localhost 证书，hub 侧报
+# "upstream SSL certificate verify error: (18:self-signed certificate)"，入口永远 502。
+$running = Get-Process -Name "MRRC-Modern-Launcher", "MRRC-Modern-Server", "scope_pipe" -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "restarting the app so it picks up the certificate in its environment"
+    foreach ($n in @("MRRC-Modern-Server", "scope_pipe", "MRRC-Modern-Launcher")) {
+        Get-Process -Name $n -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); Start-Sleep -Milliseconds 500 }
+    }
+    Start-Sleep -Seconds 2
+    $launcher = Join-Path (Split-Path -Parent $FleetDir) "MRRC-Modern-Launcher.exe"
+    if (Test-Path $launcher) {
+        # 用带新环境的本进程去启动它，新进程就继承了证书路径（这正是从开始菜单启动做不到的）
+        Start-Process -FilePath $launcher -WorkingDirectory (Split-Path -Parent $FleetDir) -WindowStyle Normal
+        Write-Host "  app restarted (launcher) - it will now serve the instance certificate"
+    } else {
+        Write-Host "  could not find the launcher next to the fleet dir; start the app by hand so it reads the new variables"
+    }
+} else {
+    Write-Host "the app was not running; start it now so it reads the new environment variables"
+}
+
 # ---- frpc 配置 ----
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 @"
@@ -154,6 +176,9 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 # binding and UserId arrives empty, which is how this was diagnosed.
 $principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$env:USERNAME" -LogonType Interactive
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
+# 升级应用时安装器会关掉 frpc（它住在应用目录里），而任务是登录时启动 ⇒ 不会自己回来。
+# 这里在注册后总是重新启动一次：租户重跑同一条命令即可恢复隧道（脚本本来承诺幂等）。
+Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 4
 

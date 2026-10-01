@@ -118,7 +118,9 @@
   尚未迁到它自己的 `<标签>.mrrc.vlsc.net` —— 迁移机制已就位、未施用。
   **标签规则**：主产品用裸呼号（`bg1sb`），附加产品加产品后缀（`bg1sb-legacy`）—— 见 `07-subject-area-model.md` §7.x.1
 - `https://portal.mrrc.vlsc.net:8899/` —— **呼号自助注册**（面向公众，另一套 vhost，
-  与实例入口同证书）。运维审批台在 `/admin`。详见 §12.9
+  与实例入口同证书）。运维审批台在 `/admin`。详见 §12.9。
+  **2026-10-02 起门户运行在独立主机 `47.80.243.9`**（8899 用户面 / 9988 边缘面，见 V0.20）；
+  边缘的 `/mrrc_portal/` 上游已指向它，实例入口仍在本机 hub。
 
 ### 证书（NFR-H030 的落地）
 
@@ -231,7 +233,10 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
 | 测试 | `python3 tests/test_portal.py` |
 | 入口 | `https://portal.mrrc.vlsc.net:8899/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
+| **主机（2026-10-02 起）** | **阿里云 `47.80.243.9`**（Ubuntu 26.04 / nginx 1.28.3）—— 从 hub 迁出，见 V0.20。**老 hub 的同名单元已停用** |
 | 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |
+| 自维护 | `mrrc-portal-sync.timer`（每日 08:30 从 hub 拉通配证书 + 呼号库；受限命令 `command=`，规模门 ≥10 万条；换库后重启 portal） |
+| **仍耦合在 hub** | `grant` 写的注册表在**新主机**（需同步到 hub 再跑 `gen_hub_routes.py`）；`/enroll` 的实例证书落在新主机（hub 的逐实例校验需要它们 + `trust-bundle.pem`）；证书续期后还要更新边缘的 `/etc/nginx/mrrc-hub-trust.pem` |
 | 限流 | `/apply` 上 `limit_req zone=mrrc_portal_apply burst=5 nodelay`（10 r/m/来源）。**这里能用真实客户端 IP** —— 与被隧道合并来源的实例侧不同 |
 
 **要记住的一条**：`grant` 只写注册表并打印实例侧命令，**不自动重生成路由** ——

@@ -172,12 +172,20 @@ class Portal:
                 f"拒绝分配：{normalized} 当前状态 {app.status}，只有 {STORE_VERIFIED} 才可分配入口"
             )
         label = cs.label_for(normalized, app.product)     # ④ 分配
-        port = self.registry.free_port()
-        self.registry.add(label, port)
+        # 同一呼号再次申请必须落到同一个入口：注册表是 label -> port，hub 的 nginx 路由由它
+        # 生成。早先这里无条件取下一个空闲端口，于是重新申请会把入口指到一个没人监听的端口
+        # （实测：老朋友 18804 仍在路由里，隧道却起来在 18803，入口 502）。
+        known = dict(self.registry.entries())
+        if label in known:
+            port = known[label]
+        else:
+            port = self.registry.free_port()
+            self.registry.add(label, port)
         try:
             granted = self.store.grant(normalized, label, port)
         except Exception:
-            self.registry.remove(label)                   # 失败即回滚，不留孤儿条目
+            if label not in known:                        # 失败即回滚，只回滚这次新增的
+                self.registry.remove(label)
             raise
         return {"callsign": normalized, "label": label, "port": port,
                 # 给租户看的下一步。**不要**再写老式的脚本命令：v1.24.0 起接入在应用

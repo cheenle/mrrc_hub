@@ -2,6 +2,24 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.20 — 2026-10-02 — Portal 迁到 47.80.243.9（用户面 8899 / 边缘面 9988），并给它装上自维护
+
+**触发**：操作员要求把 `portal.mrrc.vlsc.net` 迁到新主机 47.80.243.9（并即将切换解析）；老 hub 的 v6 不可达（见 V0.19），把门户与 hub 的角色拆开。
+
+**已做**（全部在 47.80.243.9，Ubuntu 26.04 / nginx 1.28.3）：新建 `mrrcportal` 服务账号与目录；代码按 hub 仓 HEAD 部署（含 V0.18 的令牌交付与 `/claim`）；**数据整体搬迁**并双侧 `sha256` 校验一致：`portal.json`、`instances.tsv`、`portal.token`、`callsigns.txt`、`frps.token.portal`、`instance-certs/`、`clublog_users.json`（36 MB，273,047 条）、`cert.txt`；通配证书 + 私钥随迁（`/etc/mrrc-hub/tls/`）；两套 vhost（8899 用户面带 `/apply` 限流、9988 边缘面）、`hub_safe` 日志格式、限流 zone、`proxy_params_mrrc_portal` 全部照搬；systemd 单元与 hub 同构。
+
+**验证**：本机 8899/9988 均 200；协议级 `apply`（32 字符令牌）→ `status`（applied）→ `claim` 错口令 403 → 错令牌 403 → `reject` 清理 200；**外部**：9988 从本机与从边缘都通（0.12–0.40 s），**8899 仍被安全组拦（待开）**；边缘 `/mrrc_portal/` 上游已切到 `47.80.243.9:9988`，边缘路径 6/6 200（0.37–0.59 s），且**新主机访问日志**里正是边缘 IP 的那 6 条（`193.111.30.163 … 200 rt=0.003`）—— 请求真的落到了新主机，不是缓存或旧路径。
+
+**自维护**（否则证书续期/每日呼号库会让门户悄悄坏掉）：hub 新增受限导出 `/usr/local/sbin/mrrc-hub-export-for-portal.sh`（root 的 `authorized_keys` 用 `command=` 绑定，只吐一个 tar，拿不到 shell）；新主机每日 08:30 由 `mrrc-portal-sync.timer` 拉回证书/私钥/呼号库（沿用 hub 的**规模门 ≥10 万条**，换库后重启 portal —— 因为 `ClubLogVerifier._index` 是进程内缓存；只有证书变了才 `reload nginx`）。真跑一次：273,047 条 ✓、证书未变 ✓、portal active ✓，双侧哈希一致 ✓。
+
+**仍留在老 hub 的耦合（必须记住，别以为迁完就无关了）**：
+① **注册表**：`grant` 改的是**新主机**的 `instances.tsv`，hub 的入口不会自己多一行 —— 运维仍需把这行同步到 hub 并跑 `gen_hub_routes.py`（V0.17 的 timer 只负责重生成，不负责搬文件）；
+② **instance-certs**：`/enroll` 落的实例证书现在落在新主机，而 hub 的 nginx 逐实例校验需要它们 + hub 的 `trust-bundle.pem` ⇒ 迁移或登记后要把证书同步到 hub 并重建信任包；
+③ **边缘信任文件**：新主机用的仍是 hub 签发的通配证书 ⇒ 证书续期后除了新主机（本 timer 已覆盖），还要更新边缘的 `/etc/nginx/mrrc-hub-trust.pem`（这是 hub 文档里咬过两次的 502 坑）；
+④ 切换前**老 hub 的 `mrrc-portal` 仍在跑**：两套 store 会分叉 ⇒ 切解析那一刻要重拷 `portal.json`/`instances.tsv`，然后停掉老服务。
+
+**未做/边界**：8899 安全组待放行；DNS 切换由操作员进行，切换后的三步（重拷状态、停老服务、更新 §12.8 主机表）在本文末列出。
+
 ## V0.19 — 2026-10-02 — 边缘间歇故障的真凶：nginx 选中了 hub 不可达的 IPv6
 
 **触发**：给 `www.vlsc.net` 与 `*.mrrc.vlsc.net` 都加上 AAAA 后，准备把服务器到服务器的跳数改走 IPv6。

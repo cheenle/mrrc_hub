@@ -1,0 +1,12 @@
+# 安装包要内置的外部二进制。制表符分隔：<平台/文件名>\t<URL>\t<sha256>
+#
+# frpc 不在此列：它由 fetch_installer_payload.sh 从 frp 官方 release 取，并用官方 checksums 校验。
+#
+# openssl：官方项目不发布 Windows 二进制，所以这份是人工确认来源后 pin 住的。
+# 来源与出处（2026-10-02 在构建 VM 上实测）：
+#   msys2 mingw-w64-x86_64-openssl（OpenSSL 3.6.3 9 Jun 2026），从 C:\msys64\mingw64\bin 取出
+#   openssl.exe 与它实际依赖的 9 个 DLL，打成下面的 zip。
+#   自足性已实测：把 PATH 清成只剩该目录（msys2 不在其中）仍能 req -x509 签出证书；
+#   系统 PATH 下同样可运行。逐文件哈希见本轮提交说明。
+#   换版本时的规矩不变：先人工确认来源，再 --record-openssl 记下实测哈希。
+windows-amd64/openssl-win64-portable.zip	https://www.vlsc.net/mrrc_modern/downloads/openssl-win64-portable-3.6.3.zip	96e866a59c0fba9b3266852da301e8663aa011bb0c2fc1ca1a1f0f5077c02994

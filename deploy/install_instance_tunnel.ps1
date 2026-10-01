@@ -126,7 +126,10 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = $LocalPort
 remotePort = $Port
-"@ | Set-Content -Path $conf -Encoding utf8
+"@ | Set-Content -Path $conf -Encoding ascii
+# ASCII, not utf8: PowerShell 5.1's utf8 writes a BOM, and frpc's TOML parser rejects the file
+# outright ("invalid character at start of key") - the tunnel then never starts and the entry
+# answers 502 with no other error anywhere. The config is pure ASCII, so ascii is also correct.
 icacls $conf /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null      # token 在文件里 ⇒ 收紧 ACL
 
 # ---- 常驻：计划任务（登录时启动；失败自动重启）----

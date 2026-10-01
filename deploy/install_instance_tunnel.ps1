@@ -135,9 +135,11 @@ $action = New-ScheduledTaskAction -Execute $frpc -Argument "-c `"$conf`"" -Worki
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
-$principal = New-ScheduledTaskPrincipal # 本地账户不能写成 WORKGROUP\user（实测 HRESULT 0x80070534 = 账号无法解析）：
-    # 用计算机名\用户名，工作组机器与域机器都成立。
-    -UserId "$env:COMPUTERNAME\$env:USERNAME" -LogonType Interactive
+# A local account must not be written as WORKGROUP\user - that fails with HRESULT 0x80070534
+# (the account cannot be resolved). COMPUTERNAME\user is correct on workgroup and domain machines.
+# Keep these comments ABOVE the statement: inside a backtick continuation they break parameter
+# binding and UserId arrives empty, which is how this was diagnosed.
+$principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$env:USERNAME" -LogonType Interactive
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 4

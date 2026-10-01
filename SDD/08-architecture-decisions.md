@@ -166,6 +166,7 @@ socket.`，而该兜底默认关闭（`config.py`: `_env_float("MRRC_PTT_MAX_TX_
 
 **Problem**: 源设计文档称 Listener「永远只读」，但实例实现是受限操作
 （`server.py`: `LISTEN_ALLOWED_SET_FIELDS = frozenset({"freq", "vfo_a_freq", "vfo_b_freq", "mode"})`
+
 + 放行 `memLoadAll`/`memRecall`，其余一律拒绝）。按文档实现会**收窄现有能力**；
 按代码实现则文档的"只读"承诺是假的。更关键的是：**调谐本身就是对射频状态的写**，
 而文档把"写"独占给 Operator 租约 —— 两个 Listener 同时调谐的冲突域在文档中完全未定义。
@@ -230,6 +231,20 @@ B2 的 `proxy_ssl_verify off` 与令牌进 URL 问题**必须在 Hub 侧避免�
 **Rationale**: 一机一证使吊销、审计与归属都成为可执行的运维动作（UC-H08）。
 
 **Consequences**: 需要 Device CA 与轮换窗口；现有 B4 的共享口令模式不作为 Hub 的鉴权基础。
+
+**as-built 指认（2026-10-01）—— 本 AD 目前只实现了一半，且是有意分层的**：
+
+| 层面 | 本 AD 要求 | 现网实况 |
+| ------ | ------- | ------- |
+| **hub → 实例这一跳的 TLS 身份** | 每实例独立密钥对与证书；私钥不出客户主机 | ✅ **已符合**：`make_instance_cert.sh` 签一张签给实例**自己入口名**的自签证书，公钥钉进 `/etc/mrrc-hub/trust-bundle.pem`，nginx 按 `$mrrc_tls_name` 逐实例校验。私钥不出实例 |
+| **隧道自身的认证** | 禁用全 fleet 共用静态 token | ⚠️ **未符合**：仍用 frp 的单个共享 token。这是**对 AD-H11 字面的有意偏离**，不是遗漏 |
+
+**偏离的理由与退出条件**：frp 的鉴权模型就是单个共享 token；要真正一机一证需要换掉隧道层，
+那是内置 Fleet Agent（AD-H13）的事。把 frp 定位为**过渡通道**而不是目标态，正是为了让这条偏离
+有时限。**退出条件 = Fleet Agent 上线**；在那之前，任何把共享 token 当成“已解决”的叙述都是错的。
+
+> 写文档时请把这两层分开说。把“一机一证”当成一句笼统的“阶段 2”，正是这个偏离
+> 被埋没、两次被写错（一次说“不是一机一证”，一次说“阶段 2”）的原因。
 
 ---
 

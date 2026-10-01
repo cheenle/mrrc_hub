@@ -41,7 +41,7 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.13 |
+| SDD Version | V0.14 |
 | Baseline Date | 2026-10-01 |
 | Status | **阶段 1 通路已在真实公网跑通**（`bg1sb.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL 已实现；**呼号注册已上线公网自助**（`portal.mrrc.vlsc.net:8899`，见 §12.9）；**实例证书链与安装器机制已就位**（§12.8）。剩余：实例证书迁移施用、隧道层 PTT 半开释放（MVP）、Operator 租约、设备 mTLS、安装包分发、ICP 备案 |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
@@ -113,7 +113,11 @@ MRRC Fleet Agent（客户内网）
 | 开放问题与已结案 | `13-feasibility-assessment.md`（I-H9 已结案） |
 | 现状取证评审（四项 P0）与其结案状态 | `../docs/2026-09-30-fleet-hub-design-review.md` §结案 |
 | 呼号注册的**可运行实现**（四端点、为何核验必须在授予之前） | `portal/README.md`、`12-operational-model.md` **§12.9** |
-| **实例证书链**（一机一证、信任包、逐实例校验） | `12-operational-model.md` **§12.8 「实例证书链」** |
+| **实例证书链**（一机一证、信任包、逐实例校验） | `12-operational-model.md` **§12.8 「实例证书链」**；决策与偏离见 `08` **AD-H11 as-built 指认** |
+| **实例证书生命周期 / 可信安装的要求** | `05` **NFR-H031**（信任包原子替换）、**NFR-H032**（无预装可安装 + 必校哈希） |
+| **文档事实可追溯**（不凭设计意图措辞） | `05` **NFR-H033**；站点侧落地见 `../website/README.md` 的复验清单 |
+| **组件模型里“目标态 vs 在跑的”对照** | `11` **§11.1 as-built 指认**（逐行给出子集 vs 目标态） |
+| **服务模型里“目标态契约 vs 现网路径”** | `10` **§10.1 as-built 指认**（实跑四端点与两种传令方式） |
 | **实例开通链 / 安装器**（自取 frpc 并校验哈希、三平台常驻） | `12-operational-model.md` **§12.8 「实例开通链」** |
 | as-built 总体架构图（含对目标态旧图的逐条订正） | `../docs/architecture-2026-10-01-as-built.svg`（同目录 PNG / HTML） |
 | **面向用户的文档站**（5 页：概览/接入/使用/排障 + 单独一页设计） | `../website/`（先看 `../website/README.md` 的事实源映射与发布前复验清单） |

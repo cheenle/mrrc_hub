@@ -5,7 +5,7 @@
 ## 10.1 Portal（用户与管理面，REST）
 
 | 能力 | 方法/路径（建议） | 说明 | 约束 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 实例列表 | `GET /api/instances` | 返回已授权实例与在线状态、版本、电台型号 | 只返回授权集合（SC-H5） |
 | 实例详情 | `GET /api/instances/{id}` | 最后在线、当前 Tunnel 节点、活跃角色、租约状态 | Fleet Admin 默认不可读内容（NFR-H023） |
 | 成员授权 | `POST /api/instances/{id}/members` | `(user, role)` 授权 | Owner + MFA |
@@ -16,10 +16,18 @@
 | 证书吊销 | `POST /api/instances/{id}/certificates/revoke` | 吊销设备证书 | Owner + MFA；立即断连（UC-H08） |
 | 诊断开关 | `POST /api/instances/{id}/diagnostics` | 限时开启 | Owner 同意 + 审计 |
 
+> 上表是**目标态契约**。实际在跑的 Portal 只实现了其中“接入申请 + 呼号核验 + 分配”一段，
+> 且路径不同 —— 见 `12-operational-model.md` §12.9。**不要拿上表的路径去调现网**。
+>
+> **as-built（2026-10-01）**：`POST /apply`（规范化→查重→核验）、`POST /verify`、
+> `POST /grant`、`POST /revoke`，加一个 `/admin` 审批台。
+> 运维动作两种传令方式：请求头 `X-Portal-Token`（curl/脚本）或表单同名字段（浏览器）——
+> **两者都不进 URL**，因为 URL 会进访问日志与浏览器历史（AD-H07）。
+
 ## 10.2 Ticket / Lease 服务
 
 | 能力 | 契约 | 约束 |
-|---|---|---|
+| --- | --- | --- |
 | 签发 launch code | 输入 `(user, instance_id, role, lease_id?)`；输出不透明 `code`（TTL ≤60 s，单次消费） | NFR-H010；不得是可解析的 JWT 直接放 URL |
 | 消费 launch code | 原子消费；返回 `(session_id, role, lease_id)` | 重放/过期 → 拒绝 + 审计 |
 | 获取租约 | `acquire(instance_id, holder)` → `HELD \| QUEUED \| DENIED` | **原子**；绝不返回第二个 Operator（SC-H3） |
@@ -29,7 +37,7 @@
 ## 10.3 Registry（实例目录）
 
 | 能力 | 契约 | 约束 |
-|---|---|---|
+| --- | --- | --- |
 | 写入归属 | `route(instance_id, node_id, connection_id, ttl)` | Tunnel Gateway 心跳续期 |
 | 查询归属 | `lookup(instance_id)` → 节点或 `MISS` | `MISS` 时必须**明确失败**，不得回退到旧节点 |
 | 在线状态 | `presence(instance_id)` → `online/offline/last_seen` | 离线识别 ≤45 s（NFR-H002） |
@@ -38,7 +46,7 @@
 ## 10.4 Tunnel 协议（Agent ↔ Tunnel Gateway）
 
 | 帧 | 方向 | 载荷 | 说明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `HELLO` / `WELCOME` | ↔ | 协议版本、客户端版本、能力位 | Hub 保留 N-2 兼容（NFR-H016） |
 | `REGISTER` | Agent→Hub | 软件版本、电台型号、能力、LAN 状态 | 上线（UC-H02） |
 | `HEARTBEAT` | Agent→Hub | RTT、重连次数、活跃会话、上行健康度、租约状态 | 15 s；**连接健康而非业务敏感内容** |
@@ -53,7 +61,7 @@
 ## 10.5 与实例侧的接口（`mrrc_modern` 契约）
 
 | 既有能力 | Hub 如何使用 | 不得做 |
-|---|---|---|
+| --- | --- | --- |
 | 5 端点 WS | 透明代理 | 改写帧格式、合并/缓冲二进制帧、规整自定义关闭码 |
 | `/listen` 角色 gate | 复用为 Listener 语义（AD-H08） | 把 Listener 实现成严格只读而与实例行为分叉 |
 | `_verify_auth`（cookie 或 `?token=`） | **阶段 2 改为信任隧道签名上下文；MVP 期必须停止把 token 放 URL** | 继续把 token 放 URL（AD-H07） |

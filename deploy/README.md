@@ -11,6 +11,7 @@
 | # | 漂移 | 后果 |
 | --- | --- | --- |
 | **X1** | `deploy_hub_routes.sh` 生成**两个** server block（`listen 8899;` 明文 + 301、`listen 9988 ssl`），而现网是**一个** block、且 `8899` 已是 **TLS**；且它生成的 `proxy_ssl_name` 写死 `radio.vlsc.net`、信任源写死系统 CA，**不认识 `$mrrc_tls_name` 与 `trust-bundle.pem`** | 重跑会**三重倒退**：① 8899 从 TLS 退回明文 → 境内被改写（R-H13 的失效模式）；② 抹掉**逐实例证书校验**，退回"所有实例共用 `radio.vlsc.net`"；③ 抹掉**信任包**，自签实例证书立即 502。另：脚本头部注释仍写 "currently self-signed"，现网已是真 Let's Encrypt |
+| **X3** | （2026-10-02）边缘 nginx 里指向 hub 的两处 `proxy_pass`（`/mrrc_modern/BG1SB/` 与 `/mrrc_portal/`）现为 **hub 的 IPv4 字面量** `8.160.161.80:9988`，不是脚本里的主机名 | 主机名 + hub 的 AAAA ⇒ nginx 选中不可达的 IPv6，任何 reload 都会把边缘路径打黑（实测 0/4；见 SDD/12 §12.8 排障增补）。hub 的 v6 验通后可改成 upstream 双地址（v6 优先 + 3 s 退 v4）；**别在没重测前把这两行改回主机名** |
 | **X2** | `deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | 重跑会把现网形态降级为 302 或子域代理，丢掉"标准端口 + 真证书 + 前缀透明"三项收益。www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的 |
 
 > **X1 现在是两者中最危险的**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →

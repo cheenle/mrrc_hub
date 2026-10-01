@@ -194,7 +194,7 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 现象 | 先查什么 |
 | ------ | ---------- |
 | 边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步） |
-| **边缘路径间歇性无响应（2026-10-01 实测）** | 6 次请求中 3 次 20 s 内无任何响应，呈交替出现。已排除：本地 DNS/TCP/TLS（均 0.2 s 内完成）、www 静态服务（6/6 正常）、www 上另一条代理腿 `/mrrc_modern/listen → radio.vlsc.net:8888`（6/6 正常）、hub 侧各种 SNI（`tunnel.*` 与 `<呼号>.*`）/Host 组合（各 6/6 正常）。**失败定位于 `www → hub:9988` 这一跳**。推测与云厂商对单一来源的入方向限流有关，待进一步取证（www 侧 error.log 无上游超时记录 —— 客户端 20 s 先于 nginx 的 60 s 阈值断开）。**当前对策：把边缘定位为备用路径，主路优先** |
+| **边缘路径间歇性无响应（2026-10-01，2026-10-02 定根因）** | 6 次请求 3 次 20 s 无响应，当时只定到 `www → hub:9988` 这一跳、猜是云厂商入方向限流。**真因**：边缘 nginx 那两处指向 hub 的 `proxy_pass` 写的是**裸主机名**（无 `resolver` ⇒ 启动时解析一次），而 hub 已加 AAAA、边缘的 `getaddrinfo` 又按 RFC6724 把 IPv6 排前 ⇒ nginx 选了 hub 的 IPv6，而**该地址当时不可达**（实测 0/4 超时，同机 v4 4/4 通；边缘自身 v6 正常，google 0.1 s）。**修法**：两处 `proxy_pass` 钉为 hub 的 IPv4 `8.160.161.80:9988` 并 reload —— 复测 `/mrrc_portal/` **8/8 200**（修前 3/6 挂死），实例入口 4/4 302。**复现判据**：`getent ahosts portal.mrrc.vlsc.net` 首行是 v6 就说明任何一次 reload 都会踩中。**待办**：hub 的 IPv6 入站仍不可达（阿里云安全组/IPv6 公网带宽，见 V0.19），且 hub 上 `net.ipv6.conf.eth0.accept_ra=0` ⇒ RA 派生的地址与默认路由约 2.5 h 后过期不续（要设 `accept_ra=2` 并持久化）；v6 端到端验通后可改成 upstream 双地址（v6 优先 + 连接超时 3 s 退 v4） |
 | 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
 | 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
 | `curl -sI .../login` 得到 405 | **不是故障**。`-I` 发 HEAD，而登录页只接受 GET。用 `curl -s -o /dev/null -w '%{http_code}'` 拿状态码 |

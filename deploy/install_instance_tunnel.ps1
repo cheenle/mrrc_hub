@@ -94,10 +94,9 @@ icacls $key /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
 
 # ---- 登记：把公钥交给 hub（私钥永不外传）----
 if ($env:MRRC_ENROLL_SECRET) {
-# Default to the 443 edge, not the hub IP on 8899. Measured from a mainland home line: TLS to
-# the hub IP fails on EVERY port right now (portal:8899, portal:8989, tunnel:8899, bg1sb - all
-# curl rc=35), while the overseas 443 edge answers. The design already has this fallback for
-# exactly this reason (SDD R-H13); MRRC_ENROLL_URL overrides it.
+# 门户只有一个地址（V0.21：门户、实例入口与站点合并到同一台机器的 443）。
+# 早先这里有"主路 :8899 + 海外 443 边缘兜底"两条路；合并后第二条不再存在。
+# MRRC_ENROLL_URL 仍可覆盖（自建 hub 的场景）。
     $enrollUrl = "https://portal.mrrc.vlsc.net/enroll"
     if ($env:MRRC_ENROLL_URL) { $enrollUrl = $env:MRRC_ENROLL_URL }
     Write-Host "enrolling the certificate at $enrollUrl"

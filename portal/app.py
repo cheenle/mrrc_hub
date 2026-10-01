@@ -422,7 +422,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                             else "<span style='color:#f87171'>未连接</span>")
                 rows_ = ''.join(
                     f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td><td>{tunnel_cell(p)}</td>"
-                    f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net:8899/' target=_blank>打开入口</a></td></tr>"
+                    f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net/' target=_blank>打开入口</a></td></tr>"
                     for l, p in sorted(entries)) or "<tr><td colspan=4>（注册表为空）</td></tr>"
                 body = ("<h2>实例</h2><table><tr><th>标签</th><th>端口</th><th>隧道</th><th>入口</th></tr>"
                         + rows_ + "</table><p><small>「在线」= hub 回环上该端口可连接 ⇒ frpc 隧道已建立。<br>"

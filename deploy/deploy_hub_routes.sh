@@ -5,7 +5,7 @@
 #
 # Replaces the per-instance vhost with a single wildcard server block:
 #
-#   <name>.mrrc.vlsc.net:9988  →  https://127.0.0.1:<port>  (that instance's tunnel)
+#   <name>.mrrc.vlsc.net  →  https://127.0.0.1:<port>  (that instance's tunnel)
 #
 # The only per-instance fact left is the loopback port its tunnel claims, kept in
 # /etc/mrrc-hub/instances.tsv. Adding instance #2..#200 is a line in that file plus
@@ -37,7 +37,7 @@ if [[ ! -s "$REGISTRY" ]]; then
 #
 # The port must sit inside frps' allowPorts range (see /etc/frp/frps.toml); the
 # instance's frpc claims the same number as its remotePort. Names must be single
-# DNS labels: test1 means https://test1.mrrc.vlsc.net:9988.
+# DNS labels: test1 means https://test1.mrrc.vlsc.net.
 #
 # After editing: sudo gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx
 test1		18800
@@ -64,12 +64,12 @@ server {
 
     # Plain HTTP is not a usable path in the mainland region anyway (R-H13), so
     # this port only points at the TLS one.
-    location / { return 301 https://\$host:9988\$request_uri; }
+    location / { return 301 https://\$host\$request_uri; }
 }
 
 server {
-    listen 9988 ssl;
-    listen [::]:9988 ssl;
+    listen 443 ssl;
+    listen [::] ssl;
     http2 on;
     server_name ~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net\$;
 
@@ -122,5 +122,5 @@ systemctl reload nginx
 echo "==> wildcard routing live"
 echo
 echo "verify:"
-echo "  curl -sk  https://test1.mrrc.vlsc.net:9988/api/health   # 401 (tunnel + instance)"
-echo "  curl -sk  https://nope.mrrc.vlsc.net:9988/             # 404 (unknown instance)"
+echo "  curl -sk  https://test1.mrrc.vlsc.net/api/health   # 401 (tunnel + instance)"
+echo "  curl -sk  https://nope.mrrc.vlsc.net/             # 404 (unknown instance)"

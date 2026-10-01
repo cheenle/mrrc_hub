@@ -405,7 +405,7 @@ def test_status_endpoint_returns_connection_info_only_when_granted():
             check(code == 200 and body.get("status") == "granted", "批准后状态为 granted")
             check(body.get("label") == "bg7zzz" and body.get("port") == 18888, "批准后给出 label 与端口")
             check(len(body.get("enroll_secret", "")) >= 20, "批准后给出一次性登记口令")
-            check(body.get("entry", "").startswith("https://bg7zzz.mrrc.vlsc.net:9988"), "给出入口地址")
+            check(body.get("entry", "").startswith("https://bg7zzz.mrrc.vlsc.net"), "给出入口地址")
         finally:
             httpd.shutdown()
 
@@ -456,7 +456,7 @@ def test_claim_adopts_an_approved_application():
             check(body.get("label") == label and body.get("port") == port, "给出 label 与端口（与分配结果一致）")
             check(body.get("enroll_secret") == secret, "给出登记口令")
             check(bool(body.get("request_token")), "给出申请令牌（此后应用可自行轮询）")
-            check(body.get("entry", "").startswith(f"https://{label}.mrrc.vlsc.net:9988"), "给出入口地址")
+            check(body.get("entry", "").startswith(f"https://{label}.mrrc.vlsc.net"), "给出入口地址")
         finally:
             httpd.shutdown()
 

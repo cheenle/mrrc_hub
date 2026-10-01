@@ -3,7 +3,7 @@
 # around a mainland-China region's 80/443 reality.
 #
 #   sudo ./deploy_www_edge.sh <instance-fqdn> [hub-upstream-host:port] [mode]
-#   sudo ./deploy_www_edge.sh test1.mrrc.vlsc.net tunnel.mrrc.vlsc.net:9988 redirect
+#   sudo ./deploy_www_edge.sh test1.mrrc.vlsc.net tunnel.mrrc.vlsc.net redirect
 #
 # MODE
 #   redirect (default) — https://www.vlsc.net/mrrc_modern/<name>/… 302s to the
@@ -33,7 +33,7 @@
 set -euo pipefail
 
 SUBDOMAIN="${1:?usage: deploy_www_edge.sh <instance-fqdn> [hub-upstream] [redirect|proxy]}"
-UPSTREAM="${2:-tunnel.mrrc.vlsc.net:9988}"
+UPSTREAM="${2:-tunnel.mrrc.vlsc.net}"
 MODE="${3:-redirect}"
 case "$MODE" in
 redirect | proxy) ;;
@@ -99,11 +99,11 @@ ${MARKER_START}
     # \`return\` never executes and the request falls through to the static root
     # (measured — it 404'd, with the error log pointing at /var/www/vlsc.net/login).
     location = ${ENTRY_PATH} {
-        return 302 https://${SUBDOMAIN}:9988/;
+        return 302 https://${SUBDOMAIN}/;
     }
     location ^~ ${ENTRY_PATH}/ {
         if (\$request_uri ~ ^${ENTRY_PATH}(?<rest>/.*)\$) {
-            return 302 https://${SUBDOMAIN}:9988\$rest;
+            return 302 https://${SUBDOMAIN}\$rest;
         }
     }
     # ── end MRRC Cloud Hub edge ──
@@ -219,7 +219,7 @@ echo "==> nginx reloaded (mode: $MODE)"
 echo
 if [[ "$MODE" == "redirect" ]]; then
 	echo "verify:"
-	echo "  curl -sI https://www.vlsc.net${ENTRY_PATH}/login   # 302 → https://${SUBDOMAIN}:9988/login"
+	echo "  curl -sI https://www.vlsc.net${ENTRY_PATH}/login   # 302 → https://${SUBDOMAIN}/login"
 	echo "  curl -skL -o /dev/null -w '%{http_code}\\n' https://www.vlsc.net${ENTRY_PATH}/login   # 200"
 else
 	echo "verify:"

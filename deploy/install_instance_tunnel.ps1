@@ -95,7 +95,7 @@ icacls $key /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
 # ---- 登记：把公钥交给 hub（私钥永不外传）----
 if ($env:MRRC_ENROLL_SECRET) {
 # Default to the 443 edge, not the hub IP on 8899. Measured from a mainland home line: TLS to
-# the hub IP fails on EVERY port right now (portal:8899, portal:8989, tunnel:8899, bg1sb:9988 - all
+# the hub IP fails on EVERY port right now (portal:8899, portal:8989, tunnel:8899, bg1sb - all
 # curl rc=35), while the overseas 443 edge answers. The design already has this fallback for
 # exactly this reason (SDD R-H13); MRRC_ENROLL_URL overrides it.
     $enrollUrl = "https://www.vlsc.net/mrrc_portal/enroll"
@@ -228,9 +228,9 @@ Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 4
 
 Write-Host ""
-Write-Host "==> $Name -> https://$fqdn`:9988 (local 127.0.0.1:$LocalPort)"
+Write-Host "==> $Name -> https://$fqdn` (local 127.0.0.1:$LocalPort)"
 Write-Host "check:"
 Write-Host "  Get-Content '$DataDir\frpc-$Name.log' -Tail 5     # want: login to server success / start proxy success"
 Write-Host "  Get-ScheduledTask '$taskName' | Get-ScheduledTaskInfo"
-Write-Host "  curl.exe -sk https://$fqdn`:9988/api/health        # 401 once the radio server is up"
+Write-Host "  curl.exe -sk https://$fqdn`/api/health        # 401 once the radio server is up"
 Write-Host "  (To remove:  Stop-ScheduledTask '$taskName'; Unregister-ScheduledTask -TaskName '$taskName' -Confirm:`$false)"

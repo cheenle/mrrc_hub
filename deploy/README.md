@@ -11,7 +11,7 @@
 | # | 漂移 | 后果 |
 | --- | --- | --- |
 | **X1** | `deploy_hub_routes.sh` 生成**两个** server block（`listen 8899;` 明文 + 301、`listen 9988 ssl`），而现网是**一个** block、且 `8899` 已是 **TLS**；且它生成的 `proxy_ssl_name` 写死 `radio.vlsc.net`、信任源写死系统 CA，**不认识 `$mrrc_tls_name` 与 `trust-bundle.pem`** | 重跑会**三重倒退**：① 8899 从 TLS 退回明文 → 境内被改写（R-H13 的失效模式）；② 抹掉**逐实例证书校验**，退回"所有实例共用 `radio.vlsc.net`"；③ 抹掉**信任包**，自签实例证书立即 502。另：脚本头部注释仍写 "currently self-signed"，现网已是真 Let's Encrypt |
-| **X3** | （2026-10-02）边缘 nginx 里指向 hub 的两处 `proxy_pass`（`/mrrc_modern/BG1SB/` 与 `/mrrc_portal/`）现为 **hub 的 IPv4 字面量** `8.160.161.80:9988`，不是脚本里的主机名 | 主机名 + hub 的 AAAA ⇒ nginx 选中不可达的 IPv6，任何 reload 都会把边缘路径打黑（实测 0/4；见 SDD/12 §12.8 排障增补）。hub 的 v6 验通后可改成 upstream 双地址（v6 优先 + 3 s 退 v4）；**别在没重测前把这两行改回主机名** |
+| **X3** | （2026-10-02）边缘 nginx 里指向 hub 的两处 `proxy_pass`（`/mrrc_modern/BG1SB/` 与 `/mrrc_portal/`）现为 **hub 的 IPv4 字面量** `8.160.161.80`，不是脚本里的主机名 | 主机名 + hub 的 AAAA ⇒ nginx 选中不可达的 IPv6，任何 reload 都会把边缘路径打黑（实测 0/4；见 SDD/12 §12.8 排障增补）。hub 的 v6 验通后可改成 upstream 双地址（v6 优先 + 3 s 退 v4）；**别在没重测前把这两行改回主机名** |
 | **X2** | `deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | 重跑会把现网形态降级为 302 或子域代理，丢掉"标准端口 + 真证书 + 前缀透明"三项收益。www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的 |
 
 > **X1 现在是两者中最危险的**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
@@ -46,7 +46,7 @@
    | 端口 | 用途 |
    | --- | --- |
    | **8899** | 用户入口的明文口（只做 301 跳转；**不能**用于 ACME，见下） |
-   | **9988** | 用户入口的 TLS 口 —— 用户实际访问 `https://test1.mrrc.vlsc.net:9988` |
+   | **9988** | 用户入口的 TLS 口 —— 用户实际访问 `https://test1.mrrc.vlsc.net` |
    | **8989** | frps 控制口，实例出站连它 |
 
    非标端口的代价已写进设计记录（AD-H02 的 port 修订、风险 R-H12）：**入口 URL 带端口**，
@@ -69,12 +69,12 @@
   │  https://test1.mrrc.vlsc.net   ← TLS 由 hub 的 nginx 终结（Let's Encrypt，HTTP-01）
   ▼
 Hub ECS 8.160.161.80
-  nginx :9988 server_name test1.mrrc.vlsc.net
+  nginx  server_name test1.mrrc.vlsc.net
      └─ proxy_pass https://127.0.0.1:18888
            proxy_ssl_verify on                       ← 这一步是刻意的：
            proxy_ssl_name radio.vlsc.net                B2 现状是 proxy_ssl_verify off，
            proxy_ssl_trusted_certificate <系统 CA 库>    hub 侧必须开着校验证书
-  nginx :8899 301 → https://…:9988（明文口只跳转）
+  nginx :8899 301 → https://…（明文口只跳转）
   frps :8989  bindPort（实例出站连它；token 鉴权 + TLS）
        :18888 tcp 代理端口（**只绑 127.0.0.1**，不暴露到公网）
        ▲
@@ -103,15 +103,15 @@ cp deploy/frpc-instance.toml.example ~/mrrc-frpc.toml   # 填 token
 frpc -c ~/mrrc-frpc.toml
 
 # 3) 验证
-curl -sI https://test1.mrrc.vlsc.net:9988/login            # 期望 200（自签阶段加 -k）
-curl -s  https://test1.mrrc.vlsc.net:9988/api/health       # 期望 401（鉴权生效）
+curl -sI https://test1.mrrc.vlsc.net/login            # 期望 200（自签阶段加 -k）
+curl -s  https://test1.mrrc.vlsc.net/api/health       # 期望 401（鉴权生效）
 ```
 
 ## 这次验证要检查什么（不只是"能连上"）
 
 | # | 检查项 | 期望 | 对应设计主张 |
 | --- | --- | --- | --- |
-| V-a | 登录页可达 | `https://test1.mrrc.vlsc.net:9988/login` 200 | AD-H01 / SC-H1（客户侧零入站） |
+| V-a | 登录页可达 | `https://test1.mrrc.vlsc.net/login` 200 | AD-H01 / SC-H1（客户侧零入站） |
 | V-b | 五个 WS 端点全通 | `/WSradio` `/WSspectrum` `/WSaudioRX` `/WSaudioTX` `/WSatr1000` 均完成握手（浏览器不复现"控制/频谱在、音频缺席"） | 透明代理契约 |
 | V-c | **WS URL 里没有 `?token=`** | 浏览器 DevTools 的 Network→WS 请求 URL 无 token；`journalctl -u nginx` grep `token=` 无命中 | AD-H07 / NFR-H020 |
 | V-d | **上游证书校验为真** | nginx 配置无 `proxy_ssl_verify off`；证书不匹配时链路应失败（可临时把 `proxy_ssl_name` 改错验证它真的会失败） | NFR-H021 |
@@ -171,8 +171,8 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 避免两个客户端抢同一个名字导致抖动。**实例自己的电台服务不归它管** —— 隧道照常连，实例没起来就 502。
 
 **实测**：服务日志 `login to server success` + `start proxy success`；
-经通配 vhost `test1.mrrc.vlsc.net:9988` → `/api/health` **401**、`/login` **200**；
-`nope.mrrc.vlsc.net:9988` → **404**（未知实例不误路由，NFR-H022）。
+经通配 vhost `test1.mrrc.vlsc.net` → `/api/health` **401**、`/login` **200**；
+`nope.mrrc.vlsc.net` → **404**（未知实例不误路由，NFR-H022）。
 
 **本阶段已知限制（阶段 2 替换）**：**隧道自身的认证**仍是 frp 的**单个共享 token** ——
 这是 frp 的模型，也是 hub SDD 把 frp 定位为 MVP 验证通道、把设备 mTLS 留给自研 Agent 的原因（AD-H11/AD-H13）。
@@ -189,12 +189,12 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 
 | | 主路（低延迟） | 退化路（兼容性） |
 | --- | --- | --- |
-| URL | `https://<呼号>.mrrc.vlsc.net:9988`（或 `:8899`） | `https://www.vlsc.net/mrrc_modern/<呼号大写>/` |
+| URL | `https://<呼号>.mrrc.vlsc.net`（或 `:8899`） | `https://www.vlsc.net/mrrc_modern/<呼号大写>/` |
 | 落点 | 阿里云 hub（乌兰察布） | 海外 <www.vlsc.net> 的 443 **路径代理**，反代回 hub 的 9988 |
 | 证书 | **真 Let's Encrypt**（`*.mrrc.vlsc.net`，DNS-01，2026-09-30 → 2026-12-29，每日续期） | **真证书**（www 上 certbot HTTP-01，80/443 在此可用） |
 | 实测 RTT | **0.13 s**（`/login`） | **0.69 s**（`/login`，多一跳海外往返） |
 | 适用 | 绝大多数用户 | 只放行 80/443 出站的网络（公司/访客 Wi-Fi） |
-| 可用性 | 多次实测均正常 | ⚠️ **2026-10-01 复测为间歇可用**（6 次中 3 次 20 s 无响应）；失败在 `www → hub:9988` 这一跳，详见 `SDD/12 §12.8` 排障增补 |
+| 可用性 | 多次实测均正常 | ⚠️ **2026-10-01 复测为间歇可用**（6 次中 3 次 20 s 无响应）；失败在 `www → hub` 这一跳，详见 `SDD/12 §12.8` 排障增补 |
 
 > 脚本里的 `proxy`（**子域**）模式 **不是**现网形态 —— 现网用的是第三种 `path proxy`。
 > 见上方「⚠️ 脚本与现网漂移」X2。
@@ -213,7 +213,7 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 ssh hub 'sudo cat /etc/mrrc-hub/tls/fullchain.pem' | ssh www 'sudo tee /etc/nginx/mrrc-hub-ca.pem'
 # 2) 推送并执行（幂等、marker 分块替换、改前备份、nginx -t 后才 reload）
 scp deploy/deploy_www_edge.sh www:/tmp/
-ssh www 'sudo bash /tmp/deploy_www_edge.sh test1.mrrc.vlsc.net tunnel.mrrc.vlsc.net:9988'
+ssh www 'sudo bash /tmp/deploy_www_edge.sh test1.mrrc.vlsc.net tunnel.mrrc.vlsc.net'
 ```
 
 **验证结果（经 www 全程实测，2026-09-30）**：`/login` 200、`/api/health` 401、`/listen` 302；
@@ -233,12 +233,12 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 已验证（2026-09-30 真实公网，安全组放行后）
 
-安全组放行 8899/9988/8989 之后，**真实公网路径**（本机 → hub nginx:9988 → frps:8989 → frpc → 实例）
+安全组放行 8899/9988/8989 之后，**真实公网路径**（本机 → hub nginx → frps:8989 → frpc → 实例）
 实测通过，无 SSH 转发、无端口映射、客户侧零入站：
 
 | 检查 | 结果 |
 | --- | --- |
-| 命名 | 实例入口 `test1.mrrc.vlsc.net:9988`；隧道控制 `tunnel.mrrc.vlsc.net:8989`（均走 `*.mrrc.vlsc.net` 通配） |
+| 命名 | 实例入口 `test1.mrrc.vlsc.net`；隧道控制 `tunnel.mrrc.vlsc.net:8989`（均走 `*.mrrc.vlsc.net` 通配） |
 | 边缘 | `/login` **200**、`/api/health` **401**、`/listen` **302**（未鉴权跳登录） |
 | 公网往返 | 家宽 → 乌兰察布 → 隧道 → 家宽，**118–168 ms** |
 | 上游证书校验 | 对实例的**真 LE 证书**校验通过（校验关闭时才可能拿到 502 之外的结果） |
@@ -268,7 +268,7 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 | 检查 | 结果 |
 | --- | --- |
 | 隧道建立 | frpc `login to server success` + `[mrrc-test1] start proxy success` ✓ |
-| TLS 终结 + 子域 vhost | `https://test1.mrrc.vlsc.net:9988/login` → **200**；`/api/health` → **401** ✓ |
+| TLS 终结 + 子域 vhost | `https://test1.mrrc.vlsc.net/login` → **200**；`/api/health` → **401** ✓ |
 | **上游证书校验为真（V-d）** | 直连一个"CN 错误的自签上游"→ 200，经 nginx → **502**；换成实例的**真 LE 证书**后 → **401/200 正常通过**。两向都测过：该校验既会拦、也不会误拦 ✓ |
 | **WS 透明性（V-b）** | 裸握手矩阵（直连 vs 经隧道）：无凭据 **403 / 403**、Cookie **101 / 101**、`?token=` **101 / 101** —— 升级与自定义关闭语义完全一致 ✓ |
 | **令牌传输（V-c 部分）** | 前端已不再拼 `?token=`；本次 WS 用 Cookie 头即可通过（AD-024 的 cookie 路径经隧道有效）✓ |

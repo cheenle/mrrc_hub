@@ -511,7 +511,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                         "port": int(app.port or 0),
                         "enroll_secret": app.enroll_secret,
                         "hub_token": _frps_token(),
-                        "entry": (f"https://{app.label}.mrrc.vlsc.net:9988/" if app.label else ""),
+                        "entry": (f"https://{app.label}.mrrc.vlsc.net/" if app.label else ""),
                         "request_token": app.request_token,
                     })
 
@@ -531,7 +531,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                         "label": app.label if app.status == "granted" else "",
                         "port": int(app.port or 0) if app.status == "granted" else 0,
                         "enroll_secret": app.enroll_secret if app.status == "granted" else "",
-                        "entry": (f"https://{app.label}.mrrc.vlsc.net:9988/"
+                        "entry": (f"https://{app.label}.mrrc.vlsc.net/"
                                   if app.status == "granted" and app.label else ""),
                         # 隧道登录用的 frps 令牌。租户拿不到运维密钥，所以批准后随接入信息一起给
                         # （与登记口令同一信任级别；共享令牌这个偏离本身记在 AD-H11 里）。

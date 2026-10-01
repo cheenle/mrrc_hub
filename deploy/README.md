@@ -352,7 +352,7 @@ www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续�
 ## 路由重生成现在是自动的（2026-10-01 起）
 
 `gen_hub_routes.py` 过去要人手工跑一次（脚本会把那条 root 命令交给运维）。现在 hub 上装的是
-**root 的 systemd path 单元**（`deploy/systemd/mrrc-hub-routes.{path,service}` + `mrrc-hub-routes.sh`）：
+**root 的 systemd timer**（`deploy/systemd/mrrc-hub-routes.{timer,service}` + `mrrc-hub-routes.sh`）：
 
 ```
 证书或注册表一变 → mrrc-hub-routes.service（oneshot，root）
@@ -361,8 +361,9 @@ www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续�
 ```
 
 - 为什么不放进 Portal 服务里：它接收公网提交，**不该有** reload nginx 的权限（AD 里的分工）。
-- `StartLimitIntervalSec=0`：一次写入会触发多个 path 事件，systemd 默认启动限流会把它标成
-  failed（实测踩过 ✓），而脚本幂等且不到一秒 ⇒ 关掉限流 ✓。
+- 为什么是 **timer** 而不是 path 单元：systemd 的 `PathChanged` 也包含**属性变化（含 atime）**，
+  而服务本来就要读证书目录 ⇒ 会不断触发自己（实测 2 分钟 232 次 ✗）。30 秒一次的 timer 只花一次
+  glob + 一次哈希比较 ✓，脚本**只在生成物真的变了**才 `nginx -t` + reload ✓（所以常态下不 reload ✓）。
 - 新装 hub：`bootstrap-hub.sh` 会一并安装 ✓（不会再漏 ✓）。
 - 验收：`touch /etc/mrrc-hub/instance-certs/<名>.pem` ⇒ 看
   `journalctl -u mrrc-hub-routes.service` 出现 `nginx -t passed; reloading` ✓。

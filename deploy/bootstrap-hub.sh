@@ -284,7 +284,8 @@ EOF
 # 也不应该有）。装了它以后，批准一个实例就不再需要任何人手工敲命令。
 install -m 755 "$SELF_DIR/mrrc-hub-routes.sh" /usr/local/sbin/mrrc-hub-routes.sh
 install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.service" /etc/systemd/system/mrrc-hub-routes.service
-install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.path" /etc/systemd/system/mrrc-hub-routes.path
+install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.timer" /etc/systemd/system/mrrc-hub-routes.timer
+rm -f /etc/systemd/system/mrrc-hub-routes.path   # 早期版本用过 path 单元，会自激（见脚本注释）
 systemctl daemon-reload
-systemctl enable --now mrrc-hub-routes.path
+systemctl enable --now mrrc-hub-routes.timer
 echo "routes auto-regeneration: enabled"

@@ -94,7 +94,11 @@ server {
         proxy_ssl_verify_depth 2;
         proxy_ssl_name ${UPSTREAM_SSL_NAME};
         proxy_ssl_server_name on;
-        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        # The trust bundle, not the system CAs alone: an instance presents its own self-signed
+        # certificate, which is pinned here (the generator merges those on top of the system
+        # set). Verifying against the system store only rejects every instance with error 18
+        # and turns the entry into a 502 that looks like a dead tunnel.
+        proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem;
         proxy_ssl_session_reuse on;
 
         proxy_set_header Host \$host;

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   在 Windows 实例上安装 Cloud Hub 隧道（与 install_instance_tunnel.sh 对等）。
 
@@ -94,7 +94,12 @@ icacls $key /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
 
 # ---- 登记：把公钥交给 hub（私钥永不外传）----
 if ($env:MRRC_ENROLL_SECRET) {
-    $enrollUrl = if ($env:MRRC_ENROLL_URL) { $env:MRRC_ENROLL_URL } else { "https://portal.mrrc.vlsc.net:8899/enroll" }
+# Default to the 443 edge, not the hub IP on 8899. Measured from a mainland home line: TLS to
+# the hub IP fails on EVERY port right now (portal:8899, portal:8989, tunnel:8899, bg1sb:9988 - all
+# curl rc=35), while the overseas 443 edge answers. The design already has this fallback for
+# exactly this reason (SDD R-H13); MRRC_ENROLL_URL overrides it.
+    $enrollUrl = "https://www.vlsc.net/mrrc_portal/enroll"
+    if ($env:MRRC_ENROLL_URL) { $enrollUrl = $env:MRRC_ENROLL_URL }
     Write-Host "enrolling the certificate at $enrollUrl"
     try {
         $r = Invoke-RestMethod -Method Post -Uri $enrollUrl -TimeoutSec 30 -Body @{
@@ -137,7 +142,17 @@ if ($running) {
         Write-Host "  could not find the launcher next to the fleet dir; start the app by hand so it reads the new variables"
     }
 } else {
-    Write-Host "the app was not running; start it now so it reads the new environment variables"
+    # 应用没在运行 —— 不能只说一句"请自己启动"：租户从开始菜单启动会继承 Explorer 的旧环境块，
+    # 于是又用回它自己那张 localhost 证书（实测正是这条路径把人卡在 502）。
+    # 就用本进程（已带新环境）把它拉起来。
+    Write-Host "the app is not running; starting it now with the new environment"
+    $launcher = Join-Path (Split-Path -Parent $FleetDir) "MRRC-Modern-Launcher.exe"
+    if (Test-Path $launcher) {
+        Start-Process -FilePath $launcher -WorkingDirectory (Split-Path -Parent $FleetDir)
+        Write-Host "  started the launcher; it will serve the instance certificate"
+    } else {
+        Write-Host "  launcher not found next to the fleet dir - start the app by hand"
+    }
 }
 
 # ---- frpc 配置 ----

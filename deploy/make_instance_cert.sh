@@ -58,7 +58,7 @@ echo "               （hub 侧只需公钥；私钥永远不离开实例）"
 # ---- 登记：把**公钥**交给 hub（私钥永不外传）----
 # 口令来自 Portal 的"分配入口"（运维页显示），一次性；没有口令时跳过并说明后果。
 if [[ -n "${MRRC_ENROLL_SECRET:-}" ]]; then
-	url="${MRRC_ENROLL_URL:-https://portal.mrrc.vlsc.net:8899/enroll}"
+	url="${MRRC_ENROLL_URL:-https://www.vlsc.net/mrrc_portal/enroll}"
 	echo "登记到 hub: $url"
 	if out="$(curl -fsS --retry 3 --connect-timeout 20 \
 			-X POST --data-urlencode "callsign=$NAME" \

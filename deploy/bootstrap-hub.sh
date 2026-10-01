@@ -277,3 +277,14 @@ temporarily set \`proxy_ssl_name example.com;\`, reload, and confirm the request
 now FAILS. A verification setting nobody has seen fail is not a verification
 setting — that is how \`proxy_ssl_verify off\` survived in B2.
 EOF
+
+# ---- 路由自动重生成（root）----
+# 证书或注册表一变就重生成通配路由与信任包，nginx -t 过了才 reload。
+# 放在 root 的 path 单元里，而不是让接收证书的 Portal 服务去 reload nginx（它没有那个权限，
+# 也不应该有）。装了它以后，批准一个实例就不再需要任何人手工敲命令。
+install -m 755 "$SELF_DIR/mrrc-hub-routes.sh" /usr/local/sbin/mrrc-hub-routes.sh
+install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.service" /etc/systemd/system/mrrc-hub-routes.service
+install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.path" /etc/systemd/system/mrrc-hub-routes.path
+systemctl daemon-reload
+systemctl enable --now mrrc-hub-routes.path
+echo "routes auto-regeneration: enabled"

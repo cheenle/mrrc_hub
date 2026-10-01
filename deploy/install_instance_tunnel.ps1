@@ -108,7 +108,7 @@ if ($env:MRRC_ENROLL_SECRET) {
             cert     = (Get-Content $crt -Raw)
         }
         Write-Host "enrolled for: $($r.names -join ', ')"
-        Write-Host "on the hub, as root: $($r.next_step)"
+        Write-Host "the hub applies this automatically; if that hub lacks the watcher, hand this to the operator: $($r.next_step)"
     } catch {
         Write-Warning "enrollment failed: $($_.Exception.Message)"
         Write-Warning "the certificate is on disk; re-run this script once the hub is reachable (idempotent)"

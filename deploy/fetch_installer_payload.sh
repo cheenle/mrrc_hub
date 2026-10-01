@@ -105,5 +105,29 @@ else
 	echo "    先用 --record-openssl <url> <平台>/<文件名> 记一条并人工确认来源" >&2
 fi
 
+# ---- 实例侧脚本：与二进制同源、同级，且必须是"这次构建的代码" ----
+# 只放二进制是不够的：安装器脚本版本落后，租户就会装出一个登记不上、或应用侧环境没接线的
+# 实例 —— 与发布二进制是同一类错误。脚本直接取自本目录（mrrc_hub/deploy，权威副本），
+# 每个平台放它要用的那份：Windows 用 .ps1，macOS/Linux 用 .sh 一族（后者会调用
+# wire_instance_env.sh，所以这两个必须同目录，否则安装器找不到它）。
+IFS=',' read -ra PLIST <<< "$PLATFORMS"
+for plat in "${PLIST[@]}"; do
+	mkdir -p "$OUT/$plat"
+	case "$plat" in
+		windows-*)
+			for s in install_instance_tunnel.ps1; do
+				install -m 644 "$SELF_DIR/$s" "$OUT/$plat/$s"
+				echo "  ✓ $plat/$s（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
+			done
+			;;
+		*)
+			for s in install_instance_tunnel.sh wire_instance_env.sh make_instance_cert.sh; do
+				install -m 755 "$SELF_DIR/$s" "$OUT/$plat/$s"
+				echo "  ✓ $plat/$s（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
+			done
+			;;
+	esac
+done
+
 echo "取件完成: $OUT"
 find "$OUT" -type f -maxdepth 2 | sort | sed 's/^/  /'

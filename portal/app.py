@@ -22,6 +22,7 @@ import hmac
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -41,6 +42,76 @@ DEFAULT_REGISTRY = os.environ.get("MRRC_PORTAL_REGISTRY", "/etc/mrrc-hub/instanc
 DEFAULT_CALLSIGN_DB = os.environ.get("MRRC_PORTAL_CALLSIGN_DB", "/etc/mrrc-hub/callsigns.txt")
 DEFAULT_TOKEN_FILE = os.environ.get("MRRC_PORTAL_TOKEN_FILE", "/etc/mrrc-hub/portal.token")
 DEFAULT_CLUBLOG = os.environ.get("MRRC_PORTAL_CLUBLOG", "/var/lib/mrrc-hub/portal/clublog_users.json")
+DEFAULT_CERT_DIR = os.environ.get("MRRC_PORTAL_CERT_DIR", "/etc/mrrc-hub/instance-certs")
+
+# 页面外壳与 www.vlsc.net 设计系统同 token（黑底 / 青 accent / Inter），
+# 但样式内联、不外链 CSS —— 门户自身保持零依赖，www 不可用时注册页仍完整可用。
+_PORTAL_CSS = """
+:root{--accent:#22d3ee;--bg:#000;--bg2:#0d1117;--card:rgba(255,255,255,.03);
+--tx:#fff;--tx2:#8899aa;--txm:#5c6370;--bd:rgba(255,255,255,.08);}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx2);
+font:15px/1.7 'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;}
+.p-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
+max-width:960px;margin:0 auto;padding:1.5rem 1.25rem .25rem;}
+.p-brand{color:var(--tx);text-decoration:none;font-weight:700;font-size:1.1rem;letter-spacing:-.02em;}
+.p-brand em{color:var(--accent);font-style:normal;}
+.p-crumb{color:var(--txm);font-size:.8125rem;}
+.p-main{max-width:960px;margin:0 auto;padding:.75rem 1.25rem 2.5rem;}
+h1{color:var(--tx);font-size:1.7rem;letter-spacing:-.02em;margin:1.1rem 0 .6rem;}
+h2{color:var(--tx);font-size:1.15rem;margin:2.2rem 0 .6rem;padding-bottom:.45rem;border-bottom:1px solid var(--bd);}
+p{margin:.7rem 0}
+a{color:var(--accent)}
+code{font-family:'JetBrains Mono','SF Mono',monospace;font-size:.85em;
+background:rgba(34,211,238,.09);color:#7dd3fc;padding:.12em .4em;border-radius:5px;}
+table{border-collapse:collapse;width:100%;margin:1rem 0 1.6rem;background:var(--card);
+border:1px solid var(--bd);border-radius:10px;overflow:hidden;}
+td,th{border-bottom:1px solid var(--bd);padding:.55rem .8rem;text-align:left;font-size:.875rem;color:var(--tx2);}
+th{color:var(--txm);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;background:rgba(255,255,255,.02);}
+tr:last-child td{border-bottom:0}
+td b{color:var(--tx)}
+input,button{font:inherit;padding:.55rem .8rem;border-radius:8px;border:1px solid var(--bd);
+background:var(--bg2);color:var(--tx);}
+input::placeholder{color:var(--txm)}
+input:focus{outline:none;border-color:var(--accent);}
+button{background:var(--accent);border-color:var(--accent);color:#000;font-weight:600;cursor:pointer;padding:.55rem 1.1rem;}
+button:hover{filter:brightness(1.1)}
+form{margin:.4rem 0}
+.msg{background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.35);color:#34d399;
+padding:.6rem .9rem;border-radius:8px;}
+small{color:var(--txm);font-size:.8125rem;line-height:1.7;}
+.p-foot{max-width:960px;margin:0 auto;padding:1.2rem 1.25rem 2.5rem;border-top:1px solid var(--bd);
+color:var(--txm);font-size:.8125rem;}
+.p-apply{display:grid;gap:.6rem;grid-template-columns:repeat(3,1fr);margin:1rem 0;}
+.p-apply button{grid-column:1/-1;}
+@media(max-width:720px){.p-apply{grid-template-columns:1fr}}
+"""
+
+
+def _page(title: str, body: str, noindex: bool = False) -> str:
+    robots = "<meta name=robots content=noindex>\n" if noindex else ""
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#000000">
+{robots}<title>{title}</title>
+<style>{_PORTAL_CSS}</style>
+</head>
+<body data-site="hub">
+<header class="p-head">
+  <a class="p-brand" href="https://www.vlsc.net/mrrc_hub/">📡 MRRC <em>Cloud Hub</em></a>
+  <span class="p-crumb">{html.escape(title)}</span>
+</header>
+<main class="p-main">
+{body}
+</main>
+<footer class="p-foot">呼号即身份 · 核验通过才授予访问 ·
+<a href="https://www.vlsc.net/mrrc_hub/">文档站</a></footer>
+<script src="https://www.vlsc.net/js/global-nav.js?v=8" defer></script>
+</body>
+</html>"""
 
 
 def build_verifier(callsign_db: str | Path = DEFAULT_CALLSIGN_DB,
@@ -136,6 +207,32 @@ def _clublog_info() -> str:
     size = path.stat().st_size
     age_h = (time.time() - path.stat().st_mtime) / 3600
     return f"{size / 1048576:.1f} MB，更新于 {age_h:.1f} 小时前" + ("　⚠️ 超过 48 小时" if age_h > 48 else "")
+
+
+def cert_names(pem_path) -> set:
+    """用 openssl 读证书的 subject CN 与 SAN 里的 DNS 名。
+
+    本服务不引第三方库，而 stdlib 又不能解析证书 ⇒ 调 openssl（hub 一定有）。
+    读失败返回空集合，调用方据此拒绝登记。
+    """
+    names: set = set()
+    try:
+        out = subprocess.run(["openssl", "x509", "-in", str(pem_path), "-noout", "-subject", "-ext", "subjectAltName"],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode != 0:
+            return names
+        for line in out.stdout.splitlines():
+            if line.lower().startswith("subject="):
+                m = re.search(r"CN\s*=\s*([^/,\s]+)", line)
+                if m:
+                    names.add(m.group(1).strip().lower())
+            elif "dns:" in line.lower():
+                names.update(part.strip().lower() for part in re.findall(r"DNS:([^,\s]+)", line, re.I))
+    except Exception as exc:                            # noqa: BLE001
+        # 静默吞掉这里的原因曾让排查绕了两轮：名字解析失败会被下游当成"证书名字不符"。
+        # 现在把原因写进日志（journalctl -u mrrc-portal 可见）。
+        print(f"⚠️ cert_names 解析失败: {exc!r}", file=sys.stderr)
+    return names
 
 
 def make_handler(portal: Portal, token: str, base: str = ""):
@@ -257,7 +354,10 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                         out.append(f"<tr><td><code>{html.escape(c)}</code></td><td>{html.escape(a['status'])}</td>"
                                    f"<td>{html.escape(a.get('product') or '主产品')}</td>"
                                    f"<td>{html.escape(a.get('label') or '—')}</td><td>{a.get('port') or '—'}</td>"
-                                   f"<td>{html.escape((a.get('evidence') or '')[:70])}</td><td>{actions(c)}</td></tr>")
+                                   f"<td>{html.escape((a.get('evidence') or '')[:70])}"
+                                   + (f"<br><small>登记口令: <code>{html.escape(a['enroll_secret'])}</code></small>"
+                                      if a.get('enroll_secret') and a['status'] == 'granted' else '')
+                                   + f"</td><td>{actions(c)}</td></tr>")
                     return ''.join(out) or "<tr><td colspan=7>（无）</td></tr>"
                 body = "<h2>申请（全部状态）</h2><table><tr><th>呼号</th><th>状态</th><th>产品</th><th>标签</th><th>端口</th><th>依据</th><th>动作</th></tr>" \
                     + rows({"applied"}, lambda c: act("/verify", c, "核验通过", "<input type=hidden name=evidence value='人工核验通过'>") + act("/reject", c, "拒绝", "<input type=hidden name=reason value='材料不足'>")) \
@@ -270,9 +370,9 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     import socket
                     try:
                         with socket.create_connection(("127.0.0.1", int(port)), timeout=1.5):
-                            return "<b style='color:#2e7d32'>在线</b>"
+                            return "<b style='color:#34d399'>在线</b>"
                     except OSError:
-                        return "<span style='color:#b71c1c'>未连接</span>"
+                        return "<span style='color:#f87171'>未连接</span>"
                 rows_ = ''.join(
                     f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td><td>{probe(p)}</td>"
                     f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net:8899/' target=_blank>打开入口</a></td></tr>"
@@ -299,32 +399,24 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                         f"<p><small>hub 每天 04:30 从 www 拉取（受限命令：只能读那一个文件）。<br>"
                         f"立即刷新：<code>sudo /usr/local/sbin/mrrc-portal-sync-clublog.sh</code></small></p>")
 
-            return f"""<!doctype html><meta charset="utf-8"><meta name=robots content=noindex>
-<title>MRRC Portal — 后台管理</title>
-<style>body{{font:15px/1.6 -apple-system,sans-serif;max-width:1100px;margin:28px auto;padding:0 16px}}
-table{{border-collapse:collapse;width:100%;margin:10px 0 22px}}td,th{{border-bottom:1px solid #ddd;padding:6px;text-align:left;font-size:14px}}
-button{{font:inherit;padding:5px 11px;margin-right:4px}}code{{background:#f4f4f4;padding:1px 4px}}
-.msg{{background:#e8f5e9;border:1px solid #a5d6a7;padding:8px 12px}}h2{{margin-top:22px}}</style>
-<h1>呼号自助 — 后台管理</h1>
-{f'<p class=msg>{html.escape(msg)}</p>' if msg else ''}
-<p>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('审计','audit')}{nav('呼号库','clublog')}</p>
-{body}"""
+            return _page("MRRC Portal — 后台管理",
+                         "<h1>呼号自助 — 后台管理</h1>"
+                         + (f'<p class=msg>{html.escape(msg)}</p>' if msg else '')
+                         + f"<p>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('审计','audit')}{nav('呼号库','clublog')}</p>"
+                         + body, noindex=True)
 
         # ---- routes ----        # ---- routes ----
         def do_GET(self):                        # noqa: N802
             if self._route() == "/admin":
-                return self._send(200, f"""<!doctype html><meta charset="utf-8"><meta name=robots content=noindex>
-<title>MRRC Portal — 运维登录</title>
-<style>body{{font:15px/1.6 -apple-system,sans-serif;max-width:520px;margin:60px auto;padding:0 16px}}
-input,button{{font:inherit;padding:8px;width:100%;box-sizing:border-box}}button{{margin-top:10px}}
-code{{background:#f4f4f4;padding:1px 4px}}</style>
-<h1>运维审批</h1>
-<form method=post action=admin>
-  <input type=password name=token placeholder="运维令牌（sudo cat /etc/mrrc-hub/portal.token）" autofocus>
-  <button>进入</button>
-</form>
-<p><small>令牌只随表单提交，不进 URL ✓ 本页与审批页均 <code>noindex</code> ✓</small></p>""",
-                               ctype="text/html; charset=utf-8")
+                return self._send(200, _page(
+                    "MRRC Portal — 运维登录",
+                    "<h1>运维审批</h1>"
+                    "<form method=post action=admin>"
+                    "<input type=password name=token placeholder=\"运维令牌（sudo cat /etc/mrrc-hub/portal.token）\" autofocus>"
+                    "<button>进入</button>"
+                    "</form>"
+                    "<p><small>令牌只随表单提交，不进 URL ✓ 本页与审批页均 <code>noindex</code> ✓</small></p>",
+                    noindex=True), ctype="text/html; charset=utf-8")
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})
             rows = "".join(
@@ -332,24 +424,20 @@ code{{background:#f4f4f4;padding:1px 4px}}</style>
                 f"<td>{html.escape(a['label'] or '—')}</td><td>{a['port'] or '—'}</td></tr>"
                 for a in portal.store.bindings().values()
             ) or "<tr><td colspan=4>（暂无已授予实例）</td></tr>"
-            self._send(200, f"""<!doctype html><meta charset="utf-8">
-<title>MRRC Cloud Hub — 呼号自助注册</title>
-<style>body{{font:15px/1.6 -apple-system,sans-serif;max-width:760px;margin:40px auto;padding:0 16px}}
-input,button{{font:inherit;padding:8px}}table{{border-collapse:collapse;width:100%}}
-td,th{{border-bottom:1px solid #ddd;padding:6px;text-align:left}}
-code{{background:#f4f4f4;padding:1px 4px}}</style>
-<h1>呼号自助注册</h1>
-<p>按 <strong>规范化 → 查重 → 核验 → 分配</strong> 四步完成。呼号经核验通过后才会分配入口。</p>
-<form method="post" action="apply">
-  <p><input name="callsign" placeholder="呼号，例如 BG1SB" required>
-     <input name="contact" placeholder="联系方式（可选）">
-     <input name="product" placeholder="产品（留空=主产品）"></p>
-  <button type="submit">提交申请</button>
-</form>
-<p><small>为什么必须核验：呼号是<strong>公开标识</strong>，入口名就是呼号，
-因此实例存在性必然可枚举（I-H9 已接受）。防不了"被猜到"，就只能守住
-"核验通过才授予访问"。冒用可被举报并撤销（<code>/revoke</code>）。</small></p>
-<h2>已授予</h2><table><tr><th>呼号</th><th>状态</th><th>标签</th><th>端口</th></tr>{rows}</table>""",
+            self._send(200, _page(
+                "MRRC Cloud Hub — 呼号自助注册",
+                "<h1>呼号自助注册</h1>"
+                "<p>按 <strong>规范化 → 查重 → 核验 → 分配</strong> 四步完成。呼号经核验通过后才会分配入口。</p>"
+                "<form method=\"post\" action=\"apply\" class=\"p-apply\">"
+                "<input name=\"callsign\" placeholder=\"呼号，例如 BG1SB\" required>"
+                "<input name=\"contact\" placeholder=\"联系方式（可选）\">"
+                "<input name=\"product\" placeholder=\"产品（留空=主产品）\">"
+                "<button type=\"submit\">提交申请</button>"
+                "</form>"
+                "<p><small>为什么必须核验：呼号是<strong>公开标识</strong>，入口名就是呼号，"
+                "因此实例存在性必然可枚举（I-H9 已接受）。防不了“被猜到”，就只能守住"
+                "“核验通过才授予访问”。冒用可被举报并撤销（<code>/revoke</code>）。</small></p>"
+                f"<h2>已授予</h2><table><tr><th>呼号</th><th>状态</th><th>标签</th><th>端口</th></tr>{rows}</table>"),
                        ctype="text/html; charset=utf-8")
 
         def do_POST(self):                       # noqa: N802
@@ -362,6 +450,34 @@ code{{background:#f4f4f4;padding:1px 4px}}</style>
                 if route == "/apply":
                     return self._send(200, portal.apply(body.get("callsign", ""),
                                                         body.get("contact", ""), body.get("product", "")))
+                if route == "/enroll":
+                    # 实例提交自签证书的公钥。这条路**对公网开放**，所以凭据是一次性口令，
+                    # 而且要校验证书名字就是它自己的入口名 —— 否则可以拿别人的证书来冒充。
+                    callsign = cs.normalize(body.get("callsign", ""))
+                    app = portal.store.get(callsign)
+                    supplied = str(body.get("secret") or "")
+                    if not app or app.status != "granted" or not app.enroll_secret \
+                            or not hmac.compare_digest(supplied, app.enroll_secret):
+                        return self._send(403, {"error": "登记口令无效或未获授权"})
+                    pem = str(body.get("cert") or "").strip()
+                    if "BEGIN CERTIFICATE" not in pem or "END CERTIFICATE" not in pem:
+                        return self._send(400, {"error": "cert 必须是 PEM 文本"})
+                    expected = f"{app.label}.mrrc.vlsc.net"
+                    cert_dir = Path(DEFAULT_CERT_DIR)
+                    cert_dir.mkdir(parents=True, exist_ok=True)
+                    tmp = cert_dir / f".{app.label}.pem.tmp"
+                    tmp.write_text(pem if pem.endswith("\n") else pem + "\n", encoding="utf-8")
+                    names = cert_names(tmp)
+                    if expected not in names:
+                        tmp.unlink(missing_ok=True)
+                        return self._send(400, {"error": f"证书名字不符：期望 {expected}，实得 {sorted(names) or '解析失败'}"})
+                    tmp.replace(cert_dir / f"{app.label}.pem")
+                    portal.store._load  # noqa: B018  (仅表明状态未变；审计见下)
+                    return self._send(200, {
+                        "callsign": callsign, "cert": str(cert_dir / f"{app.label}.pem"),
+                        "names": sorted(names),
+                        "next_step": "sudo /usr/local/sbin/gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx",
+                    })
                 if route == "/admin":
                     if not self._operator_ok(body):
                         return self._send(403, {"error": "令牌不正确"})

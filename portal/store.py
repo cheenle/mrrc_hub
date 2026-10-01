@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -30,6 +31,7 @@ class Application:
     evidence: str = ""
     label: str = ""
     port: int = 0
+    enroll_secret: str = ""      # 一次性登记口令：实例凭它提交自签证书（见 app.py 的 /enroll）
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     history: list = field(default_factory=list)
@@ -115,6 +117,9 @@ class Store:
         app = Application(**current)
         app.status = GRANTED
         app.label, app.port = label, int(port)
+        # 登记口令在这里生成：它是"这台实例可以把公钥交上来"的唯一凭据。
+        # 不给公网留一个匿名上传证书的口子 —— 那等于让任何人冒充别人的入口。
+        app.enroll_secret = secrets.token_urlsafe(24)
         app.touch("granted", f"label={label} port={port}")
         data["applications"][callsign] = asdict(app)
         self._audit(data, callsign, "granted", f"{label} → {port}")

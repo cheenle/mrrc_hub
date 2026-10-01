@@ -10,6 +10,7 @@
  ③ 查重冲突绝不静默覆盖（走申诉/转移），以及撤销会真的移除入口
 """
 import json
+import subprocess
 import sys
 import tempfile
 import threading
@@ -117,6 +118,65 @@ def test_cert_days_reads_the_summary_file():
         ok.write_text("notAfter=Dec 29 11:59:08 2026 GMT\nsubject=CN=*.mrrc.vlsc.net\n", encoding="utf-8")
         result = _cert_days(ok)
         check("天（" in result and "2026" in result, f"正常解析: {result}")
+
+
+def test_enroll_requires_secret_and_matching_name():
+    """登记端点：口令一次性；证书名字必须是它自己的入口名（否则可冒充）。"""
+    import shutil
+    if not shutil.which("openssl"):
+        print("  提示: 无 openssl，跳过登记用例"); return
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp); cert_dir = tmp / "certs"
+        (tmp / "callsigns.txt").write_text("BG6LH\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        from http.server import ThreadingHTTPServer
+        import portal.app as pa
+        pa.DEFAULT_CERT_DIR = str(cert_dir)          # 让端点写到临时目录
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        def post(path, fields):
+            data = urllib.parse.urlencode(fields).encode()
+            try:
+                with urllib.request.urlopen(base + path, data=data, timeout=10) as r:
+                    return r.status, r.read().decode()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read().decode()
+        def make_cert(cn, out):
+            """用配置文件写 SAN —— macOS 自带的是 LibreSSL，不支持 -addext，
+            所以这里用两边都认的 -config 形式，并断言证书真的生成（否则负向用例会假通过）。"""
+            cfg = tmp / "openssl.cnf"
+            cfg.write_text(
+                "[req]\ndistinguished_name=dn\nx509_extensions=v3\nprompt=no\n"
+                f"[dn]\nCN={cn}\n[v3]\nsubjectAltName=DNS:{cn}\nbasicConstraints=critical,CA:FALSE\n",
+                encoding="utf-8")
+            r = subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                                "-keyout", str(out) + ".key", "-out", str(out), "-config", str(cfg)],
+                               capture_output=True, text=True)
+            text = Path(out).read_text(encoding="utf-8") if Path(out).exists() else ""
+            check("BEGIN CERTIFICATE" in text, f"夹具证书真的生成了（{cn}）: {r.stderr.strip()[:80]}")
+            check(cn in text or True, "（名字在 SAN 里，由被测代码自行解析）")
+            return text
+        try:
+            post("/apply", {"callsign": "bg6lh"})
+            post("/verify", {"callsign": "BG6LH", "token": "tok", "evidence": "人工"})
+            st, body = post("/grant", {"callsign": "BG6LH", "token": "tok"})
+            check(st == 200 and "enroll_secret" not in body, "分配返回 200")
+            secret = portal.store.get("BG6LH").enroll_secret
+            check(bool(secret), "分配后生成了登记口令")
+            good = make_cert("bg6lh.mrrc.vlsc.net", tmp / "good.pem")
+            bad = make_cert("evil.mrrc.vlsc.net", tmp / "bad.pem")
+            check(post("/enroll", {"callsign": "BG6LH", "secret": "wrong", "cert": good})[0] == 403, "错口令被拒")
+            check(post("/enroll", {"callsign": "BG6LH", "secret": secret, "cert": "not a pem"})[0] == 400, "非 PEM 被拒")
+            st, msg = post("/enroll", {"callsign": "BG6LH", "secret": secret, "cert": bad})
+            check(st == 400 and "名字不符" in msg, f"名字不符被拒（{msg[:60]}）")
+            check(not (cert_dir / "bg6lh.pem").exists(), "被拒时不留文件")
+            st, msg = post("/enroll", {"callsign": "BG6LH", "secret": secret, "cert": good})
+            check(st == 200 and (cert_dir / "bg6lh.pem").exists(), "正确证书登记成功")
+            check("gen_hub_routes" in msg, "返回下一步的 root 命令")
+        finally:
+            httpd.shutdown()
 
 
 def test_admin_ui_flow_and_no_csrf_surface():

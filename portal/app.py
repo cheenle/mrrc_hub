@@ -41,6 +41,18 @@ DEFAULT_STORE = os.environ.get("MRRC_PORTAL_STORE", "/etc/mrrc-hub/portal.json")
 DEFAULT_REGISTRY = os.environ.get("MRRC_PORTAL_REGISTRY", "/etc/mrrc-hub/instances.tsv")
 DEFAULT_CALLSIGN_DB = os.environ.get("MRRC_PORTAL_CALLSIGN_DB", "/etc/mrrc-hub/callsigns.txt")
 DEFAULT_TOKEN_FILE = os.environ.get("MRRC_PORTAL_TOKEN_FILE", "/etc/mrrc-hub/portal.token")
+
+#: frps 令牌的服务账号可读副本（部署时 `install -m 640 -o root -g <服务账号>` 一份出来）。
+#: 端点**不**直接读 /etc/frp/frps.token：那是 root 的文件，服务账号读不到，也不该读到。
+FRPS_TOKEN_FILE = os.environ.get("MRRC_PORTAL_FRPS_TOKEN_FILE", "/etc/mrrc-hub/frps.token.portal")
+
+
+def _frps_token() -> str:
+    try:
+        return Path(FRPS_TOKEN_FILE).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        print(f"⚠️ 读不到 frps 令牌副本 {FRPS_TOKEN_FILE}: {exc!r}", file=sys.stderr)
+        return ""
 DEFAULT_CLUBLOG = os.environ.get("MRRC_PORTAL_CLUBLOG", "/var/lib/mrrc-hub/portal/clublog_users.json")
 DEFAULT_CERT_DIR = os.environ.get("MRRC_PORTAL_CERT_DIR", "/etc/mrrc-hub/instance-certs")
 
@@ -468,6 +480,9 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                         "enroll_secret": app.enroll_secret if app.status == "granted" else "",
                         "entry": (f"https://{app.label}.mrrc.vlsc.net:9988/"
                                   if app.status == "granted" and app.label else ""),
+                        # 隧道登录用的 frps 令牌。租户拿不到运维密钥，所以批准后随接入信息一起给
+                        # （与登记口令同一信任级别；共享令牌这个偏离本身记在 AD-H11 里）。
+                        "hub_token": _frps_token() if app.status == "granted" else "",
                     }
                     return self._send(200, reply)
 

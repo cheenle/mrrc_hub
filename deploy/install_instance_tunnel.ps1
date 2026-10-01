@@ -98,7 +98,7 @@ if ($env:MRRC_ENROLL_SECRET) {
 # the hub IP fails on EVERY port right now (portal:8899, portal:8989, tunnel:8899, bg1sb - all
 # curl rc=35), while the overseas 443 edge answers. The design already has this fallback for
 # exactly this reason (SDD R-H13); MRRC_ENROLL_URL overrides it.
-    $enrollUrl = "https://www.vlsc.net/mrrc_portal/enroll"
+    $enrollUrl = "https://portal.mrrc.vlsc.net/enroll"
     if ($env:MRRC_ENROLL_URL) { $enrollUrl = $env:MRRC_ENROLL_URL }
     Write-Host "enrolling the certificate at $enrollUrl"
     try {

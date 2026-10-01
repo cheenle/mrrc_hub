@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3200" height="2100" viewBox="0 0 3200 2100" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+<style>
+  .bt{font-size:21px;font-weight:700;color:#1f2937;margin:0 0 8px}
+  .bt.small{font-size:19px}
+  .bi{font-size:16px;color:#374151;margin:0 0 6px;line-height:1.5}
+  .bi b{color:#111827}
+  .tiny{font-size:14px;color:#6b7280;margin:4px 0 0;line-height:1.45}
+  .cd{font-family:'JetBrains Mono','SF Mono',Menlo,monospace;font-size:.92em;background:#eef2f7;border-radius:4px;padding:0 4px}
+  .tag{display:inline-block;font-size:12.5px;font-weight:700;border-radius:999px;padding:1px 10px;margin-left:8px;vertical-align:2px;border:1px solid}
+  .tag.live{color:#047857;border-color:#7fd0ae;background:#e9f8f1}
+  .tag.warn{color:#b45309;border-color:#f0b35c;background:#fff7e8}
+  .tag.gap{color:#b91c1c;border-color:#f3b4b4;background:#fdecec}
+  .files{font-family:'JetBrains Mono','SF Mono',Menlo,monospace;font-size:14px;color:#475569;line-height:1.75;margin:0}
+  div{box-sizing:border-box}
+</style>
+<defs>
+  <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.10"/></filter>
+  <filter id="shs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.08"/></filter>
+  <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ea6a12"/></marker>
+  <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#0d9f6e"/></marker>
+  <marker id="av" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d28d9"/></marker>
+</defs>
+
+<rect width="3200" height="2100" fill="#f5f7fa"/>
+<text x="80" y="92" font-size="46" font-weight="700" fill="#111827">MRRC Cloud Hub · 物理架构（三台主机 + 外部依赖）</text>
+<text x="80" y="134" font-size="20" fill="#64748b">每个进程 / 文件 / 端口 / 定时任务均为 2026-10-01 现场读取 · 虚线 = 间歇或受限通道 · 逻辑分层见同目录 architecture-2026-10-01-as-built.svg</text>
+<text x="80" y="166" font-size="16" fill="#94a3b8">事实源：SDD/12 §12.8–§12.9 · deploy/README · hub/www/实例三处现场取证</text>
+<line x1="80" y1="190" x2="3120" y2="190" stroke="#dfe5ec" stroke-width="1.5"/>
+<rect x="430" y="214" width="2340" height="64" rx="32" fill="#fff4ea" stroke="#f0a875" stroke-width="1.6" filter="url(#shs)"/>
+<text x="1600" y="253" font-size="19" font-weight="600" fill="#c2410c" text-anchor="middle">hub 上没有 Redis / RDS / docker / 容器编排：只有 nginx + frps + 一个标准库 Python 服务 + 两个 cron —— 这是 as-built，不是省略</text>
+
+<!-- ═══════ 主机 1：实例侧 ═══════ -->
+<rect x="70" y="320" width="800" height="1240" rx="18" fill="#fff8ec" stroke="#edaf54" stroke-width="1.8" filter="url(#sh)"/>
+<text x="470" y="372" font-size="25" font-weight="700" fill="#b45309" text-anchor="middle">主机 ① 客户内网 · 实例（macOS / Linux）</text>
+<text x="470" y="400" font-size="15" fill="#6b7280" text-anchor="middle">家宽 · 无公网 IPv4 · IPv6 动态 · 零入站 · 仅出站 8989</text>
+<g filter="url(#shs)"><rect x="100" y="428" width="740" height="96" rx="12" fill="#fff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="100" y="428" width="740" height="96"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">电台 FT-710 / IC-7300 / MK2（USB）</p>
+    <p class="bi" style="margin:0">CAT/CI-V + USB 音频；射频源头；<b>不知道有 Hub 这回事</b></p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="100" y="544" width="740" height="196" rx="12" fill="#fff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="100" y="544" width="740" height="196"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">进程 · MRRC Modern 服务<span class="tag live">python/uvicorn :8888</span></p>
+    <p class="bi">5 个 WS 端点 + <span class="cd">/listen</span> 角色 gate + PTT Layer 0–8 本地释放权威</p>
+    <p class="bi">读 <span class="cd">MRRC_SSL_CERT/KEY</span>、<span class="cd">MRRC_WEB_PORT</span>；<span class="cd">MRRC_REMOTE_SESSION_TX_HEARTBEAT_S</span> <b>尚无消费方</b><span class="tag gap">C1 未落地</span></p>
+    <p class="tiny">static JS 仍把 cookie 值拼 <span class="cd">?token=</span> 进 WS URL<span class="tag gap">C2 未落地</span>（SDD 11 §11.3）</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="100" y="760" width="740" height="150" rx="12" fill="#fff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="100" y="760" width="740" height="150"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">进程 · frpc<span class="tag live">常驻服务</span></p>
+    <p class="bi">macOS LaunchAgent <span class="cd">com.mrrc.fleet-tunnel.&lt;呼号&gt;</span> / Linux systemd user unit；KeepAlive 自恢复</p>
+    <p class="bi"><span class="cd">type=tcp</span>：local 127.0.0.1:8888 → hub 回环 188xx；出站 WSS/TLS → <b>8989</b></p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="100" y="930" width="740" height="238" rx="12" fill="#fdfaf3" stroke="#e5d5b5" stroke-width="1.3"/>
+  <foreignObject x="100" y="930" width="740" height="238"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#92400e">落盘（实例侧）</p>
+    <p class="files">~/Library/Application Support/mrrc-fleet/<br/>　frpc-&lt;呼号&gt;.toml　<b>0600</b>（token 唯一落盘点）<br/>　frpc-&lt;呼号&gt;.log / .out.log / .err.log<br/>~/.config/mrrc/env.sh　<b>0600</b>（wire_instance_env 写）<br/>certs/fullchain.pem + &lt;label&gt;.key　<b>key 0600</b><br/>　自签，CN/SAN=&lt;label&gt;.mrrc.vlsc.net；<b>私钥永不出机</b>，<br/>　公钥经 /enroll 登记进 hub 信任包</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="100" y="1188" width="740" height="150" rx="12" fill="#fff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="100" y="1188" width="740" height="150"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">重启 / 换网行为</p>
+    <p class="bi"><b>隧道自动回来</b>（KeepAlive）；<b>电台服务不自动回来</b> —— 源码运行需手动起</p>
+    <p class="tiny">SDD 12 曾写"打包版 v1.22.0 已带前置能力"：该版本在 mrrc_modern 无 tag/commit/CHANGELOG，已订正为未发布</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="100" y="1358" width="740" height="170" rx="12" fill="#fdfaf3" stroke="#e5d5b5" stroke-width="1.3"/>
+  <foreignObject x="100" y="1358" width="740" height="170"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#92400e">接入一台新实例 = 三件事</p>
+    <p class="bi">1. Portal 授予 → 注册表一行（label + 188xx）</p>
+    <p class="bi">2. <span class="cd">make_instance_cert.sh</span> 自签 + <span class="cd">/enroll</span> 登记公钥</p>
+    <p class="bi">3. <span class="cd">install_instance_tunnel.sh</span> 装常驻隧道（frpc 自带/下载校验 SHA-256）</p>
+  </div></foreignObject></g>
+
+<!-- ═══════ 主机 2：hub ═══════ -->
+<rect x="910" y="320" width="1210" height="1260" rx="18" fill="#eef4fc" stroke="#8fb3f2" stroke-width="1.8" filter="url(#sh)"/>
+<text x="1515" y="372" font-size="25" font-weight="700" fill="#1d4ed8" text-anchor="middle">主机 ② 阿里云 ECS · Hub（乌兰察布）</text>
+<text x="1515" y="400" font-size="15" fill="#6b7280" text-anchor="middle">iZ0jlaouy9vk8n98wfp3a6Z · 公 8.160.161.80 / 内 172.19.95.147 · Ubuntu 26.04 · 2vCPU/3.6G/40G · 安全组仅 22/8899/9988/8989</text>
+<g filter="url(#shs)"><rect x="940" y="428" width="1150" height="212" rx="12" fill="#fff" stroke="#dbe4f0" stroke-width="1.3"/>
+  <foreignObject x="940" y="428" width="1150" height="212"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#1d4ed8">进程 · nginx<span class="tag live">:9988 / :8899 TLS</span></p>
+    <p class="bi">通配 vhost：<span class="cd">~^(?&lt;name&gt;[a-z0-9-]+)\.mrrc\.vlsc\.net$</span> → map 查注册表 → <span class="cd">127.0.0.1:$port</span>；未知呼号 <b>404 不回退</b></p>
+    <p class="bi"><span class="cd">proxy_ssl_verify on</span> + 信任包（系统 CA + 钉住的自签租户公钥）；WS 升级/关闭码透传</p>
+    <p class="bi">:8899 上 <span class="cd">portal.mrrc.vlsc.net</span> → 127.0.0.1:8890（<span class="cd">limit_req</span> 10r/m on /apply）；日志 <span class="cd">hub_safe</span> <b>不记 query</b></p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="940" y="660" width="565" height="132" rx="12" fill="#fff" stroke="#f0d9c8" stroke-width="1.3"/>
+  <foreignObject x="940" y="660" width="565" height="132"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 18px">
+    <p class="bt small" style="color:#c2410c">进程 · frps 0.71.0<span class="tag live">:8989</span></p>
+    <p class="bi">控制口 token+TLS；代理端口 <b>18802–18999 只绑 127.0.0.1</b></p>
+    <p class="tiny">共享 token（frp 模型）—— 一机一证是阶段 2</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="1525" y="660" width="565" height="132" rx="12" fill="#fff" stroke="#cdeadd" stroke-width="1.3"/>
+  <foreignObject x="1525" y="660" width="565" height="132"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 18px">
+    <p class="bt small" style="color:#047857">进程 · mrrc-portal.service<span class="tag live">127.0.0.1:8890</span></p>
+    <p class="bi">python3 标准库 HTTP；user=<span class="cd">mrrcportal</span>，NoNewPrivileges/PrivateTmp</p>
+    <p class="tiny">呼号核验四步；令牌常数时间比较；root 动作只打印不代劳</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="940" y="812" width="1150" height="118" rx="12" fill="#f4f0ff" stroke="#b9a6ee" stroke-width="1.3"/>
+  <foreignObject x="940" y="812" width="1150" height="118"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#6d28d9">定时 · cron（root）</p>
+    <p class="bi"><b>08:00</b> mrrc-hub-cert.sh：DNS-01 续期 *.mrrc.vlsc.net + &lt;14 天告警 + deploy-hook reload　·　<b>04:30</b> clublog 同步：<b>受限命令</b>从 www 只读那一个 JSON（规模门 &lt;10 万条拒换）</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="940" y="950" width="1150" height="330" rx="12" fill="#f7f9fd" stroke="#c3d3ee" stroke-width="1.3"/>
+  <foreignObject x="940" y="950" width="1150" height="330"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#1e40af">落盘（hub · 全部为文件，无数据库）</p>
+    <p class="files">/etc/mrrc-hub/instances.tsv　　　路由权威（label ⇄ 回环端口）<br/>/etc/mrrc-hub/portal.json　　　 申请/授予 + 追加式审计（原子写）<br/>/etc/mrrc-hub/portal.token　　　<b>0600</b>　·　callsigns.txt　自建呼号清单<br/>/etc/mrrc-hub/trust-bundle.pem　系统 CA + 在册实例公钥（gen 生成）<br/>/etc/mrrc-hub/instance-certs/　 每实例一份公钥（撤销=删文件+重跑 gen）<br/>/etc/mrrc-hub/tls/　　　　　　　通配 fullchain + <b>privkey 0600</b><br/>/etc/nginx/conf.d/mrrc-hub-map.conf　　gen_hub_routes.py 生成<br/>/var/lib/mrrc-hub/portal/clublog_users.json　27 万条（mrrcportal 可读）<br/>/var/log/nginx/mrrc-hub.access.log　·　/var/log/mrrc-hub-cert.log</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="940" y="1300" width="1150" height="120" rx="12" fill="#fff" stroke="#dbe4f0" stroke-width="1.3"/>
+  <foreignObject x="940" y="1300" width="1150" height="120"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#1d4ed8">回环拓扑（公网看不见）</p>
+    <p class="bi">nginx → <span class="cd">127.0.0.1:188xx</span> → frps → 隧道 → 实例 :8888　·　nginx → <span class="cd">127.0.0.1:8890</span> → portal</p>
+    <p class="tiny">公网上只暴露 nginx(8899/9988) 与 frps(8989) 两个进程口；188xx 与 8890 永不外听</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="940" y="1440" width="1150" height="112" rx="12" fill="#fff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="940" y="1440" width="1150" height="112"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">运维入口</p>
+    <p class="bi"><span class="cd">ssh cheenle@8.160.161.80</span>（NOPASSWD sudo）· 管理台 <span class="cd">portal…/admin</span>（noindex，令牌走请求体）· 路由变更 = <span class="cd">gen_hub_routes.py &amp;&amp; nginx -t &amp;&amp; reload</span>（root 手执行，有意分工）</p>
+  </div></foreignObject></g>
+
+<!-- ═══════ 主机 3：www 边缘 ═══════ -->
+<rect x="2160" y="320" width="970" height="600" rx="18" fill="#eafaf2" stroke="#86d3b0" stroke-width="1.8" filter="url(#sh)"/>
+<text x="2645" y="372" font-size="25" font-weight="700" fill="#047857" text-anchor="middle">主机 ③ 海外边缘 · www.vlsc.net</text>
+<text x="2645" y="400" font-size="15" fill="#6b7280" text-anchor="middle">193.111.30.163 · 80/443 可用（境外已备案）· certbot HTTP-01</text>
+<g filter="url(#shs)"><rect x="2190" y="428" width="910" height="180" rx="12" fill="#fff" stroke="#cdeadd" stroke-width="1.3"/>
+  <foreignObject x="2190" y="428" width="910" height="180"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#047857">进程 · nginx :443（+ :80 仅 ACME/跳转）</p>
+    <p class="bi">门户站 + 各产品子站静态服务</p>
+    <p class="bi"><span class="cd">/mrrc_modern/&lt;呼号大写&gt;/</span> 路径反代整条会话 → hub:9988（上游校验用系统 CA）<span class="tag warn">间歇 3/6</span></p>
+    <p class="tiny">2026-10-01 实测 6 次中 3 次 20 s 无响应，失败在 www→hub 一跳；定位备用路径</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="2190" y="628" width="910" height="150" rx="12" fill="#fff" stroke="#cdeadd" stroke-width="1.3"/>
+  <foreignObject x="2190" y="628" width="910" height="150"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#047857">进程 · 留言版 feedback（呼号库的来源）</p>
+    <p class="bi"><b>03:00</b> 从 clublog.org 刷新 <span class="cd">clublog-users.json</span>；与 Portal 核验<b>同源同规则</b></p>
+    <p class="files">/home/cheenle/feedback/　·　clublog_users.json</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="2190" y="798" width="910" height="96" rx="12" fill="#fdfaf3" stroke="#e5d5b5" stroke-width="1.3"/>
+  <foreignObject x="2190" y="798" width="910" height="96"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small" style="color:#92400e">落盘（www）</p>
+    <p class="files">/var/www/vlsc.net/{,mrrc_hub/,mrrc_modern/…}　·　/etc/cron.d/certbot　·　feedback 数据目录</p>
+  </div></foreignObject></g>
+
+<!-- ═══════ 外部依赖 ═══════ -->
+<rect x="2160" y="960" width="970" height="620" rx="18" fill="#f2f4f8" stroke="#b6c2d4" stroke-width="1.8" filter="url(#sh)"/>
+<text x="2645" y="1012" font-size="25" font-weight="700" fill="#334155" text-anchor="middle">外部依赖与用户</text>
+<g filter="url(#shs)"><rect x="2190" y="1040" width="910" height="130" rx="12" fill="#fff" stroke="#d7dce3" stroke-width="1.3"/>
+  <foreignObject x="2190" y="1040" width="910" height="130"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">用户浏览器</p>
+    <p class="bi">主路 <span class="cd">https://&lt;呼号&gt;.mrrc.vlsc.net:9988</span>（或 :8899）· 退化路 www 443 路径 · 局域网 :8888</p>
+    <p class="tiny">只放行 80/443 出站的网络才需要退化路；PWA 可加主屏幕</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="2190" y="1190" width="910" height="112" rx="12" fill="#fff" stroke="#d7dce3" stroke-width="1.3"/>
+  <foreignObject x="2190" y="1190" width="910" height="112"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">阿里云 DNS（vlsc.net 区 · 万网）</p>
+    <p class="bi"><span class="cd">*.mrrc.vlsc.net</span> 通配 A → 8.160.161.80（故新呼号<b>零 DNS 变更</b>）；hook 写 <span class="cd">_acme-challenge</span> TXT</p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="2190" y="1322" width="910" height="96" rx="12" fill="#fff" stroke="#d7dce3" stroke-width="1.3"/>
+  <foreignObject x="2190" y="1322" width="910" height="96"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">Let's Encrypt</p>
+    <p class="bi">仅 DNS-01（境内 80/443 不可用，R-H13）；RAM 用户只挂 <span class="cd">AliyunDNSFullAccess</span></p>
+  </div></foreignObject></g>
+<g filter="url(#shs)"><rect x="2190" y="1438" width="910" height="96" rx="12" fill="#fff" stroke="#d7dce3" stroke-width="1.3"/>
+  <foreignObject x="2190" y="1438" width="910" height="96"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 20px">
+    <p class="bt small">Club Log（clublog.org）</p>
+    <p class="bi">27 万呼号库的终极来源：www 03:00 拉 → hub 04:30 从 www 拉（两跳，受限命令）</p>
+  </div></foreignObject></g>
+
+<!-- ═══════ 连线 ═══════ -->
+<path d="M 870 835 H 936" fill="none" stroke="#ea6a12" stroke-width="3.2" marker-end="url(#ao)"/>
+<text x="903" y="820" font-size="14.5" font-weight="700" fill="#ea6a12" text-anchor="middle">出站 8989</text>
+<text x="903" y="866" font-size="13" fill="#ea6a12" text-anchor="middle">token+TLS</text>
+<path d="M 2160 1105 C 2138 1105, 2138 520, 2124 520" fill="none" stroke="#0d9f6e" stroke-width="3.2" marker-end="url(#ag)"/>
+<text x="2141" y="810" font-size="14.5" font-weight="700" fill="#0d9f6e" text-anchor="middle" transform="rotate(-90 2141 810)">9988 / 8899 · TLS 通配真证书（主路）</text>
+<path d="M 2300 1040 V 924" fill="none" stroke="#0d9f6e" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ag)"/>
+<text x="2318" y="990" font-size="13.5" font-weight="600" fill="#0d9f6e">443 边缘路径（退化·间歇）</text>
+<path d="M 2190 560 C 2150 560, 2150 470, 2124 470" fill="none" stroke="#0d9f6e" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ag)"/>
+<text x="2152" y="522" font-size="13.5" font-weight="600" fill="#0d9f6e" text-anchor="middle" transform="rotate(-90 2152 522)">反代 →9988</text>
+<path d="M 2120 866 C 2146 866, 2146 1246, 2158 1246" fill="none" stroke="#6d28d9" stroke-width="2.6" stroke-dasharray="7 5" marker-end="url(#av)"/>
+<text x="2139" y="1060" font-size="13.5" font-weight="600" fill="#6d28d9" text-anchor="middle" transform="rotate(-90 2139 1060)">DNS-01 TXT（每日 08:00）</text>
+<path d="M 2120 900 C 2152 900, 2152 700, 2158 700" fill="none" stroke="#6d28d9" stroke-width="2.6" stroke-dasharray="7 5" marker-end="url(#av)"/>
+<text x="2160" y="806" font-size="13.5" font-weight="600" fill="#6d28d9" text-anchor="middle" transform="rotate(-90 2160 806)">04:30 受限命令拉单文件</text>
+<path d="M 2645 780 V 794" fill="none" stroke="#6b7280" stroke-width="2.4" marker-end="url(#av)"/>
+<path d="M 2645 920 V 956" fill="none" stroke="#6b7280" stroke-width="2.4" stroke-dasharray="6 5"/>
+<text x="2663" y="944" font-size="13.5" fill="#6b7280">03:00 拉 clublog.org</text>
+<path d="M 1512 640 V 656" fill="none" stroke="#ea6a12" stroke-width="2.6" marker-end="url(#ao)"/>
+<text x="1530" y="654" font-size="13.5" font-weight="600" fill="#ea6a12">127.0.0.1:188xx</text>
+
+<!-- ═══════ 页脚 ═══════ -->
+<line x1="80" y1="1640" x2="3120" y2="1640" stroke="#dfe5ec" stroke-width="1.5"/>
+<text x="80" y="1682" font-size="17" fill="#374151"><tspan font-weight="700">读数基线：</tspan>2026-10-01 三处现场（hub 系统/服务/文件、www vhost 与 cron、实例 LaunchAgent 与配置）；进程清单以 systemctl / launchctl 实测为准，不以设计文档为准</text>
+<text x="80" y="1718" font-size="17" fill="#374151"><tspan font-weight="700">单点与容量：</tspan>hub 单实例（2vCPU/3.6G）—— 当前 1 实例 1 隧道，余量极大；真单点是 ECS 本身与通配证书续期链（cron + DNS 凭证），两者都有告警退出码</text>
+<text x="80" y="1754" font-size="17" fill="#374151"><tspan font-weight="700">信任锚：</tspan>浏览器→hub 靠 LE 通配；hub→实例靠信任包钉住自签公钥（校验始终开）；www→hub 靠系统 CA；实例私钥永不出机</text>
+<g font-size="16" fill="#374151">
+  <rect x="80" y="1792" width="26" height="18" rx="4" fill="#fff8ec" stroke="#edaf54" stroke-width="1.4"/><text x="116" y="1807">主机① 实例</text>
+  <rect x="280" y="1792" width="26" height="18" rx="4" fill="#eef4fc" stroke="#8fb3f2" stroke-width="1.4"/><text x="316" y="1807">主机② hub</text>
+  <rect x="480" y="1792" width="26" height="18" rx="4" fill="#eafaf2" stroke="#86d3b0" stroke-width="1.4"/><text x="516" y="1807">主机③ www 边缘</text>
+  <rect x="720" y="1792" width="26" height="18" rx="4" fill="#f2f4f8" stroke="#b6c2d4" stroke-width="1.4"/><text x="756" y="1807">外部依赖</text>
+  <rect x="920" y="1792" width="26" height="18" rx="4" fill="#fdfaf3" stroke="#e5d5b5" stroke-width="1.4"/><text x="956" y="1807">落盘文件</text>
+  <path d="M 1120 1801 h 44" stroke="#ea6a12" stroke-width="3" marker-end="url(#ao)"/><text x="1180" y="1807">隧道/数据</text>
+  <path d="M 1320 1801 h 44" stroke="#0d9f6e" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ag)"/><text x="1380" y="1807">用户会话（含间歇）</text>
+  <path d="M 1600 1801 h 44" stroke="#6d28d9" stroke-width="2.6" stroke-dasharray="7 5" marker-end="url(#av)"/><text x="1660" y="1807">定时拉取 / DNS-01</text>
+</g>
+<text x="3120" y="1860" font-size="15" fill="#94a3b8" text-anchor="end">物理架构 2026-10-01 · 与逻辑架构图（architecture-2026-10-01-as-built.svg）互为补集：那张讲层与决策，这张讲机器与文件</text>
+</svg>

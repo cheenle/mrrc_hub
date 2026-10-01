@@ -282,8 +282,15 @@
                 </tr>
                 <tr>
                   <td>会话凭据不进 URL</td>
-                  <td><span class="hub-badge live">已实现</span></td>
-                  <td>前端不再把令牌拼进查询串；Hub 侧访问日志也不记查询串</td>
+                  <td><span class="hub-badge live">Hub 侧已实现</span></td>
+                  <td>
+                    Hub 侧：nginx 日志不记查询串、hub 不经手拼串。<b
+                      >实例侧已在 mrrc_modern feat/hub 改为纯 Cookie 传递（未合并
+                      main）</b
+                    >；<b>Stable 渠道 v1.21.0 仍把令牌拼进查询串</b
+                    >（mrrc_modern C2 未合并，见其 SDD 11 §11.3 对账注）——
+                    同源 WS 本可只靠 Cookie
+                  </td>
                 </tr>
                 <tr>
                   <td>PTT 半开连接释放（远程会话活性）</td>

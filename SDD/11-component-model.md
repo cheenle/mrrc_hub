@@ -58,6 +58,13 @@ Access Gateway ──(内网 RPC)──► Tunnel Gateway ──(mTLS WSS)──
 | C5 | Hub 模式下推荐 `MRRC_PTT_MAX_TX_SECONDS=120` | 卡死进程的兜底上限 | 第 15 章 §15.3.1 |
 | C6 | Listener 调谐的审计来源标注 | AD-H08 的可审计性 | AD-H08 |
 
+> **对账注（2026-10-01，V0.16，同日修正）**：C1–C6 在 `mrrc_modern` **origin/feat/hub** 上
+> **已实现**（CHANGELOG v1.22.0/v1.23.0：C1 心跳在 server.py 有 6 处消费；C2 改纯 Cookie
+> 传递，`?token=` 仅存于注释；前缀感知见 listen.js/ft710_main.js），**但该分支未合并进 main**
+> （ahead 25 commits），Stable 渠道与产品站仍是 v1.21.0（仍拼 `?token=`）。
+> 因此"已实现"叙事只对 feat/hub 成立；hub as-built 实例跑在哪个 ref 上是 §12.8 的运营待确认项。
+> 残留：Cookie 仍 `httponly=False`（C2 之后"JS 要读它"的理由已不成立，可改 True）、无 `Secure`（C3 仍 open）。
+
 **交付状态（2026-10-01）**：C1–C6 已随 **mrrc_modern v1.22.0** 进打包版
 （C1 的阈值以 `MRRC_REMOTE_SESSION_TX_HEARTBEAT_S` 实现，默认 0 = 关，Hub 模式建议 3–5 s）。
 注意：**进包 ≠ 默认开启** —— C1 默认是关的，需要实例侧显式打开。

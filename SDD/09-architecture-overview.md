@@ -90,6 +90,9 @@ MVP 的代理必须**对 5 个 WebSocket 端点与静态资源完全透明**：
 逐项事实（三台主机、两个入口、证书全流程、运维命令、已知退化）见
 `12-operational-model.md` §12.8 —— 与本章不一致时以 §12.8 为准并回改本章。
 
+**物理架构图**（机器/进程/文件/端口/cron 一级，2026-10-01 现场读数）：
+[`../docs/physical-architecture-2026-10-01.svg`](../docs/physical-architecture-2026-10-01.svg)（同目录 PNG 为渲染件）。
+
 **as-built 校验版总体架构图**（2026-10-01，含对 2026-09-30 目标态旧图的逐条订正记录）：
 源为 [`../docs/architecture-2026-10-01-as-built.svg`](../docs/architecture-2026-10-01-as-built.svg)
 （同目录 PNG 为其渲染件，HTML 为校验记录页；改图改 SVG 后重渲染）。

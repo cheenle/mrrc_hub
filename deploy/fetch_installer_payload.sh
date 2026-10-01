@@ -115,13 +115,13 @@ for plat in "${PLIST[@]}"; do
 	mkdir -p "$OUT/$plat"
 	case "$plat" in
 		windows-*)
-			for s in install_instance_tunnel.ps1; do
+			for s in install_instance_tunnel.ps1 openssl.cnf; do
 				install -m 644 "$SELF_DIR/$s" "$OUT/$plat/$s"
 				echo "  ✓ $plat/${s}（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
 			done
 			;;
 		*)
-			for s in install_instance_tunnel.sh wire_instance_env.sh make_instance_cert.sh; do
+			for s in install_instance_tunnel.sh wire_instance_env.sh make_instance_cert.sh openssl.cnf; do
 				install -m 755 "$SELF_DIR/$s" "$OUT/$plat/$s"
 				echo "  ✓ $plat/${s}（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
 			done

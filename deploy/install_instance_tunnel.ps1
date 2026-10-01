@@ -49,6 +49,8 @@ if (-not (Test-Path $frpc)) {
 
 # ---- 证书：内置 openssl 签自签证书（hub 按 $fqdn 校验；私钥不外传）----
 $openssl = Join-Path $FleetDir "openssl.exe"
+$cnf  = Join-Path $FleetDir "openssl.cnf"                       # 随包带：签名不再依赖系统或编译前缀的默认配置
+if (-not (Test-Path $cnf)) { Fail "missing openssl.cnf next to this script: $cnf" }
 if (-not (Test-Path $openssl)) {
     $onPath = (Get-Command openssl.exe -ErrorAction SilentlyContinue).Source
     if ($onPath) { $openssl = $onPath; Write-Host "use openssl from PATH: $openssl" }
@@ -68,7 +70,8 @@ if ($needCert) {
         -subj "/CN=$fqdn" -addext "subjectAltName=DNS:$fqdn" `
         -addext "basicConstraints=critical,CA:FALSE" `
         -addext "keyUsage=critical,digitalSignature,keyEncipherment" `
-        -addext "extendedKeyUsage=serverAuth" 2>$null
+        -addext "extendedKeyUsage=serverAuth" `
+        -config $cnf 2>$null
     if ($LASTEXITCODE -ne 0) { Fail "openssl failed to sign the certificate" }
     Write-Host "signed a self-signed certificate for $fqdn (3650 days)"
 }

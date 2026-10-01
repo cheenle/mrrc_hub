@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="MRRC Cloud Hub — 把你的 MRRC Modern 电台接入云端统一入口：实例主动出站、无需公网 IP、一个呼号一个入口、PTT 释放永远在电台本地。"
+    />
+    <meta name="author" content="BG1SB" />
+    <meta name="theme-color" content="#000000" />
+    <title>概览 · MRRC Cloud Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/octen.css?v=1" />
+    <link rel="stylesheet" href="css/hub.css?v=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>"
+    />
+  </head>
+  <body data-site="mrrc_hub">
+    <a href="#main" class="hub-skip">跳到主要内容</a>
+
+    <nav class="navbar">
+      <div class="container navbar-content">
+        <a href="index.html" class="logo">
+          <span class="logo-icon"><i class="fas fa-satellite-dish"></i></span>
+          <span>MRRC <span style="color: var(--accent)">Cloud Hub</span></span>
+        </a>
+        <ul class="nav-links">
+          <li>
+            <a href="index.html" class="active" aria-current="page">概览</a>
+          </li>
+          <li><a href="start.html">接入</a></li>
+          <li><a href="use.html">使用与分享</a></li>
+          <li><a href="trouble.html">排障</a></li>
+          <li><a href="design.html">设计与实现</a></li>
+          <li>
+            <a
+              href="https://github.com/cheenle/mrrc_hub"
+              target="_blank"
+              rel="noopener"
+              ><i class="fab fa-github"></i> 源码</a
+            >
+          </li>
+        </ul>
+        <div class="nav-actions">
+          <a href="https://www.vlsc.net/mrrc_modern/" class="lang-btn"
+            >MRRC Modern</a
+          >
+          <button
+            class="mobile-menu-toggle"
+            aria-label="打开菜单"
+            onclick="toggleMobileMenu()"
+          >
+            <i class="fas fa-bars"></i>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <main id="main">
+      <section class="hero">
+        <div class="hero-content">
+          <div class="hero-badge">
+            <i class="fas fa-tower-broadcast"></i>
+            <span>MRRC Cloud Hub · 阶段 1 通路已在真实公网跑通</span>
+          </div>
+          <h1 class="hero-title">
+            把你的电台<br />
+            <span class="gradient">挂到云端</span>
+          </h1>
+          <p class="hero-subtitle">
+            你的 MRRC Modern 继续跑在自己家里，电台、电脑、天线都不动。
+            不需要公网 IP、不需要端口映射、不需要动路由器 —— 实例主动出站连上
+            Hub， 你就能从任何地方用浏览器操作同一台电台。
+          </p>
+          <div class="hero-actions">
+            <a href="start.html" class="btn btn-primary btn-large">
+              <i class="fas fa-rocket"></i> 开始接入
+            </a>
+            <a href="design.html" class="btn btn-secondary btn-large">
+              <i class="fas fa-layer-group"></i> 看设计与实现
+            </a>
+            <a
+              href="https://github.com/cheenle/mrrc_hub"
+              class="btn btn-secondary btn-large"
+              target="_blank"
+              rel="noopener"
+            >
+              <i class="fab fa-github"></i> 源码
+            </a>
+          </div>
+          <div class="hero-stats">
+            <div class="stat-item">
+              <span class="stat-value">118–168 ms</span>
+              <span class="stat-label">公网往返实测</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">5</span>
+              <span class="stat-label">个 WS 端点透明转发</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">0</span>
+              <span class="stat-label">客户侧入站端口</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">Layer 0–7</span>
+              <span class="stat-label">PTT 本地释放层</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" style="background: var(--bg-secondary)">
+        <div class="container">
+          <div class="section-header">
+            <span class="section-label">Why</span>
+            <h2 class="section-title">四条主张</h2>
+            <p class="section-subtitle">
+              整个接入层只有这四个设计承诺，其余都是为了让它们成立。
+            </p>
+          </div>
+          <div class="features-grid">
+            <div class="feature-card animate">
+              <div class="icon"><i class="fas fa-door-closed"></i></div>
+              <h3>客户侧零入站</h3>
+              <p>
+                你的电脑只<b>出站</b>一条常驻连接。没有公网
+                IP、没有端口映射、没有 UPnP， 甚至不需要知道自己的公网地址 ——
+                家庭宽带、4G/5G、公司网都能跑。
+              </p>
+            </div>
+            <div class="feature-card animate">
+              <div class="icon"><i class="fas fa-id-card"></i></div>
+              <h3>一个呼号一个入口</h3>
+              <p>
+                入口就是
+                <code>&lt;呼号&gt;.mrrc.vlsc.net</code
+                >。呼号既是租户名，也是账号标识，
+                不用再维护另一套用户名体系。大小写不敏感。
+              </p>
+            </div>
+            <div class="feature-card animate">
+              <div class="icon"><i class="fas fa-hand"></i></div>
+              <h3>PTT 释放永远在本地</h3>
+              <p>
+                Hub 只是一条通道，<b>从不写下 PTT</b>。断线、掉网、半开连接，
+                一律由电台所在的那台机器强制回 RX —— 不依赖云端租约超时。
+              </p>
+            </div>
+            <div class="feature-card animate">
+              <div class="icon"><i class="fas fa-shield-halved"></i></div>
+              <h3>逐跳校验证书</h3>
+              <p>
+                整条链路端到端 TLS：浏览器到 Hub 用真证书，Hub
+                到你的实例也<b>校验证书</b>。 没有哪一跳是靠"关掉校验"换来的。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="section-header">
+            <span class="section-label">Data Path</span>
+            <h2 class="section-title">30 秒看懂信号走到哪</h2>
+            <p class="section-subtitle">
+              从电台到你的浏览器，五跳。中间任何一跳都不需要你动路由器。
+            </p>
+          </div>
+          <div class="hub-stack">
+            <div class="hub-layer">
+              <div class="hub-layer-id">你的电台</div>
+              <div class="hub-layer-body">
+                <strong>FT-710 / IC-7300 / IC-7300MK2</strong>
+                <span>接在你自己的电脑上，位置、天线、电源都不用变。</span>
+              </div>
+            </div>
+            <div class="hub-layer">
+              <div class="hub-layer-id">你的电脑</div>
+              <div class="hub-layer-body">
+                <strong>MRRC Modern · 本机 127.0.0.1:8888</strong>
+                <span
+                  >继续提供局域网访问。控制、音频、频谱、PTT
+                  安全释放全在这里。</span
+                >
+              </div>
+            </div>
+            <div class="hub-layer">
+              <div class="hub-layer-id">出站隧道</div>
+              <div class="hub-layer-body">
+                <strong>一条常驻出站连接</strong>
+                <span
+                  >几行命令装成开机自启服务。你不需要对外开放任何入站端口。</span
+                >
+              </div>
+            </div>
+            <div class="hub-layer">
+              <div class="hub-layer-id">Hub</div>
+              <div class="hub-layer-body">
+                <strong>统一入口 &lt;呼号&gt;.mrrc.vlsc.net:9988</strong>
+                <span
+                  >真 Let's Encrypt
+                  通配证书，浏览器零警告。按呼号路由到你的隧道。</span
+                >
+              </div>
+            </div>
+            <div class="hub-layer">
+              <div class="hub-layer-id">你的浏览器</div>
+              <div class="hub-layer-body">
+                <strong>从任何地方打开同一个网址</strong>
+                <span>只放行 80/443 的网络也能用 —— 走海外边缘入口。</span>
+              </div>
+            </div>
+          </div>
+          <p
+            class="hub-note"
+            style="text-align: center; border-top: 0; margin-top: 1rem"
+          >
+            想看清每一层各自负责什么、边界画在哪、失效时表现什么 ——
+            <a href="design.html" style="color: var(--accent)"
+              >看设计与层层实现 →</a
+            >
+          </p>
+        </div>
+      </section>
+
+      <section class="section" style="background: var(--bg-secondary)">
+        <div class="container">
+          <div class="section-header">
+            <span class="section-label">Status</span>
+            <h2 class="section-title">现在能到什么程度</h2>
+            <p class="section-subtitle">
+              下面每一条都能在现网上实测。没做完的我们不会写得像是做完了。
+            </p>
+          </div>
+          <div class="hub-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">能力</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>实例出站隧道</td>
+                  <td><span class="hub-badge live">已跑通</span></td>
+                  <td>阶段 1 用成熟反向隧道验证通路；客户侧零入站</td>
+                </tr>
+                <tr>
+                  <td>通配子域入口 + 真证书</td>
+                  <td><span class="hub-badge live">已跑通</span></td>
+                  <td>
+                    <code>*.mrrc.vlsc.net</code>，Let's Encrypt，每日自动续期
+                  </td>
+                </tr>
+                <tr>
+                  <td>五个 WebSocket 端点透明转发</td>
+                  <td><span class="hub-badge live">已跑通</span></td>
+                  <td>
+                    控制、频谱、收音频、发音频、天调，握手与关闭语义和直连一致
+                  </td>
+                </tr>
+                <tr>
+                  <td>逐跳证书校验</td>
+                  <td><span class="hub-badge live">已开启</span></td>
+                  <td>没有一跳是靠关闭校验换来的</td>
+                </tr>
+                <tr>
+                  <td>会话凭据不进 URL</td>
+                  <td><span class="hub-badge live">Hub 侧已实现</span></td>
+                  <td>
+                    Hub 侧：nginx 日志不记查询串、hub 不经手拼串。<b
+                      >实例侧已在 mrrc_modern feat/hub 改为纯 Cookie 传递（未合并
+                      main）</b
+                    >；<b>Stable 渠道 v1.21.0 仍把令牌拼进查询串</b
+                    >（mrrc_modern C2 未合并，见其 SDD 11 §11.3 对账注）——
+                    同源 WS 本可只靠 Cookie
+                  </td>
+                </tr>
+                <tr>
+                  <td>PTT 半开连接释放（远程会话活性）</td>
+                  <td>
+                    <span class="hub-badge live">实例侧已有</span>
+                    <span class="hub-badge todo">隧道层待做</span>
+                  </td>
+                  <td>
+                    拔网线这类"TCP
+                    还活着但对面已失联"的情形：实例侧已有可开的心跳闸门
+                    （默认关闭，Hub 模式建议 3–5
+                    s）；<b>隧道层的主动关流还没做</b>。
+                    在此之前靠实例本地多层释放兜底。
+                  </td>
+                </tr>
+                <tr>
+                  <td>自助注册 Portal（呼号核验四步）</td>
+                  <td><span class="hub-badge live">公网入口已上线</span></td>
+                  <td>
+                    <code>portal.mrrc.vlsc.net:8899</code>（通配证书覆盖，<code
+                      >/apply</code
+                    >
+                    按来源 IP 限流）。命中呼号库自动核验，库外转人工；
+                    核验通过后运维授予并写入注册表。见<a
+                      href="start.html#register"
+                      style="color: var(--accent)"
+                      >接入 · 注册</a
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td>实例证书链（hub → 实例这一跳的一机一证）</td>
+                  <td><span class="hub-badge live">机制就位</span></td>
+                  <td>
+                    每个实例一张签给自己入口名的自签证书，公钥被 Hub
+                    <b>钉在信任包里</b>、按名字校验 ——
+                    校验始终是开着的，自签靠"钉住它"通过， 不是靠关掉
+                    verification。
+                    <b>注意：现网当前实例尚未迁到这条链</b>（仍用旧证书名）。
+                  </td>
+                </tr>
+                <tr>
+                  <td>实例安装器</td>
+                  <td><span class="hub-badge live">脚本就位</span></td>
+                  <td>
+                    自取 frpc 并<b>校验 SHA-256</b>、与 Hub 端版本钉死、 macOS /
+                    Linux / Windows 三平台常驻。尚未做成公开发布的安装包下载。
+                  </td>
+                </tr>
+                <tr>
+                  <td>一机一证（隧道自身的设备 mTLS）</td>
+                  <td><span class="hub-badge todo">阶段 2</span></td>
+                  <td>
+                    隧道认证目前仍是 frp 的单个共享凭证 —— 与上一行的 TLS
+                    身份是两件事（谁能接入隧道 vs 这台实例是不是它声称的那台）。
+                  </td>
+                </tr>
+                <tr>
+                  <td>独占写者租约</td>
+                  <td><span class="hub-badge todo">阶段 2</span></td>
+                  <td>现阶段由实例侧仲裁谁在发射</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="section-header">
+            <span class="section-label">Next Step</span>
+            <h2 class="section-title">你该从哪开始</h2>
+          </div>
+          <div class="steps">
+            <div class="step">
+              <h4>还没装 MRRC Modern</h4>
+              <p>
+                先去产品站下载安装，把电台在局域网里跑通 ——
+                能登录、有音频、能发射。这是接入 Hub 的前提。
+              </p>
+              <a
+                href="https://www.vlsc.net/mrrc_modern/"
+                class="btn btn-secondary"
+                style="margin-top: 1rem"
+              >
+                <i class="fas fa-download"></i> MRRC Modern 产品站
+              </a>
+            </div>
+            <div class="step">
+              <h4>局域网已经能用</h4>
+              <p>
+                四步：前提自检 → 自助申请 → 装隧道 →
+                验证。每一步都有可以直接复制的命令和期望输出。
+              </p>
+              <a
+                href="start.html"
+                class="btn btn-primary"
+                style="margin-top: 1rem"
+              >
+                <i class="fas fa-rocket"></i> 开始接入
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-section">
+            <h4>MRRC Cloud Hub</h4>
+            <p>
+              把 MRRC Modern
+              实例接入云端统一入口：实例主动出站、一个呼号一个入口、PTT
+              释放永远在电台本地执行。
+            </p>
+          </div>
+          <div class="footer-section">
+            <h4>文档</h4>
+            <ul>
+              <li><a href="index.html">概览</a></li>
+              <li><a href="start.html">接入四步</a></li>
+              <li><a href="use.html">使用与分享</a></li>
+              <li><a href="trouble.html">排障</a></li>
+              <li><a href="design.html">设计与层层实现</a></li>
+            </ul>
+          </div>
+          <div class="footer-section">
+            <h4>相关</h4>
+            <ul>
+              <li>
+                <a href="https://www.vlsc.net/mrrc_modern/"
+                  >MRRC Modern 产品站</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://github.com/cheenle/mrrc_hub"
+                  target="_blank"
+                  rel="noopener"
+                  >源码（GitHub）</a
+                >
+              </li>
+              <li>
+                <a href="https://www.vlsc.net/" target="_blank" rel="noopener"
+                  >VLSC Projects</a
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2026 MRRC Cloud Hub · BG1SB</p>
+          <p>
+            事实基线：2026-10-01 现场取证 · 运营事实以
+            <code>SDD/12 §12.8</code> 为准
+          </p>
+        </div>
+      </div>
+    </footer>
+
+    <script src="js/hub.js"></script>
+    <script src="https://www.vlsc.net/js/global-nav.js?v=9" defer></script>
+  </body>
+</html>

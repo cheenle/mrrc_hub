@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="把 MRRC Modern 实例接入 MRRC Cloud Hub 的四步：前提自检、呼号注册、安装隧道、验证入口。含可直接复制的命令与期望输出。"
+    />
+    <meta name="author" content="BG1SB" />
+    <meta name="theme-color" content="#000000" />
+    <title>接入四步 · MRRC Cloud Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/octen.css?v=1" />
+    <link rel="stylesheet" href="css/hub.css?v=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>"
+    />
+  </head>
+  <body data-site="mrrc_hub">
+    <a href="#main" class="hub-skip">跳到主要内容</a>
+
+    <nav class="navbar">
+      <div class="container navbar-content">
+        <a href="index.html" class="logo">
+          <span class="logo-icon"><i class="fas fa-satellite-dish"></i></span>
+          <span>MRRC <span style="color: var(--accent)">Cloud Hub</span></span>
+        </a>
+        <ul class="nav-links">
+          <li><a href="index.html">概览</a></li>
+          <li>
+            <a href="start.html" class="active" aria-current="page">接入</a>
+          </li>
+          <li><a href="use.html">使用与分享</a></li>
+          <li><a href="trouble.html">排障</a></li>
+          <li><a href="design.html">设计与实现</a></li>
+          <li>
+            <a
+              href="https://github.com/cheenle/mrrc_hub"
+              target="_blank"
+              rel="noopener"
+              ><i class="fab fa-github"></i> 源码</a
+            >
+          </li>
+        </ul>
+        <div class="nav-actions">
+          <a href="https://www.vlsc.net/mrrc_modern/" class="lang-btn"
+            >MRRC Modern</a
+          >
+          <button
+            class="mobile-menu-toggle"
+            aria-label="打开菜单"
+            onclick="toggleMobileMenu()"
+          >
+            <i class="fas fa-bars"></i>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hub-hero">
+      <h1>接入四步</h1>
+      <p>
+        前提自检 → 自助申请 → 装隧道 → 验证。
+        全程只在本机执行，不需要动路由器，也不需要公网 IP。
+      </p>
+    </header>
+
+    <main id="main" class="hub-shell">
+      <nav class="hub-toc" aria-label="本页目录">
+        <h4>本页</h4>
+        <ul>
+          <li><a href="#precheck">1 · 前提自检</a></li>
+          <li><a href="#register">2 · 注册</a></li>
+          <li><a href="#tunnel">3 · 装隧道</a></li>
+          <li><a href="#verify">4 · 验证</a></li>
+          <li><a href="#restart">5 · 重启之后</a></li>
+        </ul>
+      </nav>
+
+      <div class="hub-prose">
+        <div class="hub-callout">
+          <span class="hub-callout-title">先看清一件事</span>
+          <p>
+            Hub <b>不会替你运行电台服务</b>。你的 MRRC Modern
+            始终跑在你自己的机器上， Hub
+            只是给它一个从公网可达的入口。所以"局域网已经能用"是硬前提 ——
+            局域网不通，接上 Hub 也不会通。
+          </p>
+        </div>
+
+        <ol class="hub-steps">
+          <li id="precheck">
+            <h3>前提自检</h3>
+            <p>
+              在继续之前，逐条确认下面五件事。任何一条不满足，先解决它再往下走。
+            </p>
+            <div class="hub-table-wrap">
+              <table class="hub-facts">
+                <tbody>
+                  <tr>
+                    <td>局域网能打开</td>
+                    <td>
+                      <code>http://&lt;你的内网IP&gt;:8888/</code>
+                      能出登录页。<br />
+                      默认端口 <code>8888</code>，默认监听所有网卡。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>能登录</td>
+                    <td>
+                      首次启动会自动生成随机口令，在登录页横幅和菜单栏的
+                      <b>Show Password…</b> 里都能看到。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>有音频、能发射</td>
+                    <td>
+                      先在局域网里跑通一次完整收发。远程排障比本地排障贵十倍。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>知道设备</td>
+                    <td>
+                      串口（如 <code>/dev/cu.usbserial-*</code>）与音频设备名
+                      （常见是 <code>USB Audio Device</code>）——
+                      装完之后如果配置变了， 这两项是要改的地方。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>出站可达</td>
+                    <td>
+                      隧道控制口 <code>8989</code> 的出站不能被拦。公司网、访客
+                      Wi-Fi 常拦非标端口。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="hub-callout warn">
+              <span class="hub-callout-title">三个端口是不同的事</span>
+              <p>
+                隧道控制口是
+                <code>tunnel.mrrc.vlsc.net:8989</code>（你的电脑连出去）；
+                入口是
+                <code>&lt;呼号&gt;.mrrc.vlsc.net:9988</code>（浏览器连进来）。
+                <b>它们都要出站可达</b>，但只有前者是接入时必须打通的。
+              </p>
+            </div>
+          </li>
+
+          <li id="register">
+            <h3>注册：拿到你的名字与端口</h3>
+            <p>
+              呼号是你在 Hub
+              上的身份。注册完成后你会得到三样东西，后面两步都要用。
+            </p>
+
+            <div class="hub-callout ok">
+              <span class="hub-callout-title">
+                <span class="hub-badge live">今天可用</span>
+                自助申请（公网入口已上线）
+              </span>
+              <p>
+                打开
+                <code>https://portal.mrrc.vlsc.net:8899/</code
+                >，填呼号与联系方式提交。Portal 当场走完前三步：
+              </p>
+              <ul>
+                <li>
+                  <b>规范化</b> —— 去空格、大小写不敏感。<code>BG1SB</code> 与
+                  <code>bg1sb</code> 视为同一个呼号，不会变成两个租户。
+                </li>
+                <li>
+                  <b>查重</b> —— 同一个呼号在同一时刻只能有一个归属人。
+                  已被绑定时走申诉/转移流程，<b>绝不静默覆盖</b>。
+                </li>
+                <li>
+                  <b>核验</b> —— 命中 Club Log 呼号库（27
+                  万条，与站内留言版同源） 的<b>当场自动核验</b>；库外转人工核验
+                  —— 库外 ≠ 冒用，新执照、低活跃都可能不在库里，只有人能拒绝。
+                </li>
+              </ul>
+              <p>
+                核验通过后，运维走第四步<b>分配</b>：把呼号标签与隧道端口写进注册表，
+                然后把三样东西发给你：<b>呼号标签</b>（入口就是
+                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>）、<b>隧道端口</b>（形如
+                <code>188xx</code>）、<b>隧道凭证</b>（别贴进公开场合）。
+                拿到这三样，进第 3 步装隧道。
+              </p>
+            </div>
+
+            <div class="hub-callout">
+              <span class="hub-callout-title">自助注册对你的三个实际好处</span>
+              <ul>
+                <li>
+                  <b>不会被静默覆盖</b> ——
+                  被冒用时申请会被拒绝，而不是抢走你的呼号。
+                </li>
+                <li>
+                  <b>每一步有审计</b> —— 申请、核验、授予都进追加式审计日志。
+                </li>
+                <li>
+                  <b>可被撤销</b> ——
+                  冒用被核实后移除绑定并停用入口（<code>/revoke</code>）。
+                </li>
+              </ul>
+            </div>
+
+            <div class="hub-callout warn">
+              <span class="hub-callout-title"
+                >为什么核验必须发生在"给访问"之前</span
+              >
+              <p>
+                呼号是<b>公开信息</b>，入口存在性天然可以被枚举出来 ——
+                这一点在设计上是被
+                <b>有意接受</b
+                >的，不是漏洞。既然藏不住，防御重心就只能前移到"授予访问之前把身份核实清楚"，
+                而不是事后追责。
+              </p>
+            </div>
+          </li>
+
+          <li id="tunnel">
+            <h3>装隧道</h3>
+            <p>
+              隧道把你自己机器上的电台服务，接到 Hub
+              上属于你呼号的那个回环端口。
+              你的电脑只连出去，不开放任何入站端口。
+            </p>
+
+            <div class="hub-code">
+              <pre><code># 1) 取仓库（安装器在里面）
+git clone https://github.com/cheenle/mrrc_hub.git
+
+# 2) 装成常驻服务（macOS / Linux）
+#    不需要先装 frp —— 安装器会自己取回来并校验哈希
+MRRC_HUB_TOKEN='&lt;隧道凭证&gt;' \
+  bash mrrc_hub/deploy/install_instance_tunnel.sh &lt;呼号&gt; &lt;隧道端口&gt;</code></pre>
+            </div>
+
+            <p>Windows 用对等的 PowerShell 版，而且它做的更多：</p>
+
+            <div class="hub-code">
+              <pre><code>$env:MRRC_HUB_TOKEN = '&lt;隧道凭证&gt;'
+.\mrrc_hub\deploy\install_instance_tunnel.ps1 &lt;呼号&gt; &lt;隧道端口&gt;</code></pre>
+            </div>
+
+            <div class="hub-table-wrap">
+              <table class="hub-facts">
+                <tbody>
+                  <tr>
+                    <td>frpc 从哪来</td>
+                    <td>
+                      安装器按三级优先选：① 安装包内嵌副本 → ② 系统
+                      <code>PATH</code> 里已有的 → ③ 从 frp 官方 release
+                      下载并<b>校验 SHA-256</b>， 不符即拒绝使用。版本与 Hub
+                      端<b>钉死对齐</b> ——
+                      客户端比服务端新可能握手失败。缓存落在
+                      <code>~/.local/share/mrrc-fleet</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>它做了什么</td>
+                    <td>
+                      写一份
+                      <code>0600</code> 的隧道配置，并装一个<b>常驻服务</b>：
+                      macOS 是带 <b>KeepAlive</b> 的 LaunchAgent、Linux 是
+                      systemd 用户单元（带 linger，<b>注销后仍活</b>）、Windows
+                      是计划任务。 崩溃、重启、换网都能自恢复。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Windows 额外做</td>
+                    <td>
+                      用内置的 openssl 给你的
+                      <code>&lt;呼号&gt;.mrrc.vlsc.net</code>
+                      签一张自签证书，并把证书路径与心跳阈值写成<b
+                        >用户级环境变量</b
+                      >
+                      —— 应用下次启动即生效。<b>私钥不出本机</b>，只有公钥交给
+                      Hub 钉住。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>它不做什么</td>
+                    <td>
+                      <b>不管你的 MRRC 服务。</b>电台服务归你自己起。
+                      实例没起来时隧道照常在，访问会得到 502 —— 这是区分
+                      "隧道断了"和"电台服务没起"的关键。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>幂等 / 防冲突</td>
+                    <td>
+                      已经有手工启动的隧道客户端在跑时，它会拒绝启动 ——
+                      两个客户端抢同一个名字会让入口反复抖动。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>凭据处理</td>
+                    <td>
+                      凭据只落在
+                      <code>0600</code>
+                      配置文件里；不进命令行参数、不进世界可读的文件。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="hub-callout">
+              <span class="hub-callout-title">端口与凭证从哪来？</span>
+              <p>
+                隧道端口由 Hub 侧权威分配（注册表里那行），你不能自己挑。
+                核验通过、运维分配后，你会拿到标签、端口与凭证三样东西。
+                没拿到就别猜 —— 填错的端口隧道会连上，但入口仍然 404。
+              </p>
+            </div>
+          </li>
+
+          <li id="verify">
+            <h3>验证</h3>
+            <p>两条命令，一条看隧道，一条看整条链路。</p>
+
+            <div class="hub-code">
+              <pre><code># 1) 隧道这一跳健康吗
+tail -5 "$HOME/Library/Application Support/mrrc-fleet/frpc-&lt;呼号&gt;.log"
+# 期望看到：login to server success
+#           [&lt;呼号&gt;] start proxy success
+
+# 2) 从公网看整条链路健康吗
+curl -sI https://&lt;呼号&gt;.mrrc.vlsc.net:9988/login        # 期望 200
+curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net:9988/api/health     # 期望 401</code></pre>
+            </div>
+
+            <div class="hub-callout ok">
+              <span class="hub-callout-title">401 是好事</span>
+              <p>
+                <code>/api/health</code> 返回 <b>401</b> 说明三层同时通了：
+                隧道建立成功、Hub 按呼号找到了你的实例、实例的鉴权中间件在工作。
+                如果它返回 200，反而说明鉴权没生效 —— 值得停下来查一下。
+              </p>
+            </div>
+
+            <p>
+              两条都通过之后，浏览器打开下面的地址，用你的<b>主口令</b>登录，
+              就应该看到和局域网里一模一样的控制台：
+            </p>
+
+            <div class="hub-code">
+              <pre><code>https://&lt;呼号&gt;.mrrc.vlsc.net:9988/</code></pre>
+            </div>
+          </li>
+
+          <li id="restart">
+            <h3>重启之后</h3>
+            <p>这两件事的行为<b>不一样</b>，这是最容易踩的坑。</p>
+
+            <div class="hub-table-wrap">
+              <table class="hub-facts">
+                <tbody>
+                  <tr>
+                    <td>隧道</td>
+                    <td>
+                      <b>自动回来。</b>常驻服务带自重启（macOS LaunchAgent /
+                      Linux systemd --user / Windows 计划任务），
+                      重启、崩溃、换网络都会自己重连。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>MRRC 服务</td>
+                    <td>
+                      <b>看你装的是哪个版本：</b><br />
+                      · <b>打包版（v1.22.0 起）</b>—— 按正常应用安装，已带 Hub
+                      前置能力（路径前缀 / 令牌不进 URL / 会话遥测 / PTT
+                      活性闸门）。<br />
+                      · <b>源码运行</b> ——
+                      非常驻，重启后要手动起（下面就这个情况）。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="hub-code">
+              <pre><code>cd mrrc_modern
+while IFS='=' read -r k v; do case "$k" in ''|\#*) continue;; esac; export "$k=$v"; done \
+    &lt; "$HOME/Library/Application Support/MRRC-Modern/mrrc_modern.env"
+nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;</code></pre>
+            </div>
+
+            <div class="hub-callout danger">
+              <span class="hub-callout-title"
+                >必须是这个 <code>while ... read</code> 循环，不能
+                <code>source</code></span
+              >
+              <p>
+                环境文件里有
+                <code>USB Audio Device</code> 这类<b>带空格的值</b>。
+                <code>source</code>
+                会把值里的词当命令去执行；上面这个循环才是正确的加载方式。
+                这不是风格问题，是会真的报错。
+              </p>
+            </div>
+          </li>
+        </ol>
+
+        <p class="hub-note">
+          接下来 →
+          <a href="use.html" style="color: var(--accent)"
+            >怎么用、怎么分享给朋友</a
+          >
+          · 连不上 →
+          <a href="trouble.html" style="color: var(--accent)">排障</a> ·
+          想知道每一层为什么这么设计 →
+          <a href="design.html" style="color: var(--accent)">设计与层层实现</a>
+          <br />
+          本页事实基线：2026-10-01 现场取证。命令与期望输出均在现网实例上实测。
+        </p>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-section">
+            <h4>MRRC Cloud Hub</h4>
+            <p>
+              把 MRRC Modern
+              实例接入云端统一入口：实例主动出站、一个呼号一个入口、PTT
+              释放永远在电台本地执行。
+            </p>
+          </div>
+          <div class="footer-section">
+            <h4>文档</h4>
+            <ul>
+              <li><a href="index.html">概览</a></li>
+              <li><a href="start.html">接入四步</a></li>
+              <li><a href="use.html">使用与分享</a></li>
+              <li><a href="trouble.html">排障</a></li>
+              <li><a href="design.html">设计与层层实现</a></li>
+            </ul>
+          </div>
+          <div class="footer-section">
+            <h4>相关</h4>
+            <ul>
+              <li>
+                <a href="https://www.vlsc.net/mrrc_modern/"
+                  >MRRC Modern 产品站</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://github.com/cheenle/mrrc_hub"
+                  target="_blank"
+                  rel="noopener"
+                  >源码（GitHub）</a
+                >
+              </li>
+              <li>
+                <a href="https://www.vlsc.net/" target="_blank" rel="noopener"
+                  >VLSC Projects</a
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2026 MRRC Cloud Hub · BG1SB</p>
+          <p>
+            事实基线：2026-10-01 现场取证 · 运营事实以
+            <code>SDD/12 §12.8</code> 为准
+          </p>
+        </div>
+      </div>
+    </footer>
+
+    <script src="js/hub.js"></script>
+    <script src="https://www.vlsc.net/js/global-nav.js?v=9" defer></script>
+  </body>
+</html>

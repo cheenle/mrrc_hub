@@ -86,6 +86,21 @@
 | Postconditions | 至多一个有效 Operator 租约 |
 | Refs | `SC-H3` `AD-H05` `UC-H05` |
 
+### UC-H10: 呼号注册与核验（实例与用户）
+
+| Field | Description |
+|-------|-------------|
+| Goal | 以真实呼号建立租户身份：实例获得 `<呼号>.mrrc.vlsc.net`，用户以呼号作为账号标识 |
+| Preconditions | 注册人持有该呼号；Portal 具备核验手段（呼号库比对 / 执照材料审核） |
+| Basic Flow | 提交呼号 → **规范化**（去空格、大小写不敏感：`BG1SB` 与 `bg1sb` 视为同一呼号）→ 查重（同一呼号同一时刻只能有一个 Owner）→ **核验**（呼号库比对，或执照材料人工审核）→ 绑定 `(呼号, 账号)` → 分配实例标签与隧道端口（注册表一行）→ 实例侧 `install_instance_tunnel.sh <呼号> <端口>` 上线 → 入口生效 |
+| Exceptions | 核验失败 → 拒绝并审计；呼号已被绑定 → 拒绝，或走申诉/转移流程，**绝不静默覆盖**；大小写变体 → 同一呼号；冒用被举报并核实 → 撤销绑定并停用入口 |
+| Safety | 呼号是**公开**标识，入口存在性可被枚举（AD-H15 有意接受）。因此核验必须发生在**授予访问之前**，而不是事后追责 |
+| Postconditions | 租户名 = 呼号；账号标识 = 呼号；审计记录了核验依据 |
+| Refs | `AD-H15` `NFR-H028` `NFR-H029` `SC-H10` `UC-H01` `I-H9` |
+| **Status** | **已实现**（2026-09-30）：`portal/`（`callsign.py` 规范化与标签规则、`store.py` 状态机与审计、
+`registry.py` 注册表与端口分配、`verify.py` 核验器、`app.py` 开放四步端点）。
+测试 `tests/test_portal.py`。**核验是授予的硬前置**，由测试守住。 |
+
 ### UC-H07: Tunnel Gateway 故障切换
 
 | Field | Description |

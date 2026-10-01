@@ -3,7 +3,7 @@
 ## 12.1 部署拓扑（单地域双可用区起步）
 
 | 资源 | 起步规格 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | Access/Tunnel 数据面 | 2 × 4C8G，高网络基线 | 可先同进程部署；到触发线后拆分。**实际更可能先受公网出带宽、连接数与 fd 限制，而非 CPU** |
 | 控制面 | 2 × 4C8G | Portal/IAM/Registry/Ticket/OTA/审计，无状态 |
 | RDS MySQL HA | 1 套 4C8G | 用户、实例、ACL、版本、审计索引 |
@@ -28,7 +28,7 @@
 ## 12.3 配置项（建议命名）
 
 | 配置 | 默认 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `HUB_TUNNEL_HOST` / `HUB_TUNNEL_PORT` | `tunnel.mrrc.vlsc.net:443` | Agent 隧道入口（支持多地址列表） |
 | `HUB_HEARTBEAT_INTERVAL_S` | 15 | 实例心跳周期（NFR-H002） |
 | `HUB_LEASE_TTL_S` | 25 | Operator 租约 TTL（20–30） |
@@ -42,7 +42,7 @@
 ## 12.4 可观测性与告警
 
 | 指标 | 告警线 | 动作 |
-|---|---:|---|
+| --- | ---: | --- |
 | 实例在线率 | < 95%（5 min 窗口） | 输出离线清单并区分客户侧/Hub 侧 |
 | 单实例隧道重连 | > 3 次/小时 | 检查客户网络、证书与 Tunnel 节点 |
 | 新会话建立成功率 | < 99% | 检查节点映射、验票与代理链路 |
@@ -63,7 +63,7 @@
 ## 12.5 配额
 
 | 配额 | 说明 |
-|---|---|
+| --- | --- |
 | 每实例 Listener 并发上限 | Owner 可配；默认建议 3（与 AD-H12 门槛对齐） |
 | 每用户并发会话数 | 防滥用 |
 | Operator 单次最长占用 | 需定值（源文档 §14 待决策项） |
@@ -79,10 +79,200 @@
 ## 12.7 排障快速索引
 
 | 症状 | 优先检查 |
-|---|---|
+| --- | --- |
 | 实例显示离线但客户说在线 | 心跳是否到达、证书是否过期、归属映射是否过期、出站 443 是否被拦 |
 | 用户能登录但控制台黑屏 | 5 个 WS 端点中哪个被拒绝（4001 未授权 / 4003 角色拒绝）；是否 Listener 访问了 `/WSaudioTX` |
 | 令牌出现在日志 | **回归缺陷**（AD-H07/SC-H6）：检查 `HUB_LOG_REDACT`、nginx log_format、实例 uvicorn 日志 |
 | 音频卡顿 | 上行利用率是否 > 60%；按 AD-H14 先降瀑布帧率；查看 Listener 并发是否超过 AD-H12 门槛 |
 | PTT 未释放 | **安全事件**：区分 EOF 型 / 半开型（第 15 章 §15.4），核对心跳参数与 `MRRC_PTT_MAX_TX_SECONDS` |
 | 升级后行为没变 | 核对清单版本、包 SHA、实例实际运行版本（沿用 `upgrade_core.py` 的 `state.json` 可证明性） |
+
+## 12.8 实况记录（as-built，2026-09-30）
+
+> 机器/进程/文件/端口/cron 一级的物理视图见
+> [`../docs/physical-architecture-2026-10-01.svg`](../docs/physical-architecture-2026-10-01.svg)
+> （同目录 PNG 为渲染件）；本节与其一致，冲突时以现场为准并回改两处。
+
+本节记录**实际部署的事实**，与前面各节的"设计意图"区分；两者不一致时以本节为准并回改设计。
+
+### 主机
+
+| 角色 | 位置 | 说明 |
+| ------ | ------ | ------ |
+| Hub | 阿里云乌兰察布 `8.160.161.80`（Ubuntu 26.04） | nginx（`mrrc-hub` 通配 vhost + `mrrc-portal` / `mrrc-portal-edge`，均在 8899/9988 TLS）、frps 0.71.0（控制口 8989，`proxyBindAddr=127.0.0.1`）、Let's Encrypt 证书与每日 cron、`mrrc-portal.service`（呼号注册，仅回环 8890）、`/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 逐实例公钥） |
+| Edge | 海外 `www.vlsc.net`（193.111.30.163） | 443 路径代理 `/mrrc_modern/<呼号大写>/` → hub 9988；上游校验用**系统 CA** |
+| Instance | 实例归属人自己的机器（macOS / Linux / Windows） | 常驻隧道（launchd / systemd / 计划任务）；MRRC 服务是否常驻取决于是打包版还是源码运行（见下） |
+
+### 入口（当前）
+
+- `https://<呼号>.mrrc.vlsc.net:9988/` —— 直连 hub 的**主入口**，真证书，浏览器零警告
+- `https://<呼号>.mrrc.vlsc.net:8899/` —— **同一个 vhost、同一张证书的第二个 TLS 入口**。
+  它原本是明文 301 口，因 R-H13（未备案域名在大陆地域的明文会被途中改写）**已升级为 TLS**。
+  两个端口的 `server` 块是同一个，不是两条不同路径。
+- `https://www.vlsc.net/mrrc_modern/<呼号大写>/` —— 海外边缘，真证书（境内无备案的迂回入口）。
+  **路径大小写敏感、规范形式是大写呼号**，小写会被 301 到规范形式。
+  ⚠️ **该路径 2026-10-01 实测存在间歇性失败** —— 见下方「排障增补」
+- 注册表 `/etc/mrrc-hub/instances.tsv` —— 三列：`<标签> <回环端口> <上游 TLS 名>`。现网当前仅一行：
+  `bg1sb 18802 radio.vlsc.net`。加实例 = 一行 + 重跑 `gen_hub_routes.py`。
+  **第三列是逐实例证书校验的落点**（见下方「实例证书链」）；`bg1sb` 目前仍指向上游旧证书名，
+  尚未迁到它自己的 `<标签>.mrrc.vlsc.net` —— 迁移机制已就位、未施用。
+  **标签规则**：主产品用裸呼号（`bg1sb`），附加产品加产品后缀（`bg1sb-legacy`）—— 见 `07-subject-area-model.md` §7.x.1
+- `https://portal.mrrc.vlsc.net:8899/` —— **呼号自助注册**（面向公众，另一套 vhost，
+  与实例入口同证书）。运维审批台在 `/admin`。详见 §12.9
+
+### 证书（NFR-H030 的落地）
+
+- 签发：hub 上 `mrrc-hub-cert.sh`，DNS-01，覆盖 `*.mrrc.vlsc.net` 与 `mrrc.vlsc.net`
+- 验证方式：certbot `manual` 插件 + **自建 hook** `aliyun-acme-dns-hook.py`（纯标准库自算阿里云 RPC 签名，直接调 DNS API）。**刻意不用 `certbot-dns-aliyun`**：第三方、年久失修，本机 Python 版本已超前
+- 凭证：`/root/.secrets/aliyun.ini`（0600）。存在 ⇒ 真证书；不存在 ⇒ 回退自签通配（脚本自动切换）
+- 续期：root crontab 每天 8:00 跑 `mrrc-hub-cert.sh`，剩余 <30 天自动续；日志 `/var/log/mrrc-hub-cert.log`；退出码 0/1/2（<14 天为告警）
+- 安装：`mrrc-hub-cert-hook.sh` 拷贝证书到 `/etc/mrrc-hub/tls/` 并 reload nginx
+- **www 边缘不再需要同步信任锚**：上游校验信任源是系统 CA。此前钉自签证书的做法咬过两次（换证书未同步 ⇒ 立即 502），已废弃
+
+### 实例证书链（一机一证，2026-10-01 就位）
+
+通配证书解决的是**入口**；另有一条链解决**hub → 实例**这一跳的身份。
+
+| 环节 | 实况 |
+| ------ | ------ |
+| 签发 | `deploy/make_instance_cert.sh <标签>`：自签证书，**签给实例自己的入口名**（`<标签>.mrrc.vlsc.net`），默认 3650 天，幂等（CN 匹配则不重签，`FORCE=1` 强制） |
+| 交付 | 实例侧设 `MRRC_SSL_CERT` / `MRRC_SSL_KEY`；**私钥永不外传**，只有公钥进 |
+| 钉住 | 公钥写入 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例证书）。现网 121 个证书块 |
+| 校验 | nginx `proxy_ssl_name $mrrc_tls_name` + `proxy_ssl_trusted_certificate …/trust-bundle.pem`，**校验始终开着**；自签证书靠"钉住它"通过，而不是靠关掉 verification |
+| 映射 | `$mrrc_tls_name` 由 `gen_hub_routes.py` 从注册表第三列生成；未指定时回落 `radio.vlsc.net`（兼容既有实例） |
+
+**为什么自签而不是给每台实例发真证书**：租户没有自己的域名，入口名在 `*.mrrc.vlsc.net` 下，
+而通配证书的私钥不可能下发给每个租户。自签 + 逐实例钉住能得到同一个安全属性（名字绑定的
+端到端校验），且不引入新的 CA 依赖。
+
+> 现网 `bg1sb` 仍在用 `radio.vlsc.net` 那张旧证书（注册表第三列未改）—— **能力已到位，迁移未做**。
+> 写文档时不要把"机制存在"写成"已在跑"。
+
+### 实例开通链（安装器，2026-10-01 就位）
+
+`deploy/install_instance_tunnel.sh`（macOS / Linux）与 `.ps1`（Windows）把开通变成一步：
+
+| 环节 | 实况 |
+| ------ | ------ |
+| frpc 来源（按优先级） | ① 安装包内嵌副本（与脚本同级或 `.frpc/`）→ ② 系统 `PATH` → ③ 从 frp 官方 release 下载**并校验 SHA-256**，不符即拒绝使用 |
+| 版本对齐 | `MRRC_FRP_VERSION` 默认 `0.71.0`，**与 hub 上的 frps 对齐（pin 死）** —— 客户端比服务端新可能握手失败 |
+| 缓存 | `~/.local/share/mrrc-fleet`（`MRRC_FRP_DIR` 可改） |
+| 常驻 | macOS = LaunchAgent + `KeepAlive`；Linux = systemd user unit（**登出后仍活**）；Windows = 计划任务 |
+| 载荷构建 | `deploy/fetch_installer_payload.sh` 逐个校验哈希；**openssl 的 URL/哈希不硬编码**，从 lock 读，缺条目就跳过 —— *宁可不打包，也不把来路不明的二进制塞进安装包* |
+
+**现阶段的边界**：安装器仍是**仓内脚本**，没有公开发布的安装包下载地址
+（已试 `www.vlsc.net/mrrc_hub/install.sh` 等路径均 404）。用户今天仍需先拿到仓库。
+安装包分发是下一步。
+
+### 实例侧运行（重要运维事实）
+
+frpc 隧道是 **常驻服务**（macOS `com.mrrc.fleet-tunnel.<呼号>`，Linux systemd user unit），重启自动恢复。
+**MRRC 服务本身取决于跑的是哪个版本**：
+
+- **打包版**：mrrc_modern 的 **feat/hub 分支** CHANGELOG 有 v1.22.0/v1.23.0（含 Hub 前置能力
+  C1–C6，见第 11 章 §11.3），但**未合并进 main、无 tag**；Stable 渠道与产品站仍 v1.21.0。
+  **运营待确认**：现网 bg1sb 实例跑在哪个 ref —— 它决定 as-built 链路是否含 C1/C2。
+  V0.15 的"v1.22.0 及以后已带入安装包"叙述缺分支限定，V0.16 订正。
+- **源码运行**：仍非常驻，重启后要手动起：
+
+```bash
+cd mrrc_modern
+while IFS='=' read -r k v; do case "$k" in ''|\#*) continue;; esac; export "$k=$v"; done \
+    < "$HOME/Library/Application Support/MRRC-Modern/mrrc_modern.env"
+nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
+```
+
+用 `read` 循环而不是 `source`：env 文件含 `USB Audio Device` 这类带空格的值，`source` 会把它当命令执行。
+
+### 已知退化（有意接受，见 ch13）
+
+- **登录限流在隧道路径下退化为全局桶**：所有登录共享 `::ffff:127.0.0.1`（5 次失败 / 300 秒）。修法：边缘 `limit_req` 或实例信任 `X-Forwarded-For`（随下次发版）。用户已明确暂缓
+- **实例存在性可枚举**：I-H9 已结案接受（呼号是公开信息）；防御重心前移到"授予访问之前核验呼号"（UC-H10）
+
+### 排障增补
+
+| 现象 | 先查什么 |
+| ------ | ---------- |
+| 边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步） |
+| **边缘路径间歇性无响应（2026-10-01 实测）** | 6 次请求中 3 次 20 s 内无任何响应，呈交替出现。已排除：本地 DNS/TCP/TLS（均 0.2 s 内完成）、www 静态服务（6/6 正常）、www 上另一条代理腿 `/mrrc_modern/listen → radio.vlsc.net:8888`（6/6 正常）、hub 侧各种 SNI（`tunnel.*` 与 `<呼号>.*`）/Host 组合（各 6/6 正常）。**失败定位于 `www → hub:9988` 这一跳**。推测与云厂商对单一来源的入方向限流有关，待进一步取证（www 侧 error.log 无上游超时记录 —— 客户端 20 s 先于 nginx 的 60 s 阈值断开）。**当前对策：把边缘定位为备用路径，主路优先** |
+| 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
+| 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
+| `curl -sI .../login` 得到 405 | **不是故障**。`-I` 发 HEAD，而登录页只接受 GET。用 `curl -s -o /dev/null -w '%{http_code}'` 拿状态码 |
+
+### 12.8.1 第二产品 `mrrc` 的接入现状（2026-09-30）
+
+除主产品 `mrrc_modern` 外，站点侧产品 `mrrc`（Tornado 应用，默认端口 **8877**，`auth = FILE`）
+也已具备接入条件，按标签规则以**附加产品**形式出现（如 `bg1sb-legacy`，见 §7.x.1）：
+
+| 能力 | 状态 |
+| ------ | ------ |
+| 子域根路径入口 | **开箱即用** —— 无需改造；其认证走会话（无 URL 令牌），故 fleet 评审的 P0-2 对它不适用 |
+| 路径前缀能力 | **已实现**（`mrrc` 分支 `feat/hub`）：`base_path.py` + `[SERVER] base_path`，**默认空 = 行为与改造前完全一致**；含 **Cookie path 限定**（路径入口下同 origin 多产品不再互踩会话，即 P0-3 在该产品上的落点）、HTML 8 处 / `fetch` 3 处 / WebSocket 10 处 / `sw.js` 预缓存的前缀化。守卫：`dev_tools/test_path_prefix.py` |
+| 会话遥测 | **已实现**：`GET /api/session_metrics` + `[SERVER] metrics_interval_s`（默认 60s 打印一行；0 = 关闭）；连接数直读既有 `*Clients` 列表，**不侵入 WS 生命周期** |
+| PTT 安全 | **已具备三层，无需新增**：① 活性闸门（连续未收帧 ≈5s 即收回，`[CTRL] tx_liveness_s` 可配，默认即原行为）② TOT 硬上限（`[CTRL] ptt_tot_seconds`，默认 120s）③ 释放失败每 2s 重试 |
+
+**尚未上线**：注册表条目、实例侧隧道、以及 www 的产品段（形如 `/mrrc_legacy/<呼号>/`）。
+前置条件是**一个能独立运行该产品的站点** —— 它要占用电台/音频/串口，不能与主产品同机并行，
+因此上线验证需独立硬件或经同意的停机窗口。
+
+改造记录与逐步计划：`../../mrrc/docs/current/design/hub-parity-plan.md`。
+
+## 12.9 Portal 自助（UC-H10 的落地）
+
+| 项 | 实况 |
+| ---- | ------ |
+| 代码 | `portal/`（零第三方依赖，标准库 HTTP；与 HTTP 层解耦便于测试） |
+| 数据 | `/etc/mrrc-hub/portal.json`（申请/授予 + 追加式审计，原子写） |
+| 注册表 | 与 hub 同一份 `/etc/mrrc-hub/instances.tsv`（Portal 只追加一行） |
+| 呼号库（权威） | `/var/lib/mrrc-hub/portal/clublog_users.json` —— **Club Log** 全库（273,047 条），与站内留言版 `www.vlsc.net/feedback` **同源**；hub 每天 04:30 从 www 拉取（`mrrc-portal-sync-clublog.sh`，晚于 www 的 03:00 刷新） |
+| 呼号库（自建） | `/etc/mrrc-hub/callsigns.txt`（一行一个）—— 用于权威库暂未收录的新执照 |
+| 核验链 | `ClubLogVerifier → CallsignListVerifier → ManualVerifier`（能给出**确定结论**的依据先问，人工始终兜底） |
+| 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较 |
+| 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
+| 测试 | `python3 tests/test_portal.py` |
+| 入口 | `https://portal.mrrc.vlsc.net:8899/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
+| 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |
+| 限流 | `/apply` 上 `limit_req zone=mrrc_portal_apply burst=5 nodelay`（10 r/m/来源）。**这里能用真实客户端 IP** —— 与被隧道合并来源的实例侧不同 |
+
+**要记住的一条**：`grant` 只写注册表并打印实例侧命令，**不自动重生成路由** ——
+`gen_hub_routes.py` + `nginx reload` 仍需 root 手工执行，这是有意的分工。
+
+**核验为何必须在授予之前**：呼号是公开标识、入口可枚举（I-H9 接受），
+所以防线只能放在"核验通过才给访问"，不能放在"别人猜不到"。完整论证见
+`../portal/README.md` 与 `../portal/callsign.py`。
+
+### 12.9.1 Portal 上线的端到端验收（2026-10-01）
+
+| 项 | 实测 |
+| ---- | ------ |
+| 入口与证书 | `GET https://portal.mrrc.vlsc.net:8899/` → 200，**不带 `-k` 亦通过**（通配证书覆盖） |
+| 自助申请（库外呼号） | `POST /apply` `bg1test` → `applied`，理由"呼号库中未收录，转人工核验" |
+| 自动核验（库内呼号） | `POST /apply` `bg1sb` → `verified`，"命中呼号库" |
+| 未核验不得授予 | 无令牌 `POST /grant` → **403**；状态未到 `verified` 亦拒绝（代码硬前置） |
+| 限流 | 14 连击 → `200×4` 后持续 **429**（按来源 IP，真实生效） |
+| 既有服务未受影响 | `bg1sb` 实例入口 401 ✓、www 边缘 401 ✓、未知名字 404 unknown instance ✓ |
+
+运维动作两种用法：脚本/curl 用请求头 `X-Portal-Token`；浏览器用表单里的同名字段
+（**令牌走请求体，不进 URL** —— URL 会进访问日志与浏览器历史）。
+授予之后仍需 root 手工执行 `gen_hub_routes.py` + `nginx reload`（有意分工，见 §12.9）。
+
+### 12.9.2 核验依据：与留言版同源（2026-10-01）
+
+站内留言版（`www.vlsc.net/feedback`，其代码在 `/home/cheenle/feedback/`）早已解决"呼号有效性"：
+`callsign.py` 做归一化与基准呼号格式校验，判定则查 **Club Log 呼号库**（27 万条，每日从
+clublog.org 刷新，与 RumLogNG 同源）。Portal **直接采用同一套规则与同一份数据**，理由是：
+两个入口若对同一呼号给出不同结论，比只有一个入口更糟。
+
+采用的规则（逐条对齐留言版）：
+
+| 项 | 规则 |
+| ---- | ------ |
+| 格式 | `^[0-9]?[A-Z]{1,2}[0-9][A-Z]{1,3}$`（可选 1 位数字前缀 + 1-2 字母 + 分区数字 + 1-3 字母） |
+| 便携/前缀 | **拒绝** `BG1SB/P`、`4X/BG1SB` 等 —— 注册的是身份，便携是操作状态；且标签要当 DNS 名用 |
+| 基准呼号提取 | `4X/BG1SB`→`BG1SB`、`BG1SB/P`→`BG1SB`、`1A0C_14`→`1A0C`、`SOS`→'' |
+| 判定语义 | 命中 = 已核验；**未命中 ≠ 冒用**（新执照、低活跃、未上传 Club Log 都可能不在库里）⇒ 转人工，只有人能拒绝 |
+
+**拉取的授权方式是受限命令**：hub 上那把钥匙在 www 的 `authorized_keys` 里绑定了
+`command="cat .../clublog_users.json"`，因此它**只能读这一个文件**，拿不到 shell（已实测：
+请求执行 `id` 仍只返回 JSON）。同步脚本还带**规模校验门**（<10 万条即拒绝替换），
+避免把好索引换成空索引。

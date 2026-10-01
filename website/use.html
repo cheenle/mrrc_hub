@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="通过 MRRC Cloud Hub 使用自己的电台：三个入口怎么选、主口令与监听口令的区别、怎么安全地分享给朋友、以及现阶段的已知退化。"
+    />
+    <meta name="author" content="BG1SB" />
+    <meta name="theme-color" content="#000000" />
+    <title>使用与分享 · MRRC Cloud Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/octen.css?v=1" />
+    <link rel="stylesheet" href="css/hub.css?v=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>"
+    />
+  </head>
+  <body data-site="mrrc_hub">
+    <a href="#main" class="hub-skip">跳到主要内容</a>
+
+    <nav class="navbar">
+      <div class="container navbar-content">
+        <a href="index.html" class="logo">
+          <span class="logo-icon"><i class="fas fa-satellite-dish"></i></span>
+          <span>MRRC <span style="color: var(--accent)">Cloud Hub</span></span>
+        </a>
+        <ul class="nav-links">
+          <li><a href="index.html">概览</a></li>
+          <li><a href="start.html">接入</a></li>
+          <li>
+            <a href="use.html" class="active" aria-current="page">使用与分享</a>
+          </li>
+          <li><a href="trouble.html">排障</a></li>
+          <li><a href="design.html">设计与实现</a></li>
+          <li>
+            <a
+              href="https://github.com/cheenle/mrrc_hub"
+              target="_blank"
+              rel="noopener"
+              ><i class="fab fa-github"></i> 源码</a
+            >
+          </li>
+        </ul>
+        <div class="nav-actions">
+          <a href="https://www.vlsc.net/mrrc_modern/" class="lang-btn"
+            >MRRC Modern</a
+          >
+          <button
+            class="mobile-menu-toggle"
+            aria-label="打开菜单"
+            onclick="toggleMobileMenu()"
+          >
+            <i class="fas fa-bars"></i>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hub-hero">
+      <h1>使用与分享</h1>
+      <p>
+        入口怎么选、两把口令分别意味着什么、怎么把电台安全地分享给朋友 ——
+        以及现阶段哪些地方还不好用，我们直接写在明处。
+      </p>
+    </header>
+
+    <main id="main" class="hub-shell">
+      <nav class="hub-toc" aria-label="本页目录">
+        <h4>本页</h4>
+        <ul>
+          <li><a href="#entries">三个入口</a></li>
+          <li><a href="#roles">两把口令</a></li>
+          <li><a href="#share">分享给朋友</a></li>
+          <li><a href="#gaps">现状与已知退化</a></li>
+          <li><a href="#mobile">手机上用</a></li>
+        </ul>
+      </nav>
+
+      <div class="hub-prose">
+        <section id="entries">
+          <h2>三个入口怎么选</h2>
+          <p>同一台电台、同一套口令，可以从三个地方进去。默认永远选第一个。</p>
+          <div class="hub-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">入口</th>
+                  <th scope="col">地址</th>
+                  <th scope="col">什么时候用</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>主路</b></td>
+                  <td><code>https://&lt;呼号&gt;.mrrc.vlsc.net:9988/</code></td>
+                  <td>
+                    <b>默认选它。</b>低延迟，真证书。 2026-10-01
+                    多次实测全部成功，往返 0.3–0.5 s。
+                  </td>
+                </tr>
+                <tr>
+                  <td>主路备用口</td>
+                  <td><code>https://&lt;呼号&gt;.mrrc.vlsc.net:8899/</code></td>
+                  <td>
+                    与 9988 是<b>同一个服务、同一张证书</b>。
+                    只有你的网络单独放行了这一个端口时才需要它。
+                  </td>
+                </tr>
+                <tr>
+                  <td>海外边缘</td>
+                  <td>
+                    <code
+                      >https://www.vlsc.net/mrrc_modern/&lt;呼号大写&gt;/</code
+                    >
+                  </td>
+                  <td>
+                    只放行 80/443 的网络（公司网、访客 Wi-Fi）。
+                    本节下方有它的<b>实测问题</b>，用之前先读。
+                  </td>
+                </tr>
+                <tr>
+                  <td>局域网</td>
+                  <td><code>http://&lt;内网IP&gt;:8888/</code></td>
+                  <td>在家。不经过 Hub，延迟最低。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="hub-callout warn">
+            <span class="hub-callout-title">边缘入口的路径必须用大写呼号</span>
+            <p>
+              URL 路径是<b>大小写敏感</b>的，而 DNS 不敏感。 写成小写
+              <code>/mrrc_modern/bg1sb/</code> 会被 301 到规范形式
+              <code>/mrrc_modern/BG1SB/</code> —— 能通，但多一次跳转。
+              分享链接时直接给大写形式。
+            </p>
+          </div>
+
+          <div class="hub-callout danger">
+            <span class="hub-callout-title"
+              >海外边缘入口实测存在间歇性失败（2026-10-01）</span
+            >
+            <p>
+              实测 6 次请求中有 <b>3 次</b>在 20 秒内完全没有响应（另外 3 次约
+              0.5 s 正常返回）， 呈交替出现。已排除的原因：<b
+                >本地 DNS/TCP/TLS 均正常</b
+              >（0.2 s 内完成）、 www 的静态服务 6/6 正常、www 上另一条代理腿
+              6/6 正常、 hub 侧各种 SNI/Host 组合 6/6 正常。失败发生在
+              <b>www → hub:9988 这一跳</b>。
+            </p>
+            <p>
+              因此把它当作<b>备用路径</b>：先用主路，主路不通再试它，不要把它当默认。
+              该问题已记录在案，待进一步取证。
+            </p>
+          </div>
+        </section>
+
+        <section id="roles">
+          <h2>两把口令，两个角色</h2>
+          <p>
+            这是最容易搞错的地方：同一个登录页，<b>口令不同，进去之后的权限完全不同</b>。
+          </p>
+          <div class="hub-table-wrap">
+            <table class="hub-perm">
+              <thead>
+                <tr>
+                  <th scope="col">口令</th>
+                  <th scope="col">从哪进</th>
+                  <th scope="col">听</th>
+                  <th scope="col">看频谱</th>
+                  <th scope="col">调频 / 换模式</th>
+                  <th scope="col">发射</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>主口令</b></td>
+                  <td><code>/</code></td>
+                  <td class="yes">✓</td>
+                  <td class="yes">✓</td>
+                  <td class="yes">✓</td>
+                  <td class="yes">✓</td>
+                </tr>
+                <tr>
+                  <td><b>监听口令</b></td>
+                  <td><code>/listen</code></td>
+                  <td class="yes">✓</td>
+                  <td class="yes">✓</td>
+                  <td class="yes">✓</td>
+                  <td class="no">✗ 服务端拒绝</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="hub-callout ok">
+            <span class="hub-callout-title"
+              >"不能发射"是服务端强制的，不是界面藏起来</span
+            >
+            <p>
+              监听角色在服务端被限制为只读：所有改变状态的接口调用都会被直接拒绝，
+              它连接的数据通道里压根<b>不包含</b>发射音频那一条。
+              所以把监听口令给别人是安全的 ——
+              对方拿不到发射权，不是"界面上找不到按钮"而已。
+            </p>
+          </div>
+
+          <div class="hub-callout warn">
+            <span class="hub-callout-title"
+              >监听口令默认是空的 = 监听角色进不去</span
+            >
+            <p>
+              如果你还没设置监听口令，那这个角色<b>无法进入</b>（空口令永远不匹配）。
+              想分享给别人之前，先去实例上把它设好。
+            </p>
+          </div>
+
+          <h3>监听者能调频，这是刻意的</h3>
+          <p>
+            监听者可以<b>调频率、换模式、调用存储频道</b>，只是不能发射。
+            这不是疏忽 —— 因为"调频"并不改变"谁在发射"这个根本约束，
+            而禁止调频会让想帮忙找台的人完全帮不上忙。
+          </p>
+        </section>
+
+        <section id="share">
+          <h2>分享给朋友</h2>
+          <div class="hub-callout ok">
+            <span class="hub-callout-title">给这两样</span>
+            <ul>
+              <li>
+                入口地址（主路优先）：<code
+                  >https://&lt;呼号&gt;.mrrc.vlsc.net:9988/</code
+                >
+              </li>
+              <li><b>监听口令</b> —— 对方能听、能看频谱、能调频，不能发射</li>
+            </ul>
+          </div>
+          <div class="hub-callout danger">
+            <span class="hub-callout-title">别给主口令</span>
+            <p>
+              主口令等于<b>发射权</b>。给了主口令，对方就能按下 PTT ——
+              这是在你的呼号下发射。而且现阶段 Hub 侧还没有细粒度的成员管理，
+              你也没法事后单独撤销某个人。
+            </p>
+          </div>
+        </section>
+
+        <section id="gaps">
+          <h2>现状与已知退化</h2>
+          <p>
+            下面这些是<b>现状</b>，不是设计。写出来是为了让你在遇到时不会以为是自己的配置错了。
+          </p>
+          <div class="hub-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">事项</th>
+                  <th scope="col">状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>独占写者租约（每个实例同时最多一个操作者）</td>
+                  <td>
+                    <span class="hub-badge todo">未实现 · 阶段 2</span><br />
+                    <span
+                      style="color: var(--text-secondary); font-size: 0.85rem"
+                    >
+                      两个人同时用主口令登录时，谁在发射由<b>实例侧</b>仲裁：
+                      只有当前那个"占有发射权"的会话能按下 PTT。
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>成员管理与单独撤销</td>
+                  <td>
+                    <span class="hub-badge todo">未实现 · 阶段 2</span><br />
+                    <span
+                      style="color: var(--text-secondary); font-size: 0.85rem"
+                    >
+                      想收回某个人的访问权，只能改监听口令（会影响所有拿到它的人）。<br />
+                      注：<b>实例级</b>的撒销已有流程（冒用被核实后可移除绑定并停用入口，
+                      <code>portal</code> 的 <code>/revoke</code>），
+                      但它是针对整个呼号的，不能拿来单独停掉某个监听者。
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>登录失败限流</td>
+                  <td>
+                    <span class="hub-badge gap">已知退化</span><br />
+                    <span
+                      style="color: var(--text-secondary); font-size: 0.85rem"
+                    >
+                      限流规则是 5 次失败 / 300 秒。但在隧道方式下， Hub
+                      看到的所有登录都来自同一个来源，于是限流退化成<b
+                        >全局桶</b
+                      >
+                      —— 别人反复输错口令，会把你自己的登录一起锁住 5
+                      分钟。已决定暂缓修。
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>PTT 释放</td>
+                  <td>
+                    <span class="hub-badge live">已实现</span><br />
+                    <span
+                      style="color: var(--text-secondary); font-size: 0.85rem"
+                    >
+                      <b>不依赖云端。</b>关浏览器、掉线、拔网线、换 Wi-Fi，
+                      一律由电台所在那台机器本地强制回到接收。
+                      另有发射时长硬上限兜底。
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>deploy/*.sh 与现网漂移</td>
+                  <td>
+                    <span class="hub-badge gap">已记录未修</span><br />
+                    <span
+                      style="color: var(--text-secondary); font-size: 0.85rem"
+                    >
+                      仓库里的 <code>deploy_hub_routes.sh</code> 与
+                      <code>deploy_www_edge.sh</code> 落后于现网配置： 重跑会把
+                      8899 从 TLS
+                      退回明文、<b>抹掉按实例名的证书校验与信任包</b>、
+                      把海外边缘入口形态降级。 自己跑本仓脚本前，先读
+                      <code>deploy/README.md</code> 的「脚本与现网漂移」一节。
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="hub-callout danger">
+            <span class="hub-callout-title">别把主口令发进群</span>
+            <p>
+              因为上面那条"全局桶"：群里有人反复输错你给的主口令，
+              会把你自己也一起锁在门外 5 分钟。分享用监听口令。
+            </p>
+          </div>
+        </section>
+
+        <section id="mobile">
+          <h2>手机上用</h2>
+          <ul>
+            <li>
+              <b>当 App 用</b> —— 用手机浏览器打开入口，选"添加到主屏幕"。
+              打开后是全屏的，和原生 App 观感接近。
+            </li>
+            <li>
+              <b>原生 App</b> —— MRRC Modern 有 iOS 客户端， 下载与配置见<a
+                href="https://www.vlsc.net/mrrc_modern/"
+                style="color: var(--accent)"
+                >产品站</a
+              >。
+            </li>
+            <li>
+              <b>切网络会自动重连</b> —— 隧道带 KeepAlive，从 Wi-Fi
+              切到蜂窝会自己恢复， 不用手动重启任何东西。
+            </li>
+          </ul>
+        </section>
+
+        <p class="hub-note">
+          上个环节 →
+          <a href="start.html" style="color: var(--accent)">接入四步</a> ·
+          遇到问题 →
+          <a href="trouble.html" style="color: var(--accent)">排障</a> ·
+          想知道为什么这么设计 →
+          <a href="design.html" style="color: var(--accent)">设计与层层实现</a>
+          <br />
+          本页事实基线：2026-10-01 现场取证，入口可用性与延迟均为当时实测数据。
+        </p>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <div class="footer-section">
+            <h4>MRRC Cloud Hub</h4>
+            <p>
+              把 MRRC Modern
+              实例接入云端统一入口：实例主动出站、一个呼号一个入口、PTT
+              释放永远在电台本地执行。
+            </p>
+          </div>
+          <div class="footer-section">
+            <h4>文档</h4>
+            <ul>
+              <li><a href="index.html">概览</a></li>
+              <li><a href="start.html">接入四步</a></li>
+              <li><a href="use.html">使用与分享</a></li>
+              <li><a href="trouble.html">排障</a></li>
+              <li><a href="design.html">设计与层层实现</a></li>
+            </ul>
+          </div>
+          <div class="footer-section">
+            <h4>相关</h4>
+            <ul>
+              <li>
+                <a href="https://www.vlsc.net/mrrc_modern/"
+                  >MRRC Modern 产品站</a
+                >
+              </li>
+              <li>
+                <a
+                  href="https://github.com/cheenle/mrrc_hub"
+                  target="_blank"
+                  rel="noopener"
+                  >源码（GitHub）</a
+                >
+              </li>
+              <li>
+                <a href="https://www.vlsc.net/" target="_blank" rel="noopener"
+                  >VLSC Projects</a
+                >
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>© 2026 MRRC Cloud Hub · BG1SB</p>
+          <p>
+            事实基线：2026-10-01 现场取证 · 运营事实以
+            <code>SDD/12 §12.8</code> 为准
+          </p>
+        </div>
+      </div>
+    </footer>
+
+    <script src="js/hub.js"></script>
+    <script src="https://www.vlsc.net/js/global-nav.js?v=9" defer></script>
+  </body>
+</html>

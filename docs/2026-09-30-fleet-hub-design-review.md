@@ -199,3 +199,18 @@
 ## 8. 一句话结论
 
 > 架构方向不用改；但文档必须补上"现状基线（已有 4 套机制，其中 IPv6 直连已生产在跑）"，并把 PTT 半开释放、令牌进 URL、同 origin 双会话、Listener 语义这四项当成 **MVP 前必须解决**的问题 —— 它们不是阶段 2 的优化项，而是决定 MVP 能不能成立的前提。
+
+## 结案状态（2026-09-30 更新）
+
+本评审提出的四项 P0 与实测修正，**当前状态**：
+
+| 评审发现 | 状态 | 落在哪 |
+|----------|------|--------|
+| P0-1 PTT 半开不释放（客户端失联后仍处发射态） | **已实现**（实例侧） | 活性闸门 `MRRC_REMOTE_SESSION_TX_HEARTBEAT_S`，复用 key-owner 仲裁；Hub 模式建议设 3–5 秒。与 `MRRC_PTT_MAX_TX_SECONDS` 构成两条独立防线。测试 `tests/test_tx_liveness.py` |
+| P0-2 令牌进 URL（uvicorn 访问日志留痕） | **已实现**（实例侧） | AD-024：cookie/Bearer 优先，query 形式仅兼容并告警；`tests/test_ws_token_transport.py` |
+| P0-3 同 origin 双实例共享 Cookie | **呼号子域方案下结构性解决**；**www 路径入口仍未解决** | 每个租户独占主机名 ⇒ Cookie 天然按主机隔离 ✓。但路径反代入口（`www.vlsc.net/mrrc_modern/<呼号>/`）所有租户**共享同一 origin** ⇒ 该入口只应作迂回/临时用途，或需实例侧配合（独立 Cookie 名/路径）。**列为未结项** |
+| P0-4 Listener 实为受限操作（非"只读旁观"） | **已在设计中限定** | 见 `../SDD`（Listener 的能力边界与 Operator 租约的关系）；一期靠人工授权，自动化在阶段 2 |
+| 实测修正：Opus 64 kbps、频谱 1701 B/帧 × 30 fps ≈ 408 kbps（占 86%） | **已入档** | 该数字是 AD-H12（RX 扇出决策）的触发依据 |
+
+**尚未做（有意）**：登录限流在隧道路径下退化为全局桶（用户明确暂缓）；管理 Portal、设备 mTLS、
+Operator 租约（阶段 2）。逐项运维事实见 `../SDD/12-operational-model.md` §12.8。

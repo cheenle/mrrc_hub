@@ -1,0 +1,43 @@
+# MRRC Cloud Hub — 实例侧 frpc 配置（验证用）
+#
+# 复制到 ~/mrrc-frpc.toml，填入 bootstrap-hub.sh 打印的 token，然后：
+#     frpc -c ~/mrrc-frpc.toml
+#
+# 要求 frp ≥ 0.52（v2 配置格式；更早的版本用 ini，键名不同）。
+# 这一侧**不需要公网 IP、不需要端口映射、不需要 UPnP** —— 全部出站，
+# 这正是 hub SDD AD-H01 要验证的第一条。
+
+serverAddr = "8.160.161.80"     # 换成你的 hub；域名解析正常后也可写域名
+serverPort = 8989               # frps bindPort（安全组需放行；非标端口，见 deploy/README.md）
+auth.method = "token"
+auth.token = "REPLACE_WITH_TOKEN_FROM_BOOTSTRAP"
+
+# 隧道自身加密；frps 侧配了 transport.tls.force = true，明文会被直接拒绝，
+# 不会静默降级。
+transport.tls.enable = true
+
+log.to = "/tmp/mrrc-frpc.log"   # 排障用；不要把 token 打进长期日志
+log.level = "info"
+log.maxDays = 3
+
+[[proxies]]
+name = "mrrc-test1"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8888                # MRRC_modern 本体（HTTPS，真证书 radio.vlsc.net）
+remotePort = 18888              # 必须落在 frps 的 allowPorts 18800-18999 内；
+                                # frps 只把它绑在 127.0.0.1 上，不暴露到公网
+
+# 为什么用 type = "tcp" 而不是 http/https：
+#   本代理在 frps 侧终结于 127.0.0.1:18888，再由 hub 的 nginx 用
+#   proxy_ssl_verify on 回源，校验实例的 radio.vlsc.net 证书。
+#   若改用 frp 的 http 代理类型，本地后端必须是**明文 HTTP**，而 MRRC 只讲
+#   HTTPS —— 那就只能退回"关掉证书校验"，正是 hub SDD NFR-H021 禁止的做法。
+
+# ── 想跑第二个实例（多实例验证）时，复制一节并改这三处 ──────────────
+# [[proxies]]
+# name = "mrrc-test2"
+# type = "tcp"
+# localIP = "127.0.0.1"
+# localPort = 8890            # 另一台/另一实例
+# remotePort = 18889

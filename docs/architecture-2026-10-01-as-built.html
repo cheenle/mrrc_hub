@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>总体架构图 · as-built 校验版 2026-10-01 · 校验记录</title>
+<style>
+  body{margin:0;background:#f5f7fa;color:#1f2937;
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+  .page{max-width:1200px;margin:0 auto;padding:32px 24px 60px;}
+  h1{font-size:26px;margin:0 0 6px}
+  .sub{color:#64748b;margin:0 0 18px}
+  .fig{background:#fff;border:1px solid #d7dce3;border-radius:12px;padding:10px;overflow-x:auto}
+  .fig img{display:block;width:100%;min-width:1400px;height:auto}
+  .meta{color:#64748b;font-size:13.5px;margin:10px 2px 26px}
+  code{font-family:"JetBrains Mono","SF Mono",Menlo,monospace;font-size:.9em;background:#eef2f7;padding:0 4px;border-radius:4px}
+  details{background:#fff;border:1px solid #d7dce3;border-radius:12px;padding:14px 18px}
+  summary{cursor:pointer;font-weight:700}
+  table{border-collapse:collapse;width:100%;margin-top:12px;font-size:13.5px}
+  td,th{border:1px solid #d7dce3;padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#f1f5f9}
+  .ok{color:#047857;font-weight:700}
+  .old{color:#b45309;font-weight:700}
+  .miss{color:#b91c1c;font-weight:700}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>MRRC Cloud Hub 远程接入 · 总体架构（as-built 校验版 2026-10-01）</h1>
+  <p class="sub">图的本体是 <code>architecture-2026-10-01-as-built.svg</code>（唯一可编辑源）；同目录
+    <code>.png</code> 是其渲染件（3200×2000）。本页只承载校验记录。</p>
+  <div class="fig"><img src="architecture-2026-10-01-as-built.svg" alt="MRRC Cloud Hub 总体架构 as-built 校验版"></div>
+  <p class="meta">改图：编辑 SVG → 重渲染
+    <code>"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars
+    --force-device-scale-factor=1 --window-size=3200,2000 --screenshot=architecture-2026-10-01-as-built.png
+    architecture-2026-10-01-as-built.svg</code></p>
+
+  <details open>
+    <summary>校验记录：原图（2026-09-30 目标态版）→ 本版逐条订正</summary>
+    <table>
+      <tr><th style="width:28%">原图陈述</th><th style="width:10%">判定</th><th>订正 / 依据</th></tr>
+      <tr><td>公网入口"仅开放 443"；<code>&lt;instance-id&gt;.mrrc.vlsc.net</code></td><td class="old">过时</td>
+        <td>现网开放 8899/9988/8989（境内备案前 443 不可用，R-H13）；身份为<b>呼号</b>（AD-H15）；补海外边缘 443 退化路与 Portal 入口。SDD/12 §12.8、deploy/README</td></tr>
+      <tr><td>控制面六盒并列（Registry/Ticket/Lease/OTA/Obs）</td><td class="old">未区分</td>
+        <td>Portal 呼号注册已实现且有公网入口（§12.9）；Registry as-built 为文件注册表；其余为阶段 2/3 —— 本版以虚线框与阶段标签区分</td></tr>
+      <tr><td>Access/Tunnel Gateway、WSS/<b>mTLS</b>、RX Relay</td><td class="old">目标态</td>
+        <td>as-built = nginx 通配 vhost（含上游证书校验 NFR-H021）+ frps 共享 token；RX Relay 未实现（AD-H12 条件触发）</td></tr>
+      <tr><td>Redis/RDS/OSS/SLS 存储行</td><td class="old">目标态</td>
+        <td>as-built 为文件（instances.tsv / portal.json / 追加式审计）+ nginx 日志（只记路径）；目标态存储移至虚线区</td></tr>
+      <tr><td>用户链路"登录 Portal → 签发 ticket → 访问"</td><td class="old">过时</td>
+        <td>as-built 为主/监听口令直接登录（host-only Cookie，凭据不进 URL/日志，AD-H07/AD-H09）；Portal 只管呼号注册；ticket 链路标为虚线目标态</td></tr>
+      <tr><td>每实例一机一证；operator 单写租约</td><td class="old">阶段 2</td>
+        <td>as-built 共享 token；发射权由实例侧仲裁（mrrc_modern PTT 控制面仲裁）</td></tr>
+      <tr><td>七层 PTT 释放为最终防线</td><td class="old">数字旧</td>
+        <td>实例侧 Layer 0–8 + hub 远程会话活性层（I-H6，mrrc_modern V2.62/V2.63 已落地）</td></tr>
+      <tr><td>容量基线 200/500/1000/5000/200 Mbps</td><td class="old">规划值</td>
+        <td>未压测（I-H1/I-H2 待采集），本版显式标注"规划值，未压测"</td></tr>
+      <tr><td>Listener <code>/listen</code> 多读；实例主动出站</td><td class="ok">相符</td>
+        <td>与现网一致：Listener 服务端强制只读（4003/403）；客户侧零入站（SC-H1）</td></tr>
+      <tr><td>（缺失）证书服务、上游证书校验、404 不回退</td><td class="miss">补入</td>
+        <td>DNS-01 通配每日续期（NFR-H030）；proxy_ssl_verify on（NFR-H021）；未知呼号 404 不回退（NFR-H022）</td></tr>
+    </table>
+  </details>
+</div>
+</body>
+</html>

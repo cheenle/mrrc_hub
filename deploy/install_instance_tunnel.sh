@@ -27,7 +27,10 @@ HUB_HOST="${MRRC_HUB_HOST:-tunnel.mrrc.vlsc.net}"
 HUB_CONTROL_PORT="${MRRC_HUB_CONTROL_PORT:-8989}"
 TOKEN="${MRRC_HUB_TOKEN:?set MRRC_HUB_TOKEN (the frps token) — or read it on the hub: sudo cat /etc/frp/frps.token}"
 
-CONF_DIR="$HOME/Library/Application Support/mrrc-fleet"
+case "$(uname -s)" in
+	Darwin) CONF_DIR="$HOME/Library/Application Support/mrrc-fleet" ;;
+	*)      CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mrrc-fleet" ;;
+esac
 CONF="$CONF_DIR/frpc-$NAME.toml"
 PLIST="$HOME/Library/LaunchAgents/com.mrrc.fleet-tunnel.$NAME.plist"
 LABEL="com.mrrc.fleet-tunnel.$NAME"
@@ -172,13 +175,52 @@ cat >"$PLIST" <<EOF
 EOF
 chmod 644 "$PLIST"
 
-launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$UID" "$PLIST"
-sleep 3
-launchctl print "gui/$UID/$LABEL" 2>/dev/null | grep -E "^\s+(state|pid) " | sed 's/^/  /' || true
+case "$(uname -s)" in
+Darwin)
+	launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+	launchctl bootstrap "gui/$UID" "$PLIST"
+	sleep 3
+	launchctl print "gui/$UID/$LABEL" 2>/dev/null | grep -E "^\s+(state|pid) " | sed 's/^/  /' || true
+	;;
+Linux)
+	# systemd --user：不需要 root，且用 linger 让它活过登录会话 ——
+	# 隧道是常驻服务，租户注销后停掉就等于实例离线。
+	UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+	UNIT="$UNIT_DIR/mrrc-fleet-tunnel-${NAME}.service"
+	mkdir -p "$UNIT_DIR"
+	cat > "$UNIT" <<EOF
+[Unit]
+Description=MRRC Cloud Hub tunnel (${NAME})
+After=network-online.target
+
+[Service]
+ExecStart=${FRPC} -c ${CONF}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+	chmod 600 "$UNIT"
+	systemctl --user daemon-reload
+	systemctl --user enable --now "mrrc-fleet-tunnel-${NAME}.service"
+	if ! loginctl enable-linger "$USER" 2>/dev/null; then
+		echo "  ⚠ 无法设置 linger：注销后隧道会停。需要 root 执行： sudo loginctl enable-linger $USER" >&2
+	fi
+	sleep 3
+	systemctl --user --no-pager --lines=0 status "mrrc-fleet-tunnel-${NAME}.service" 2>/dev/null | head -3 | sed 's/^/  /' || true
+	;;
+*)
+	echo "unsupported platform: $(uname -s) — start it by hand: $FRPC -c $CONF" >&2
+	;;
+esac
 echo "==> ${NAME} → https://${NAME}.mrrc.vlsc.net:9988 (local 127.0.0.1:${LOCAL_PORT})"
 echo
 echo "check:"
 echo "  tail -5 '${CONF_DIR}/frpc-${NAME}.log'          # want: login to server success / start proxy success"
 echo "  curl -sk https://${NAME}.mrrc.vlsc.net:9988/api/health   # 401 once the radio server is up"
-echo "  launchctl bootout gui/$UID/${LABEL}            # to remove it"
+case "$(uname -s)" in
+	Darwin) echo "  launchctl bootout gui/$UID/${LABEL}            # to remove it" ;;
+	Linux)  echo "  systemctl --user disable --now mrrc-fleet-tunnel-${NAME}.service   # to remove it"
+	        echo "  journalctl --user -u mrrc-fleet-tunnel-${NAME}.service -n 20       # its log" ;;
+esac

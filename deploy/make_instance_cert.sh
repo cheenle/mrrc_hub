@@ -22,9 +22,10 @@ KEY="$OUT/$(echo "${NAME,,}").key"
 
 if [[ "${FORCE:-0}" != "1" && -s "$CRT" && -s "$KEY" ]] \
    && openssl x509 -in "$CRT" -noout -subject 2>/dev/null | grep -q "CN *= *${FQDN}"; then
-	echo "已有 ${FQDN} 的证书，跳过（FORCE=1 可强制重签）: $CRT"
+	echo "已有 ${FQDN} 的证书，复用（FORCE=1 可强制重签）: $CRT"
 	openssl x509 -in "$CRT" -noout -subject -enddate | sed 's/^/  /'
-	exit 0
+	# 注意：**不在此退出** —— 复跑必须能重试下面的登记，
+	# 否则"hub 可达后重跑"这个恢复路径形同虚设（实测踩过：日志里只有一次 200）。
 fi
 
 openssl req -x509 -newkey rsa:2048 -nodes -days "$DAYS" \
@@ -41,7 +42,8 @@ openssl x509 -in "$CRT" -noout -subject -ext subjectAltName -enddate | sed 's/^/
 echo "  cert: $CRT"
 echo "  key:  $KEY"
 echo "  实例侧设置:  MRRC_SSL_CERT=$CRT   MRRC_SSL_KEY=$KEY"
-
+echo "  hub 侧登记:  把这个文件的内容交上去，hub 写进 /etc/mrrc-hub/instance-certs/${NAME,,}.pem"
+echo "               （hub 侧只需公钥；私钥永远不离开实例）"
 # ---- 登记：把**公钥**交给 hub（私钥永不外传）----
 # 口令来自 Portal 的"分配入口"（运维页显示），一次性；没有口令时跳过并说明后果。
 if [[ -n "${MRRC_ENROLL_SECRET:-}" ]]; then
@@ -62,5 +64,3 @@ else
 	echo "未设 MRRC_ENROLL_SECRET ⇒ 跳过登记"
 	echo "  （自签证书必须登记到 hub 才会被信任，否则入口会 502；口令在 Portal 的「分配入口」里）"
 fi
-echo "  hub 侧登记:  把这个文件的内容交上去，hub 写进 /etc/mrrc-hub/instance-certs/${NAME,,}.pem"
-echo "               （hub 侧只需公钥；私钥永远不离开实例）"

@@ -43,7 +43,7 @@ record_openssl() {
 	hash="$(sha256_of "$tmp")"
 	printf '%s\t%s\t%s\n' "$name" "$url" "$hash" >> "$LOCK"
 	echo "已记录: $name  sha256=$hash" >&2
-	echo "（请人工确认这个来源可信，再把该行提交入库：$LOCK）" >&2
+	echo "（请人工确认这个来源可信，再把该行提交入库：${LOCK}）" >&2
 }
 
 if [[ -n "$RECORD" ]]; then record_openssl "$RECORD" "$NAME_OVERRIDE"; exit 0; fi
@@ -53,7 +53,7 @@ mkdir -p "$OUT"
 
 # ---- frpc：官方 release + 官方 checksums ----
 sums="$tmp/frp_checksums.txt"
-url_sums="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_checksums.txt"
+url_sums="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_sha256_checksums.txt"
 if curl -fsSL --retry 3 -o "$sums" "$url_sums"; then
 	IFS=',' read -ra PLIST <<< "$PLATFORMS"
 	for plat in "${PLIST[@]}"; do
@@ -66,7 +66,7 @@ if curl -fsSL --retry 3 -o "$sums" "$url_sums"; then
 		fi
 		got="$(sha256_of "$tmp/$base")"
 		if [[ "$got" != "$want" ]]; then
-			rm -f "$tmp/$base"; echo "  ✗ $base: SHA-256 不匹配，已删除（期望 $want 实得 $got）" >&2; exit 1
+			rm -f "$tmp/$base"; echo "  ✗ $base: SHA-256 不匹配，已删除（期望 $want 实得 ${got}）" >&2; exit 1
 		fi
 		mkdir -p "$OUT/$plat"
 		case "$ext" in
@@ -79,7 +79,7 @@ if curl -fsSL --retry 3 -o "$sums" "$url_sums"; then
 		echo "  ✓ $plat: $(basename "$bin")（校验通过）" >&2
 	done
 else
-	echo "  ✗ 无法取得 frp 官方校验和文件（$url_sums）—— frpc 一概不放入" >&2
+	echo "  ✗ 无法取得 frp 官方校验和文件（${url_sums}）—— frpc 一概不放入" >&2
 fi
 
 # ---- openssl：只从 lock 取，无条目则跳过 ----
@@ -91,17 +91,17 @@ if [[ -s "$LOCK" ]]; then
 		if ! curl -fsSL --retry 3 -o "$tmp/$file" "$url"; then echo "  ✗ $plat/$file: 下载失败" >&2; continue; fi
 		got="$(sha256_of "$tmp/$file")"
 		if [[ "$got" != "$hash" ]]; then
-			rm -f "$tmp/$file"; echo "  ✗ $plat/$file: SHA-256 与 lock 不符，已删除（期望 $hash 实得 $got）" >&2; exit 1
+			rm -f "$tmp/$file"; echo "  ✗ $plat/$file: SHA-256 与 lock 不符，已删除（期望 $hash 实得 ${got}）" >&2; exit 1
 		fi
 		mkdir -p "$OUT/$plat"
 		case "$file" in
 			*.zip) unzip -qo "$tmp/$file" -d "$OUT/$plat" ;;
 			*) install -m 755 "$tmp/$file" "$OUT/$plat/$file" ;;
 		esac
-		echo "  ✓ $plat/$file（按 lock 校验通过）" >&2
+		echo "  ✓ $plat/${file}（按 lock 校验通过）" >&2
 	done < "$LOCK"
 else
-	echo "  · openssl: lock 文件不存在或无条目（$LOCK）—— 需要 Windows 上的证书生成时，" >&2
+	echo "  · openssl: lock 文件不存在或无条目（${LOCK}）—— 需要 Windows 上的证书生成时，" >&2
 	echo "    先用 --record-openssl <url> <平台>/<文件名> 记一条并人工确认来源" >&2
 fi
 
@@ -117,13 +117,13 @@ for plat in "${PLIST[@]}"; do
 		windows-*)
 			for s in install_instance_tunnel.ps1; do
 				install -m 644 "$SELF_DIR/$s" "$OUT/$plat/$s"
-				echo "  ✓ $plat/$s（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
+				echo "  ✓ $plat/${s}（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
 			done
 			;;
 		*)
 			for s in install_instance_tunnel.sh wire_instance_env.sh make_instance_cert.sh; do
 				install -m 755 "$SELF_DIR/$s" "$OUT/$plat/$s"
-				echo "  ✓ $plat/$s（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
+				echo "  ✓ $plat/${s}（$(sha256_of "$OUT/$plat/$s" | cut -c1-12)…）" >&2
 			done
 			;;
 	esac

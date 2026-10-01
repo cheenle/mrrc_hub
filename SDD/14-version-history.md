@@ -18,8 +18,11 @@ V0.13 把"一机一证"入档，V0.14 把 AD 与实况的矛盾摆明，但**从
    于是脚本注释里承诺的"hub 可达后重跑即可"**是假的**（服务日志里三次运行只有一次请求）。
 3. **免预装取件**（`fetch_installer_payload.sh`）：无第三方依赖、**必校 SHA-256**、不符即拒绝而非
    降级（NFR-H032）。Windows 安装包改为**携带 frpc 与 openssl**，不满足就不出包。
-4. **三平台常驻**：macOS launchd / Linux systemd（注销后存活）/ Windows 服务均已落地；应用侧 env
-   接线 Windows 已通，**Linux 与 macOS 待接**。
+4. **三平台常驻 + 三平台 env 接线**：macOS launchd / Linux systemd（注销后存活）/ Windows 服务均已
+   落地；应用侧环境变量三平台已通 —— Windows 用用户级变量，macOS 用 LaunchAgent（`launchctl setenv`）
+   + 登录片段，Linux 用 `environment.d` + 登录片段。**两处都写是必要的**：从访达启动的应用不读 shell
+   配置，SSH 登录不读 `environment.d`。接线做成独立脚本 `wire_instance_env.sh`（可沙箱测试、幂等、
+   只写有值的变量——写空路径会让应用去找一个没人放文件的地方）。
 5. **文档漂移修正**：`deploy/README.md` 仍在指 `issue_wildcard_cert.sh`，该脚本已改名
    `mrrc-hub-cert.sh`；四个新脚本未收录。本版一并修正。
 

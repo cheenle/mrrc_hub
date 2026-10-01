@@ -296,7 +296,7 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 证书（实况，2026-09-30 起）
 
-`deploy/mrrc-hub-cert.sh` 是唯一入口；`issue_wildcard_cert.sh` 已被它取代并删除。
+`deploy/mrrc-hub-cert.sh` 是唯一入口；`mrrc-hub-cert.sh` 已被它取代并删除。
 
 | 文件 | 作用 |
 | ------ | ------ |
@@ -315,3 +315,13 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 3. **只等权威解析不够**。CA 经公共解析器验证，hook 需轮询 DoH 直到可见。
 
 www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续期后无需任何跨机同步**。
+
+## 开通链脚本（V0.15 收录）
+
+| 脚本 | 在哪台机器 | 做什么 |
+| --- | --- | --- |
+| `make_instance_cert.sh <呼号> [目录]` | 实例（租户机） | 签 `<呼号>.mrrc.vlsc.net` 自签证书（幂等，`FORCE=1` 重签），并**把公钥登记到 hub**（`MRRC_ENROLL_SECRET` / `MRRC_ENROLL_URL`，缺口令则跳过并说明后果） |
+| `install_instance_tunnel.sh` / `.ps1` | 实例（macOS/Linux ／ Windows） | 取件、校验 SHA-256、装常驻隧道、跑通自检；Windows 侧同时签证书并登记 |
+| `fetch_installer_payload.sh` | 实例 | 免预装取件器：无第三方依赖，**必校 SHA-256**，不符即拒绝（不降级） |
+| `gen_hub_routes.py` | hub（**root**） | 按注册表生成通配 vhost 路由 + 把 `instance-certs/` 并成一册信任包；**原子替换，`nginx -t` 过了才 reload**，校验不通过就回滚且**不回退到关闭校验** |
+| `mrrc-hub-cert.sh` | hub（root） | 通配证书（DNS-01）签发与续期 —— **由 `issue_wildcard_cert.sh` 改名而来** |

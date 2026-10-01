@@ -91,14 +91,14 @@ ensure_frpc() {                     # 结果写进全局 FRPC
 		got="$(shasum -a 256 "$tmp/$base.tar.gz" | awk '{print $1}')"
 	fi
 	if [[ "$got" != "$want" ]]; then
-		echo "SHA-256 不匹配，拒绝安装（期望 $want，实得 $got）" >&2; rm -rf "$tmp"; return 1
+		echo "SHA-256 不匹配，拒绝安装（期望 ${want}，实得 ${got}）" >&2; rm -rf "$tmp"; return 1
 	fi
 	echo "校验通过 ✓" >&2
 	tar -xzf "$tmp/$base.tar.gz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
 	install -m 755 "$tmp/$base/frpc" "$FRP_CACHE/frpc" || { rm -rf "$tmp"; return 1; }
 	rm -rf "$tmp"
 	FRPC="$FRP_CACHE/frpc"
-	echo "已安装: $FRPC（$("$FRPC" --version 2>/dev/null || echo 'version unknown')）" >&2
+	echo "已安装: ${FRPC}（$("$FRPC" --version 2>/dev/null || echo 'version unknown')）" >&2
 }
 
 ensure_frpc || exit 2

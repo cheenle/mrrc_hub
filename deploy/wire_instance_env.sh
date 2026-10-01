@@ -77,7 +77,7 @@ Linux)
 	echo "  图形应用: $ED_DIR/mrrc.conf（systemd 用户会话）"
 	;;
 *)
-	echo "  图形应用: 未支持的平台 $OS —— 手动 export 即可（值见 $ENV_SH）" >&2
+	echo "  图形应用: 未支持的平台 $OS —— 手动 export 即可（值见 ${ENV_SH}）" >&2
 	;;
 esac
 

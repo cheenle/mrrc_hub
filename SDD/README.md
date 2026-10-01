@@ -43,7 +43,7 @@
 | Document ID | SDD-MRRC-HUB-2026-001 |
 | SDD Version | V0.16 |
 | Baseline Date | 2026-10-01 |
-| Status | **阶段 1 通路已在真实公网跑通**（`bg1sb.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL：**hub 侧已实现**（日志不记 query）；**实例侧在 mrrc_modern feat/hub 已改纯 Cookie 传递（C2），未合并 main**，Stable v1.21.0 仍拼 `?token=`（11 §11.3 对账注）；**呼号注册已上线公网自助**（`portal.mrrc.vlsc.net:8899`，见 §12.9）；**实例证书链已闭环**（签发 → `POST /enroll` 登记 → 信任包 → 入口 401 验证，§12.8）。剩余：隧道层 PTT 半开释放（MVP，I-H6 open）、Operator 租约、设备 mTLS、安装包分发、ICP 备案 |
+| Status | **阶段 1 通路已在真实公网跑通**（`bg1sb.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL：**hub 侧已实现**（日志不记 query）；**实例侧在 mrrc_modern feat/hub 已改纯 Cookie 传递（C2），未合并 main**，Stable v1.21.0 仍拼 `?token=`（11 §11.3 对账注）；**呼号注册已上线公网自助**（`portal.mrrc.vlsc.net:8899`，见 §12.9）；**实例证书链已闭环并在真实租户机上验证（签发 → 登记 200 → 信任包 → 入口可达）。剩余：隧道层 PTT 半开释放（MVP，I-H6 open）、Operator 租约、设备 mTLS、安装包分发、ICP 备案 |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
 | 客户侧前提 | 实例仅需出站 TCP **8989**（隧道口）；无公网 IP、无端口映射、无 UPnP（SC-H1）。**用户侧需能出站 9988** —— 两条不同的约束，见 NFR-H001 / R-H12 |
 | 入口规划 | **两级**：主路 `<呼号>.mrrc.vlsc.net:9988`（hub，低延迟；`:8899` 同服务备用口）；退化路 `www.vlsc.net/mrrc_modern/<呼号大写>/` 反代（443 + 真证书，供只放行 80/443 的网络，+0.4~0.6 s，2026-10-01 实测间歇）。隧道 `tunnel.mrrc.vlsc.net:8989`；明文口不可依赖（R-H13） |

@@ -28,7 +28,11 @@ param(
     [switch]$Force
 )
 
-$ErrorActionPreference = "Stop"
+# 这里是 Continue 而不是 Stop，有一条实测理由：PowerShell 5.1 在 Stop 下会把**原生程序写 stderr**
+# （openssl 的进度点 `+++…`、icacls 的正常输出）当成 terminating error，签名那一步会因此中断 ——
+# 在干净 VM 上装包真跑时实测到。本脚本对每一处关键调用都显式查 $LASTEXITCODE 并用 Fail 退出，
+# 所以 Continue 不会放过失败，只是不让 stderr 输出冒充失败。
+$ErrorActionPreference = "Continue"
 $taskName = "MRRC Fleet Tunnel ($Name)"
 $conf = Join-Path $DataDir "frpc-$Name.toml"
 $fqdn = "$($Name.ToLower()).mrrc.vlsc.net"
@@ -131,7 +135,9 @@ $action = New-ScheduledTaskAction -Execute $frpc -Argument "-c `"$conf`"" -Worki
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
+$principal = New-ScheduledTaskPrincipal # 本地账户不能写成 WORKGROUP\user（实测 HRESULT 0x80070534 = 账号无法解析）：
+    # 用计算机名\用户名，工作组机器与域机器都成立。
+    -UserId "$env:COMPUTERNAME\$env:USERNAME" -LogonType Interactive
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 4

@@ -2,9 +2,9 @@
    MRRC Cloud Hub 文档站 — 渐进增强
    ──────────────────────────────────────────────────────────────────────
    无框架、无构建。每一项都是纯增强：JS 不执行时页面仍然完全可读可用。
-   移动菜单、回到顶部、滚动进度条复用 octen.css 里已有的上游类名
-   （.nav-links.active / .vlsc-to-top.show / .vlsc-scroll-progress /
-   .vlsc-reveal.in），所以本站的观感与 www.vlsc.net 同源。
+   移动菜单、目录高亮、代码复制在本站实现；回到顶部、滚动进度条、
+   全局顶 nav、GA 由门户共享的 global-nav.js 提供（每页 <script> 引入），
+   与 www.vlsc.net 各子站同源，不在这里重复实现。
    ══════════════════════════════════════════════════════════════════════ */
 (() => {
 	/* ── 移动菜单（navbar 上用的是 onclick="toggleMobileMenu()"，保持上游约定） ── */
@@ -14,28 +14,15 @@
 	};
 
 	document.addEventListener("DOMContentLoaded", () => {
-		/* ── navbar 滚动加深 + 进度条 + 回到顶部 ── */
+		/* ── navbar 滚动加深（回到顶部与进度条由 global-nav.js 负责） ── */
 		var navbar = document.querySelector(".navbar");
-		var progress = document.getElementById("scrollProgress");
-		var backTop = document.getElementById("backTop");
 
 		function onScroll() {
 			var y = window.scrollY || document.documentElement.scrollTop;
 			if (navbar) navbar.classList.toggle("scrolled", y > 8);
-			if (backTop) backTop.classList.toggle("show", y > 500);
-			if (progress) {
-				var max = document.documentElement.scrollHeight - window.innerHeight;
-				progress.style.width = (max > 0 ? (y / max) * 100 : 0) + "%";
-			}
 		}
 		window.addEventListener("scroll", onScroll, { passive: true });
 		onScroll();
-
-		if (backTop) {
-			backTop.addEventListener("click", () => {
-				window.scrollTo({ top: 0, behavior: "smooth" });
-			});
-		}
 
 		/* 注：不用 octen.css 的 .vlsc-reveal。它默认 opacity:0、必须靠 JS 加 .in 才可见，
        JS 一旦加载失败正文会整段隐形。入场动画改用纯 CSS 的 .animate（octen.css 已有）。 */

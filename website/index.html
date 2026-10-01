@@ -28,7 +28,7 @@
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>"
     />
   </head>
-  <body>
+  <body data-site="mrrc_hub">
     <a href="#main" class="hub-skip">跳到主要内容</a>
 
     <nav class="navbar">
@@ -126,9 +126,9 @@
         <div class="container">
           <div class="section-header">
             <span class="section-label">Why</span>
-            <h2 class="section-title">三条主张</h2>
+            <h2 class="section-title">四条主张</h2>
             <p class="section-subtitle">
-              整个接入层只有这三个设计承诺，其余都是为了让它们成立。
+              整个接入层只有这四个设计承诺，其余都是为了让它们成立。
             </p>
           </div>
           <div class="features-grid">
@@ -294,15 +294,15 @@
                   </td>
                 </tr>
                 <tr>
-                  <td>自助注册 Portal</td>
-                  <td><span class="hub-badge live">已实现并部署</span></td>
+                  <td>自助注册 Portal（呼号核验四步）</td>
+                  <td><span class="hub-badge live">公网入口已上线</span></td>
                   <td>
-                    呼号核验四步流程的服务已在 Hub
-                    上常驻运行，但只绑回环、<b>尚未对外开放公网入口</b>。
-                    用户注册今天仍走管理员，见<a
+                    <code>portal.mrrc.vlsc.net:8899</code>（通配证书覆盖，<code>/apply</code>
+                    按来源 IP 限流）。命中呼号库自动核验，库外转人工；
+                    核验通过后运维授予并写入注册表。见<a
                       href="start.html#register"
                       style="color: var(--accent)"
-                      >接入</a
+                      >接入 · 注册</a
                     >
                   </td>
                 </tr>
@@ -346,7 +346,7 @@
             <div class="step">
               <h4>局域网已经能用</h4>
               <p>
-                四步：前提自检 → 报呼号注册 → 装隧道 →
+                四步：前提自检 → 自助申请 → 装隧道 →
                 验证。每一步都有可以直接复制的命令和期望输出。
               </p>
               <a
@@ -417,10 +417,7 @@
       </div>
     </footer>
 
-    <button class="vlsc-to-top" id="backTop" aria-label="回到顶部">
-      <i class="fas fa-arrow-up"></i>
-    </button>
-    <div class="vlsc-scroll-progress" id="scrollProgress"></div>
     <script src="js/hub.js"></script>
+    <script src="https://www.vlsc.net/js/global-nav.js?v=8" defer></script>
   </body>
 </html>

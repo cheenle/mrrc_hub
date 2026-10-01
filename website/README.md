@@ -18,7 +18,8 @@
 | `design.html` | **工程侧唯一一页**：六层职责与边界、关键决策、安全不变量、现状与目标态 |
 | `css/octen.css` | **上游设计系统，原样复制，永不 fork** |
 | `css/hub.css` | 本站新增组件。上游之外的一切样式都在这里 —— 保证差异是一眼可见的单一文件 |
-| `js/hub.js` | 渐进增强：移动菜单、目录高亮、回到顶部、进度条、代码复制。无框架 |
+| `js/hub.js` | 渐进增强：移动菜单、目录高亮、代码复制。无框架 |
+| global-nav.js（热链） | 每页末尾从 `https://www.vlsc.net/js/global-nav.js?v=8` 加载：全局顶 nav、回到顶部、滚动进度条、GA4（带 vlsc.net 域守卫）。与 www 各子站同源，**不复制进本仓** |
 | `deploy.sh` | 幂等发布脚本。**只写不执行**，上线由人决定 |
 | `../.pi-lens.json` | 把 `css/octen.css` 排除出自动格式化 —— 见下方「必须钉住的两个文件」 |
 | `../biome.json` | 把本站的缩进风格钉成 2 空格（与上游 `octen.css` 一致），并双保险地禁用对 `octen.css` 的格式化 |
@@ -63,6 +64,11 @@ SHA-256 完全一致）。**不要在这里改它。**
 | 安全不变量 | `SDD/08`（AD-H06/07/11）、`SDD/15` |
 | 排障条目 | `SDD/12 §12.7 §12.8`、`deploy/README.md` |
 | 运营事实（主机、注册表、运维命令） | `SDD/12 §12.8` |
+| Portal 自助入口与核验流程 | `SDD/12 §12.9`、`portal/README.md`；现网 `https://portal.mrrc.vlsc.net:8899/` |
+
+Portal 自助页（`portal/app.py` 内置的三个页面）与本站同设计令牌（黑底 / 青 accent /
+同款表格与按钮观感），样式**内联**、不外链 CSS —— Portal 保持零第三方依赖，
+www 不可用时注册页仍完整可用。
 
 无法取证的内容一律写"待核实"，**不猜**。
 
@@ -87,7 +93,7 @@ cp ../../mrrc_modern/website/css/octen.css css/octen.css
 先**复核**（读实际配置 / 实测），再改页面，最后更新第 2 节这张表。
 顺序反过来就会生产出一份"看起来对"的文档。
 
-### 两条硬约定
+### 三条硬约定
 
 1. **关键内容不要用 `.vlsc-reveal`。** 那个类在 `octen.css` 里默认 `opacity: 0`，
    必须靠 JS 加 `.in` 才可见 —— JS 一旦加载失败，正文会整段隐形。
@@ -96,6 +102,9 @@ cp ../../mrrc_modern/website/css/octen.css css/octen.css
    （`hub-token-not-in-url`）会把 `?token=` / `?code=` / `?ticket=` 判为**阻断级违规**。
    讲"凭据不进 URL"这个决策时，写"查询参数形式的启动码"或只写字段名，
    **不要为了举例写出字面串**。也不要用 `exclude_scope` 削弱规则来给自己开后门。
+3. **`<body data-site>` 必须等于热链脚本 `PATHS` 里的键**（本站是 `mrrc_hub`）。
+   顶栏的高亮项就是拿它去比对的：写成别的值不会报错，只会**静默不高亮**。
+   键名随 `www.vlsc.net/js/global-nav.js` 走 —— 改本站这个值前先去那份 canonical 里确认。
 
 ---
 

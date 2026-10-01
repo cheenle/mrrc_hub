@@ -28,7 +28,7 @@
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%2322d3ee' width='100' height='100' rx='20'/><text y='.9em' x='50%' text-anchor='middle' font-size='60'>📡</text></svg>"
     />
   </head>
-  <body>
+  <body data-site="mrrc_hub">
     <a href="#main" class="hub-skip">跳到主要内容</a>
 
     <nav class="navbar">
@@ -72,7 +72,7 @@
     <header class="hub-hero">
       <h1>接入四步</h1>
       <p>
-        前提自检 → 报呼号注册 → 装隧道 → 验证。
+        前提自检 → 自助申请 → 装隧道 → 验证。
         全程只在本机执行，不需要动路由器，也不需要公网 IP。
       </p>
     </header>
@@ -170,51 +170,48 @@
             <div class="hub-callout ok">
               <span class="hub-callout-title">
                 <span class="hub-badge live">今天可用</span>
-                人工开通
-              </span>
-              <p>联系 Hub 管理员，报上你的呼号。你会拿到：</p>
-              <ul>
-                <li>
-                  <b>呼号标签</b> —— 你的入口就是
-                  <code>&lt;呼号&gt;.mrrc.vlsc.net</code>
-                </li>
-                <li>
-                  <b>隧道端口</b> —— 形如 <code>188xx</code>，由 Hub
-                  侧分配并记录在注册表里
-                </li>
-                <li><b>隧道凭证</b> —— 装隧道时要用，别贴进公开场合</li>
-              </ul>
-            </div>
-
-            <div class="hub-callout">
-              <span class="hub-callout-title">
-                <span class="hub-badge live">已实现并部署</span>
-                自助注册 Portal（呼号核验四步）
+                自助申请（公网入口已上线）
               </span>
               <p>
-                服务已在 Hub 上常驻运行，流程就是下面这四步。
-                <b>但它只绑回环、还没有公网入口</b> ——
-                所以今天你仍然要联系管理员，
-                只是管理员现在走的是同一条有据可查的流程。
+                打开
+                <code>https://portal.mrrc.vlsc.net:8899/</code
+                >，填呼号与联系方式提交。Portal 当场走完前三步：
               </p>
               <ul>
                 <li>
                   <b>规范化</b> —— 去空格、大小写不敏感。<code>BG1SB</code> 与
-                  <code>bg1sb</code>
-                  视为同一个呼号，不会变成两个租户。
+                  <code>bg1sb</code> 视为同一个呼号，不会变成两个租户。
                 </li>
                 <li>
                   <b>查重</b> —— 同一个呼号在同一时刻只能有一个归属人。
                   已被绑定时走申诉/转移流程，<b>绝不静默覆盖</b>。
                 </li>
-                <li><b>核验</b> —— 呼号库比对，或执照材料人工审核。</li>
-                <li><b>分配</b> —— 分配呼号标签与隧道端口，注册表落一行。</li>
+                <li>
+                  <b>核验</b> —— 命中 Club Log 呼号库（27 万条，与站内留言版同源）
+                  的<b>当场自动核验</b>；库外转人工核验 ——
+                  库外 ≠ 冒用，新执照、低活跃都可能不在库里，只有人能拒绝。
+                </li>
               </ul>
               <p>
-                对你有三个实际好处：<b>不会被静默覆盖</b>（被冒用会拒绝而不是抢走你的）、
-                <b>每一步有审计</b
-                >、以及<b>可被撑销</b>（冒用被核实后会移除绑定并停用入口）。
+                核验通过后，运维走第四步<b>分配</b>：把呼号标签与隧道端口写进注册表，
+                然后把三样东西发给你：<b>呼号标签</b>（入口就是
+                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>）、<b>隧道端口</b>（形如
+                <code>188xx</code>）、<b>隧道凭证</b>（别贴进公开场合）。
+                拿到这三样，进第 3 步装隧道。
               </p>
+            </div>
+
+            <div class="hub-callout">
+              <span class="hub-callout-title">自助注册对你的三个实际好处</span>
+              <ul>
+                <li>
+                  <b>不会被静默覆盖</b> —— 被冒用时申请会被拒绝，而不是抢走你的呼号。
+                </li>
+                <li><b>每一步有审计</b> —— 申请、核验、授予都进追加式审计日志。</li>
+                <li>
+                  <b>可被撤销</b> —— 冒用被核实后移除绑定并停用入口（<code>/revoke</code>）。
+                </li>
+              </ul>
             </div>
 
             <div class="hub-callout warn">
@@ -454,10 +451,7 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
       </div>
     </footer>
 
-    <button class="vlsc-to-top" id="backTop" aria-label="回到顶部">
-      <i class="fas fa-arrow-up"></i>
-    </button>
-    <div class="vlsc-scroll-progress" id="scrollProgress"></div>
     <script src="js/hub.js"></script>
+    <script src="https://www.vlsc.net/js/global-nav.js?v=8" defer></script>
   </body>
 </html>

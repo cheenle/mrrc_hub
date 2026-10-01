@@ -83,9 +83,11 @@
 }
 .hub-toc {
 	position: sticky;
-	top: calc(var(--nav-h) + 2rem);
+	top: calc(var(--gn-h) + var(--nav-h) + 2rem);
 	align-self: start;
-	max-height: calc(100vh - var(--nav-h) - 4rem);
+	grid-column: 2;
+	grid-row: 1;
+	max-height: calc(100vh - var(--gn-h) - var(--nav-h) - 4rem);
 	overflow-y: auto;
 	padding-left: 1.25rem;
 	border-left: 1px solid var(--border);
@@ -124,6 +126,8 @@
 		gap: 0;
 	}
 	.hub-toc {
+		grid-column: 1;
+		grid-row: 1;
 		position: static;
 		max-height: none;
 		overflow: visible;
@@ -132,11 +136,17 @@
 		padding: 0 0 1.25rem;
 		margin-bottom: 2.5rem;
 	}
+	.hub-prose {
+		grid-column: 1;
+		grid-row: 2;
+	}
 }
 
 /* ── 正文排版（octen.css 把 ul 的 list-style 清空了，这里恢复） ── */
 .hub-prose {
 	min-width: 0;
+	grid-column: 1;
+	grid-row: 1;
 }
 .hub-prose > section {
 	margin-bottom: 4rem;
@@ -483,7 +493,20 @@
 	line-height: 1.75;
 }
 
-/* ── 锚点让开 fixed navbar ── */
+/* ── 锚点让开 fixed navbar（含全局顶 nav） ── */
 [id] {
-	scroll-margin-top: calc(var(--nav-h) + 1rem);
+	scroll-margin-top: calc(var(--gn-h) + var(--nav-h) + 1rem);
+}
+
+/* ── 首页能力卡 2×2（对齐门户 .features-grid 的观感；
+   子站版 octen.css 的 auto-fill 在 4 张卡时会排出 3+1 孤儿卡） ── */
+@media (min-width: 769px) {
+	.features-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+/* ── hero 数字不许折行（"118–168 ms" 折成两行会显得排坏了） ── */
+.hero-stats .stat-value {
+	white-space: nowrap;
 }

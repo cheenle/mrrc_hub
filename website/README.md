@@ -65,6 +65,9 @@ SHA-256 完全一致）。**不要在这里改它。**
 | 排障条目 | `SDD/12 §12.7 §12.8`、`deploy/README.md` |
 | 运营事实（主机、注册表、运维命令） | `SDD/12 §12.8` |
 | Portal 自助入口与核验流程 | `SDD/12 §12.9`、`portal/README.md`；现网 `https://portal.mrrc.vlsc.net:8899/` |
+| 实例证书链（一机一证、信任包、逐实例校验） | `SDD/12 §12.8`「实例证书链」；现网 `/etc/mrrc-hub/trust-bundle.pem` + 注册表第三列 |
+| 实例安装器（自取 frpc、校验哈希、三平台常驻） | `deploy/install_instance_tunnel.{sh,ps1}` 头部注释；`SDD/12 §12.8`「实例开通链」 |
+| 实例侧版本与能力 | `mrrc_modern/CHANGELOG.md`（当前权威：v1.22.0）+ 其 `SDD/` |
 
 Portal 自助页（`portal/app.py` 内置的三个页面）与本站同设计令牌（黑底 / 青 accent /
 同款表格与按钮观感），样式**内联**、不外链 CSS —— Portal 保持零第三方依赖，
@@ -214,6 +217,9 @@ python3 ../.agents/skills/sdd-guardian/harness/sdd_context.py check --staged
 | --- | --- | --- |
 | 海外边缘入口 `www → hub:9988` 这一跳间歇性失败（2026-10-01 实测 6 次中 3 次 20 s 无响应） | **未修复**，已定位到 www 到 Hub 那一跳；已排除本地链路、www 静态服务、www 上另一条代理腿、Hub 侧 SNI/Host 组合 | `use.html#entries`、`design.html#status`、`trouble.html#symptoms` |
 | 登录限流在隧道路径下退化为全局桶 | 已决定暂缓 | `use.html#gaps` |
-| `deploy/*.sh` 与现网漂移（重跑会让现网退化） | 已记录未修 | `deploy/README.md` 的「⚠️ 脚本与现网漂移」 |
+| `deploy/*.sh` 与现网漂移（重跑会让现网退化） | 已记录未修。**X1 已升级为高危**：`deploy_hub_routes.sh` 还会抹掉逐实例校验与信任包 | `deploy/README.md` 的「⚠️ 脚本与现网漂移」 |
+| 实例证书链**机制就位、尚未施用**（现网 `bg1sb` 仍用 `radio.vlsc.net`） | 待迁移 | `index.html`、`design.html#status`、`SDD/12 §12.8` |
+| 安装器仍是仓内脚本，无公开发布的安装包下载 | 待做 | `start.html`、`index.html` |
+| 隧道层 PTT 半开释放未做（实例侧已有） | 待做 | `index.html`、`design.html#status` |
 
 修好之后，上面三处站内描述要**一并**更新。

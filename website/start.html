@@ -187,9 +187,9 @@
                   已被绑定时走申诉/转移流程，<b>绝不静默覆盖</b>。
                 </li>
                 <li>
-                  <b>核验</b> —— 命中 Club Log 呼号库（27 万条，与站内留言版同源）
-                  的<b>当场自动核验</b>；库外转人工核验 ——
-                  库外 ≠ 冒用，新执照、低活跃都可能不在库里，只有人能拒绝。
+                  <b>核验</b> —— 命中 Club Log 呼号库（27
+                  万条，与站内留言版同源） 的<b>当场自动核验</b>；库外转人工核验
+                  —— 库外 ≠ 冒用，新执照、低活跃都可能不在库里，只有人能拒绝。
                 </li>
               </ul>
               <p>
@@ -205,11 +205,15 @@
               <span class="hub-callout-title">自助注册对你的三个实际好处</span>
               <ul>
                 <li>
-                  <b>不会被静默覆盖</b> —— 被冒用时申请会被拒绝，而不是抢走你的呼号。
+                  <b>不会被静默覆盖</b> ——
+                  被冒用时申请会被拒绝，而不是抢走你的呼号。
                 </li>
-                <li><b>每一步有审计</b> —— 申请、核验、授予都进追加式审计日志。</li>
                 <li>
-                  <b>可被撤销</b> —— 冒用被核实后移除绑定并停用入口（<code>/revoke</code>）。
+                  <b>每一步有审计</b> —— 申请、核验、授予都进追加式审计日志。
+                </li>
+                <li>
+                  <b>可被撤销</b> ——
+                  冒用被核实后移除绑定并停用入口（<code>/revoke</code>）。
                 </li>
               </ul>
             </div>
@@ -237,30 +241,56 @@
             </p>
 
             <div class="hub-code">
-              <pre><code># 1) 装 frp 客户端（版本需 ≥ 0.52）
-brew install frp
-
-# 2) 取部署脚本（若还没有这个仓库）
+              <pre><code># 1) 取仓库（安装器在里面）
 git clone https://github.com/cheenle/mrrc_hub.git
 
-# 3) 装成开机自启的常驻服务
+# 2) 装成常驻服务（macOS / Linux）
+#    不需要先装 frp —— 安装器会自己取回来并校验哈希
 MRRC_HUB_TOKEN='&lt;隧道凭证&gt;' \
   bash mrrc_hub/deploy/install_instance_tunnel.sh &lt;呼号&gt; &lt;隧道端口&gt;</code></pre>
+            </div>
+
+            <p>Windows 用对等的 PowerShell 版，而且它做的更多：</p>
+
+            <div class="hub-code">
+              <pre><code>$env:MRRC_HUB_TOKEN = '&lt;隧道凭证&gt;'
+.\mrrc_hub\deploy\install_instance_tunnel.ps1 &lt;呼号&gt; &lt;隧道端口&gt;</code></pre>
             </div>
 
             <div class="hub-table-wrap">
               <table class="hub-facts">
                 <tbody>
                   <tr>
+                    <td>frpc 从哪来</td>
+                    <td>
+                      安装器按三级优先选：① 安装包内嵌副本 → ② 系统
+                      <code>PATH</code> 里已有的 → ③ 从 frp 官方 release
+                      下载并<b>校验 SHA-256</b>， 不符即拒绝使用。版本与 Hub
+                      端<b>钉死对齐</b> ——
+                      客户端比服务端新可能握手失败。缓存落在
+                      <code>~/.local/share/mrrc-fleet</code>。
+                    </td>
+                  </tr>
+                  <tr>
                     <td>它做了什么</td>
                     <td>
-                      写一份 <code>0600</code> 的隧道配置到
-                      <code
-                        >~/Library/Application
-                        Support/mrrc-fleet/frpc-&lt;呼号&gt;.toml</code
-                      >， 并安装一个带 <b>KeepAlive</b> 的
-                      LaunchAgent（<code>com.mrrc.fleet-tunnel.&lt;呼号&gt;</code>），
-                      崩溃、重启、换网都能自恢复。
+                      写一份
+                      <code>0600</code> 的隧道配置，并装一个<b>常驻服务</b>：
+                      macOS 是带 <b>KeepAlive</b> 的 LaunchAgent、Linux 是
+                      systemd 用户单元（带 linger，<b>注销后仍活</b>）、Windows
+                      是计划任务。 崩溃、重启、换网都能自恢复。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Windows 额外做</td>
+                    <td>
+                      用内置的 openssl 给你的
+                      <code>&lt;呼号&gt;.mrrc.vlsc.net</code>
+                      签一张自签证书，并把证书路径与心跳阈值写成<b
+                        >用户级环境变量</b
+                      >
+                      —— 应用下次启动即生效。<b>私钥不出本机</b>，只有公钥交给
+                      Hub 钉住。
                     </td>
                   </tr>
                   <tr>
@@ -291,10 +321,11 @@ MRRC_HUB_TOKEN='&lt;隧道凭证&gt;' \
             </div>
 
             <div class="hub-callout">
-              <span class="hub-callout-title">不确定端口填什么？</span>
+              <span class="hub-callout-title">端口与凭证从哪来？</span>
               <p>
                 隧道端口由 Hub 侧权威分配（注册表里那行），你不能自己挑。
-                没拿到就别猜，去问管理员 —— 填错的端口隧道会连上但入口仍然 404。
+                核验通过、运维分配后，你会拿到标签、端口与凭证三样东西。
+                没拿到就别猜 —— 填错的端口隧道会连上，但入口仍然 404。
               </p>
             </div>
           </li>
@@ -343,15 +374,18 @@ curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net:9988/api/health     # 期望 401</
                   <tr>
                     <td>隧道</td>
                     <td>
-                      <b>自动回来。</b>LaunchAgent 带
-                      KeepAlive，重启、崩溃、换网络都会自己重连。
+                      <b>自动回来。</b>常驻服务带自重启（macOS LaunchAgent /
+                      Linux systemd --user / Windows 计划任务），
+                      重启、崩溃、换网络都会自己重连。
                     </td>
                   </tr>
                   <tr>
                     <td>MRRC 服务</td>
                     <td>
-                      <b>不会自动回来。</b
-                      >当前以源码方式运行，不是常驻服务，重启后要手动起。
+                      <b>看你装的是哪个版本：</b><br />
+                      · <b>打包版（v1.22.0 起）</b>—— 按正常应用安装，已带
+                      Hub 前置能力（路径前缀 / 令牌不进 URL / 会话遥测 / PTT 活性闸门）。<br />
+                      · <b>源码运行</b> —— 非常驻，重启后要手动起（下面就这个情况）。
                     </td>
                   </tr>
                 </tbody>

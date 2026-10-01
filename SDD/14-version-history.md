@@ -19,6 +19,16 @@
 实例侧 Hub 前置能力三行；PTT 半开释放拆为“实例侧已实现（opt-in）/ 隧道层待做”。
 顺带修掉 V0.11 遗留的一个排版缺陷：一条说明块把能力表从中间截断了。
 
+**文档站同步**（`website/` 五页）：
+
+- `start.html` 「装隧道」整步重写 —— 不再要求 `brew install frp`（安装器自取并校验 SHA-256）、
+  补上 Windows 的 PowerShell 版与它额外做的证书/环境变量、常驻方式按三平台分列；
+  「重启之后」改为区分打包版与源码运行。
+- `index.html` / `design.html` 现状表：PTT 拆为两行；新增实例证书链与安装器两行；
+  「一机一证」保留为阶段 2 但改名为**隧道自身的**设备证书，并请读者不要把它
+  与 TLS 身份混为一谈。`design.html` 的 L3 层与失效表现改为“按实例名校验”。
+- `trouble.html` 新增“自助申请没动静”“注册页 429”两条，并把 502 那条补上信任包细节。
+
 **漂移升级（X1）**：`deploy_hub_routes.sh` 的危险从“一重”变成“三重” —— 除了把 8899 退回明文，
 它还会抹掉逐实例校验与信任包（它写死 `radio.vlsc.net` + 系统 CA）。
 已在 `deploy/README.md` 把 X1 重写为高危并加醒目告警。
@@ -162,7 +172,7 @@ www→hub 无免密 SSH（跨机分发要先建信任），而 **DNS-01 不需�
 **改动**
 
 1. **hub 侧从"每实例一条 vhost"改为"一条通配 vhost + 注册表"**（`deploy/deploy_hub_routes.sh`
-   + `deploy/gen_hub_routes.py`）：`/etc/mrrc-hub/instances.tsv` 是唯一的每实例事实（名字 → 回环端口），
+   - `deploy/gen_hub_routes.py`）：`/etc/mrrc-hub/instances.tsv` 是唯一的每实例事实（名字 → 回环端口），
    生成器产出 nginx `map` 并校验端口落在 frps `allowPorts` 内；vhost 用
    `~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$`，**未知名字回 404**，不回退到别的实例
    （NFR-H022）。加实例 = 注册表一行 + 重跑 + reload。
@@ -237,15 +247,15 @@ Portal / 设备证书 / 租约（阶段 2）。
 
 **勘察得到的事实**（全部实测，不是假设）
 
-+ 主机**裸机**：无 nginx / frp / docker / caddy / certbot / node，只有 sshd；2C/3.6G/40G。
-+ **非 22 端口从公网不可达**：在 18080 起临时监听，本机 200、公网 000 —— 安全组只放行 22
+- 主机**裸机**：无 nginx / frp / docker / caddy / certbot / node，只有 sshd；2C/3.6G/40G。
+- **非 22 端口从公网不可达**：在 18080 起临时监听，本机 200、公网 000 —— 安全组只放行 22
   （也可能是 ufw，读它需要 root）。
-+ `cheenle` 可 SSH 登录，但 **sudo 需要密码** ⇒ 装包与绑定低端口都做不了。
-+ **`*.mrrc.vlsc.net` 已是通配 A 记录指向该机**（`a1/a2.mrrc.vlsc.net` 实测解析成功）
+- `cheenle` 可 SSH 登录，但 **sudo 需要密码** ⇒ 装包与绑定低端口都做不了。
+- **`*.mrrc.vlsc.net` 已是通配 A 记录指向该机**（`a1/a2.mrrc.vlsc.net` 实测解析成功）
   ⇒ SDD 自己的命名 `portal./tunnel./<id>.` **今天就能用，不需要动 DNS**。
-+ `hub.vlsc.net` **不存在**（在 `vlsc.net` 区，不在通配内）。
-+ 实例侧证书是**真的 Let's Encrypt**（`CN=radio.vlsc.net`，2026-12-10 到期）。
-+ `vlsc.net` 的 DNS 托管在**阿里云万网**（`dns25/dns26.hichina.com`）。
+- `hub.vlsc.net` **不存在**（在 `vlsc.net` 区，不在通配内）。
+- 实例侧证书是**真的 Let's Encrypt**（`CN=radio.vlsc.net`，2026-12-10 到期）。
+- `vlsc.net` 的 DNS 托管在**阿里云万网**（`dns25/dns26.hichina.com`）。
 
 **改动**
 
@@ -284,13 +294,13 @@ Portal / 设备证书 / 租约（阶段 2）。
 3. **新增"现状基线"**（第 1 章 §1.2）：确认已有 4 套远程接入机制（B1 SSH 隧道 / **B2 IPv6 直连 + nginx，
    生产运行** / B3 路径前缀代理 / B4 支持上报通道）。源文档未把它们列为基线，导致 MVP 起点被误判为"从零开始"。
 4. **修正 4 项 P0 级事实偏差**，并落为决策：
-   + `AD-H06` + 第 15 章：PTT 半开连接不释放（既有 dead-man switch 只在真正断线时触发，
+   - `AD-H06` + 第 15 章：PTT 半开连接不释放（既有 dead-man switch 只在真正断线时触发，
      `MRRC_PTT_MAX_TX_SECONDS` 默认关闭）→ 定义隧道层 TX 期间心跳契约与实例侧活性闸门
-   + `AD-H07`：会话令牌在 URL query 中且实例跑 uvicorn 默认访问日志 → 透明代理模式下必然泄露；
+   - `AD-H07`：会话令牌在 URL query 中且实例跑 uvicorn 默认访问日志 → 透明代理模式下必然泄露；
     该问题项目已知（`support_bundle.py` 的脱敏正则）但只在导出诊断包时处理 → 前端改造并入 MVP
-   + `AD-H09`：通配子域下 Access 与实例**共享同一 origin**，双会话 Cookie 命名/生命周期未定义；
+   - `AD-H09`：通配子域下 Access 与实例**共享同一 origin**，双会话 Cookie 命名/生命周期未定义；
      实例 Cookie 无 `Secure`、30 天有效
-   + `AD-H08`：Listener 实际语义是"受限操作"（可调频/换模式，`LISTEN_ALLOWED_SET_FIELDS`），
+   - `AD-H08`：Listener 实际语义是"受限操作"（可调频/换模式，`LISTEN_ALLOWED_SET_FIELDS`），
      非源文档所称"永远只读"；且调谐是写操作，其并发仲裁在源文档中缺失
 5. **用实测替换估算**（第 9 章 §9.3、`NFR-H007/H008`、`AD-H14`）：RX Opus 默认 64 kbps
    （非 48–64 区间）；频谱 1701 B/帧 × 30 fps ≈ **408 kbps**（非 100–300），占单会话 **~86%** ——
@@ -302,18 +312,18 @@ Portal / 设备证书 / 租约（阶段 2）。
 
 **本版本引入的跨仓影响**
 
-+ `mrrc_modern` 需落地 C1–C6（第 11 章 §11.3），其中 **C1（远程会话活性闸门）与 C2（token 不进 URL）
+- `mrrc_modern` 需落地 C1–C6（第 11 章 §11.3），其中 **C1（远程会话活性闸门）与 C2（token 不进 URL）
   是 MVP 前置**；需在该仓 SDD（`08-architecture-decisions.md`、`15-ptt-safety-architecture.md`）
   登记为新层/新决策，并同步测试计数。
-+ `mrrc`（旧架构）的 B1 SSH 隧道脚本定位为历史，不参与 Hub 演进。
+- `mrrc`（旧架构）的 B1 SSH 隧道脚本定位为历史，不参与 Hub 演进。
 
 **本版本未解决（留在第 13 章）**
 
-+ `I-H1` Listener 并发实测（**可立即开始采集**，是 AD-H12 的触发依据）
-+ `I-H2` 活跃率与会话时长（决定出口带宽与数据面规格）
-+ `I-H6` PTT 半开释放的实例侧实现与 V1–V10 回归
-+ `I-H7` B2/B3 的长期定位（是否投入自动化）
-+ `I-H8` 私有部署/自建 Hub 的开源许可边界
+- `I-H1` Listener 并发实测（**可立即开始采集**，是 AD-H12 的触发依据）
+- `I-H2` 活跃率与会话时长（决定出口带宽与数据面规格）
+- `I-H6` PTT 半开释放的实例侧实现与 V1–V10 回归
+- `I-H7` B2/B3 的长期定位（是否投入自动化）
+- `I-H8` 私有部署/自建 Hub 的开源许可边界
 
 **版本号说明**：`V0.1` 表示"设计基线已冻结、实现未开始"。首个可上线版本到达时升 `V1.0`
 并在此登记实际规格、压测结果与 SLO 实测值。

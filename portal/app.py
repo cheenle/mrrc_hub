@@ -484,6 +484,29 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 if route == "/apply":
                     return self._send(200, portal.apply(body.get("callsign", ""),
                                                         body.get("contact", ""), body.get("product", "")))
+                if route == "/claim":
+                    # 用运维给的一次性口令"认领"一条**已批准**的申请。
+                    # 为什么需要它：应用只能看见它自己提交的那条申请（申请令牌是那时发的）。
+                    # 但审批本来就是审批 —— 租户不该因为"申请是在网页上提的"而被迫重来。
+                    # 口令本来就是交给租户的（它同时是 /enroll 的凭据），所以这里没有扩大攻击面：
+                    # 有口令的人本来就能为这个名字登记证书。
+                    callsign = cs.normalize(body.get("callsign", ""))
+                    app = portal.store.get(callsign)
+                    supplied = str(body.get("secret") or "")
+                    if not app or app.status != "granted" or not app.enroll_secret \
+                            or not hmac.compare_digest(supplied, app.enroll_secret):
+                        return self._send(403, {"error": "登记口令无效或未获授权"})
+                    return self._send(200, {
+                        "callsign": app.callsign,
+                        "status": app.status,
+                        "label": app.label,
+                        "port": int(app.port or 0),
+                        "enroll_secret": app.enroll_secret,
+                        "hub_token": _frps_token(),
+                        "entry": (f"https://{app.label}.mrrc.vlsc.net:9988/" if app.label else ""),
+                        "request_token": app.request_token,
+                    })
+
                 if route == "/status":
                     # 申请方（应用）查询自己那条申请。用 POST 而不是 GET：令牌不进 URL/日志
                     # （与 AD-H11/AD-024 一致）。凭申请令牌只能读自己这一条，改不了任何东西。

@@ -410,6 +410,57 @@ def test_status_endpoint_returns_connection_info_only_when_granted():
             httpd.shutdown()
 
 
+def test_claim_adopts_an_approved_application():
+    """租户凭运维给的一次性口令认领已批准的申请 —— 不必因为申请是在网页上提的重来一遍。"""
+    import http.server, json, threading, urllib.error, urllib.parse, urllib.request
+    from portal.app import Portal, make_handler
+    from portal.store import Store
+    from portal import registry as reg
+    from portal.verify import CallsignListVerifier
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "callsigns.txt").write_text("NOBODY\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/claim"
+
+        def post(payload):
+            data = urllib.parse.urlencode(payload).encode()
+            req = urllib.request.Request(url, data=data,
+                                        headers={"Content-Type": "application/x-www-form-urlencoded"})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+
+        try:
+            portal.apply("bg8aaa", product="mrrc_modern")
+            secret = portal.store.get("BG8AAA").enroll_secret
+            code, _ = post({"callsign": "BG8AAA", "secret": secret})
+            check(code == 403, "未批准时认领 → 403")
+
+            portal.store.mark_verified("BG8AAA", "测试")
+            granted = portal.grant("BG8AAA")          # Portal.grant 只收呼号：label/端口由它分配
+            label, port = granted["label"], granted["port"]
+            secret = portal.store.get("BG8AAA").enroll_secret
+
+            code, _ = post({"callsign": "BG8AAA", "secret": "wrong"})
+            check(code == 403, "错口令认领 → 403")
+
+            code, body = post({"callsign": "BG8AAA", "secret": secret})
+            check(code == 200, "对的口令可以认领")
+            check(body.get("label") == label and body.get("port") == port, "给出 label 与端口（与分配结果一致）")
+            check(body.get("enroll_secret") == secret, "给出登记口令")
+            check(bool(body.get("request_token")), "给出申请令牌（此后应用可自行轮询）")
+            check(body.get("entry", "").startswith(f"https://{label}.mrrc.vlsc.net:9988"), "给出入口地址")
+        finally:
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

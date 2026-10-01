@@ -75,6 +75,26 @@ if ($needCert) {
 # 私钥只给当前用户（Windows 上的 0600 等价物）
 icacls $key /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
 
+# ---- 登记：把公钥交给 hub（私钥永不外传）----
+if ($env:MRRC_ENROLL_SECRET) {
+    $enrollUrl = if ($env:MRRC_ENROLL_URL) { $env:MRRC_ENROLL_URL } else { "https://portal.mrrc.vlsc.net:8899/enroll" }
+    Write-Host "enrolling the certificate at $enrollUrl"
+    try {
+        $r = Invoke-RestMethod -Method Post -Uri $enrollUrl -TimeoutSec 30 -Body @{
+            callsign = $Name
+            secret   = $env:MRRC_ENROLL_SECRET
+            cert     = (Get-Content $crt -Raw)
+        }
+        Write-Host "enrolled for: $($r.names -join ', ')"
+        Write-Host "on the hub, as root: $($r.next_step)"
+    } catch {
+        Write-Warning "enrollment failed: $($_.Exception.Message)"
+        Write-Warning "the certificate is on disk; re-run this script once the hub is reachable (idempotent)"
+    }
+} else {
+    Write-Host "MRRC_ENROLL_SECRET not set - skipping enrollment (a self-signed certificate must be enrolled, or the entry answers 502)"
+}
+
 # ---- 应用侧设置：用户级环境变量，应用下次启动即生效 ----
 [Environment]::SetEnvironmentVariable("MRRC_SSL_CERT", $crt, "User")
 [Environment]::SetEnvironmentVariable("MRRC_SSL_KEY", $key, "User")

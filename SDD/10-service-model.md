@@ -19,8 +19,9 @@
 > 上表是**目标态契约**。实际在跑的 Portal 只实现了其中“接入申请 + 呼号核验 + 分配”一段，
 > 且路径不同 —— 见 `12-operational-model.md` §12.9。**不要拿上表的路径去调现网**。
 >
-> **as-built（2026-10-01）**：`POST /apply`（规范化→查重→核验）、`POST /verify`、
-> `POST /grant`、`POST /revoke`，加一个 `/admin` 审批台。
+> **as-built（2026-10-01）**：`POST /apply`（规范化→查重→核验，应答里交付**申请令牌**）、
+> `POST /status`（申请方凭该令牌查自己那一条）、`POST /verify`、`POST /grant`、
+> `POST /enroll`、`POST /revoke`，加一个 `/admin` 审批台。
 > 运维动作两种传令方式：请求头 `X-Portal-Token`（curl/脚本）或表单同名字段（浏览器）——
 > **两者都不进 URL**，因为 URL 会进访问日志与浏览器历史（AD-H07）。
 

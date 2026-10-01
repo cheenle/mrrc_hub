@@ -41,7 +41,7 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.17 |
+| SDD Version | V0.18 |
 | Baseline Date | 2026-10-01 |
 | Status | **阶段 1 通路已在真实公网跑通**（`bg1sb.mrrc.vlsc.net:9988` → 隧道 → 实例，118–168 ms）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL：**hub 侧已实现**（日志不记 query）；**实例侧在 mrrc_modern feat/hub 已改纯 Cookie 传递（C2），未合并 main**，Stable v1.21.0 仍拼 `?token=`（11 §11.3 对账注）；**呼号注册已上线公网自助**（`portal.mrrc.vlsc.net:8899`，见 §12.9）；**实例证书链已闭环并在真实租户机上验证（签发 → 登记 200 → 信任包 → 入口可达）。剩余：隧道层 PTT 半开释放（MVP，I-H6 open）、Operator 租约、设备 mTLS、安装包分发、ICP 备案 |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |

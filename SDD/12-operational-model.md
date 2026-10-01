@@ -250,6 +250,7 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 自动核验（库内呼号） | `POST /apply` `bg1sb` → `verified`，"命中呼号库" |
 | 未核验不得授予 | 无令牌 `POST /grant` → **403**；状态未到 `verified` 亦拒绝（代码硬前置） |
 | 限流 | 14 连击 → `200×4` 后持续 **429**（按来源 IP，真实生效） |
+| **申请令牌交回申请方（V0.18）** | 公网 `POST /apply` `bg1prb` → 应答含 32 字符 `request_token`；`POST /status` 用它 → `200 applied`（未批准时 label/port/secret 全空）；错令牌 → **403**。客户端据此才能自动等到批准 |
 | 既有服务未受影响 | `bg1sb` 实例入口 401 ✓、www 边缘 401 ✓、未知名字 404 unknown instance ✓ |
 
 运维动作两种用法：脚本/curl 用请求头 `X-Portal-Token`；浏览器用表单里的同名字段

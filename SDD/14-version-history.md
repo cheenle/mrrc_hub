@@ -2,6 +2,36 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.18 — 2026-10-02 — 申请令牌其实从没交到申请方手里（应用因此永远等不到批准）
+
+**触发**：客户端（mrrc_modern `feat/hub` 的「接入云端」）修掉自己的两个缺陷后做真机联调，仍在最后一步
+失败：`POST /apply` 回 200，但应答里没有 `request_token`，应用报 "portal did not return a request token"
+—— 拿不到令牌就无法轮询 `/status`，批准与否都到不了应用。
+
+**根因**：V0.16 引入申请令牌时只加了 `/status`（凭令牌读自己那一条），`/apply` 的应答从未把令牌交出去；
+而当时的测试从 `store.get(...).request_token` **直读 store** 取令牌，把唯一真实的取令牌路径 —— HTTP 应答
+—— 绕过去了。同一类盲区（测试用了只有测试能用的入口）当晚在客户端也刚咬过一次（`import cloud_hub`）。
+
+**改动**：`Portal.apply()` 的应答增加 `request_token`（只随这一次应答交给申请方本人；读不了别人的申请、
+也改不了任何状态）。测试改为**从 `/apply` 的 HTTP 应答取令牌**再走完 `/status` 全流程（错令牌 403、
+拿别人呼号 403、`applied` 不泄露接入字段、`granted` 才给 label/端口/口令/入口），并把 `store.get()` 的
+Optional 访问统一换成显式断言 `stored()` —— None 不该变成 AttributeError。
+
+**同一批排障里顺手修掉的旧账**（都在 `portal/app.py`）：`_admin` 两个视图各定义了一个同名 `probe()`
+（bool 版与 HTML 版，同一函数作用域互相遮蔽）→ 合为 `_tunnel_online()` + 实例页的 `tunnel_cell()`；
+`log_message` 的参数名改回基类的 `format`；`_body()` 把 `Content-Length` 与 JSON 解析失败包成
+`ValueError`（调用方本来就把它们变成 400「请求体无法解析」，现在连原因也写清楚）。
+
+**验证**：`python3 tests/test_portal.py` 15 组通过（改前先在「`/apply` 不交令牌」上红）；追加探针确认
+坏 JSON body → 400、正常表单 → 200。部署到 hub（备份 `app.py.bak-20261001_202921` + 覆盖 +
+`systemctl restart mrrc-portal`，服务 active）。**公网实测**（`portal.mrrc.vlsc.net:8899`，即应用默认入口）：
+`POST /apply` `bg1prb` → 应答含 32 字符令牌；`POST /status` 用它 → `200 applied`，label/port/secret/entry
+全空；错令牌 → `403 申请令牌无效`。两条探针记录（`BG1PRB`、`BG1SMK`）已按惯例拒绝清理并留审计。
+
+**未解决**：批准之后仍需运维动作才能开入口（`/grant` + 路由重生成 —— 后者已由 V0.17 的 timer 自动完成），
+这是刻意的分工；应用侧「申请 → 等待 → 自动接好」的全链路，待 mrrc_modern v1.24.1 发布后在真实租户机上
+复测（本轮验证到协议层：令牌交付与状态查询）。
+
 ## V0.17 — 2026-10-02 — 批准之后不再需要任何人敲命令；接入搬进应用（hub 侧接线）
 
 V0.16 把登记链跑通，但最后一步仍是"运维在 hub 上执行一条 root 命令"。本版把它取消，并补上应用

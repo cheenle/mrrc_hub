@@ -337,9 +337,9 @@
                       style="color: var(--text-secondary); font-size: 0.85rem"
                     >
                       仓库里的 <code>deploy_hub_routes.sh</code> 与
-                      <code>deploy_www_edge.sh</code> 落后于现网配置：
-                      重跑会把 8899 从 TLS 退回明文、把海外边缘入口形态降级。
-                      自己跑本仓脚本前，先读
+                      <code>deploy_www_edge.sh</code> 落后于现网配置： 重跑会把
+                      8899 从 TLS 退回明文、<b>抹掉按实例名的证书校验与信任包</b>、
+                      把海外边缘入口形态降级。 自己跑本仓脚本前，先读
                       <code>deploy/README.md</code> 的「脚本与现网漂移」一节。
                     </span>
                   </td>

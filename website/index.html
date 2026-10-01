@@ -292,8 +292,10 @@
                     <span class="hub-badge todo">隧道层待做</span>
                   </td>
                   <td>
-                    拔网线这类"TCP 还活着但对面已失联"的情形：实例侧已有可开的心跳闸门
-                    （默认关闭，Hub 模式建议 3–5 s）；<b>隧道层的主动关流还没做</b>。
+                    拔网线这类"TCP
+                    还活着但对面已失联"的情形：实例侧已有可开的心跳闸门
+                    （默认关闭，Hub 模式建议 3–5
+                    s）；<b>隧道层的主动关流还没做</b>。
                     在此之前靠实例本地多层释放兜底。
                   </td>
                 </tr>
@@ -301,7 +303,9 @@
                   <td>自助注册 Portal（呼号核验四步）</td>
                   <td><span class="hub-badge live">公网入口已上线</span></td>
                   <td>
-                    <code>portal.mrrc.vlsc.net:8899</code>（通配证书覆盖，<code>/apply</code>
+                    <code>portal.mrrc.vlsc.net:8899</code>（通配证书覆盖，<code
+                      >/apply</code
+                    >
                     按来源 IP 限流）。命中呼号库自动核验，库外转人工；
                     核验通过后运维授予并写入注册表。见<a
                       href="start.html#register"
@@ -315,8 +319,9 @@
                   <td><span class="hub-badge live">机制就位</span></td>
                   <td>
                     每个实例一张签给自己入口名的自签证书，公钥被 Hub
-                    <b>钉在信任包里</b>、按名字校验 —— 校验始终是开着的，自签靠"钉住它"通过，
-                    不是靠关掉 verification。
+                    <b>钉在信任包里</b>、按名字校验 ——
+                    校验始终是开着的，自签靠"钉住它"通过， 不是靠关掉
+                    verification。
                     <b>注意：现网当前实例尚未迁到这条链</b>（仍用旧证书名）。
                   </td>
                 </tr>
@@ -324,16 +329,16 @@
                   <td>实例安装器</td>
                   <td><span class="hub-badge live">脚本就位</span></td>
                   <td>
-                    自取 frpc 并<b>校验 SHA-256</b>、与 Hub 端版本钉死、
-                    macOS / Linux / Windows 三平台常驻。尚未做成公开发布的安装包下载。
+                    自取 frpc 并<b>校验 SHA-256</b>、与 Hub 端版本钉死、 macOS /
+                    Linux / Windows 三平台常驻。尚未做成公开发布的安装包下载。
                   </td>
                 </tr>
                 <tr>
                   <td>一机一证（隧道自身的设备 mTLS）</td>
                   <td><span class="hub-badge todo">阶段 2</span></td>
                   <td>
-                    隧道认证目前仍是 frp 的单个共享凭证 ——
-                    与上一行的 TLS 身份是两件事（谁能接入隧道 vs 这台实例是不是它声称的那台）。
+                    隧道认证目前仍是 frp 的单个共享凭证 —— 与上一行的 TLS
+                    身份是两件事（谁能接入隧道 vs 这台实例是不是它声称的那台）。
                   </td>
                 </tr>
                 <tr>

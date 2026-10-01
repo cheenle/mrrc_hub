@@ -40,7 +40,7 @@ FRPC="$(command -v frpc || echo "$HOME/bin/frpc")"
 #   1. 安装包自带的副本（与脚本同级，或 .frpc/ 子目录）—— 离线也能装 ✓
 #   2. 系统 PATH 里已有的（brew 或发行版包）
 #   3. 从 frp 官方 release 下载 **并校验 SHA-256**；校验和不一致即拒绝使用
-# 版本与 hub 上的 frps 对齐（pin 死）：客户端比服务端新可能握手失败。
+		echo "  hub 上会**自动**生效（root 的 path 单元监视证书目录）；若该 hub 未装它，请把下面那行交给运维："
 FRP_VERSION="${MRRC_FRP_VERSION:-0.71.0}"
 FRP_CACHE="${MRRC_FRP_DIR:-$HOME/.local/share/mrrc-fleet}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

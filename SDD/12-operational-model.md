@@ -95,9 +95,9 @@
 
 | 角色 | 位置 | 说明 |
 | ------ | ------ | ------ |
-| Hub | 阿里云乌兰察布 `8.160.161.80`（Ubuntu 26.04） | nginx（8899/9988 TLS 入口 + 通配 vhost）、frps 0.71.0（控制口 8989，`proxyBindAddr=127.0.0.1`）、Let's Encrypt 证书与每日 cron |
-| Edge | 海外 `www.vlsc.net`（193.111.30.163） | 443 路径反代 `/mrrc_modern/<呼号>/` → hub 9988；上游校验用**系统 CA** |
-| Instance | 操作者本机（macOS） | launchd 常驻 frpc 隧道；MRRC 服务本身**不常驻**（见下） |
+| Hub | 阿里云乌兰察布 `8.160.161.80`（Ubuntu 26.04） | nginx（`mrrc-hub` 通配 vhost + `mrrc-portal` / `mrrc-portal-edge`，均在 8899/9988 TLS）、frps 0.71.0（控制口 8989，`proxyBindAddr=127.0.0.1`）、Let's Encrypt 证书与每日 cron、`mrrc-portal.service`（呼号注册，仅回环 8890）、`/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 逐实例公钥） |
+| Edge | 海外 `www.vlsc.net`（193.111.30.163） | 443 路径代理 `/mrrc_modern/<呼号大写>/` → hub 9988；上游校验用**系统 CA** |
+| Instance | 实例归属人自己的机器（macOS / Linux / Windows） | 常驻隧道（launchd / systemd / 计划任务）；MRRC 服务是否常驻取决于是打包版还是源码运行（见下） |
 
 ### 入口（当前）
 
@@ -108,8 +108,13 @@
 - `https://www.vlsc.net/mrrc_modern/<呼号大写>/` —— 海外边缘，真证书（境内无备案的迂回入口）。
   **路径大小写敏感、规范形式是大写呼号**，小写会被 301 到规范形式。
   ⚠️ **该路径 2026-10-01 实测存在间歇性失败** —— 见下方「排障增补」
-- 注册表 `/etc/mrrc-hub/instances.tsv`（现仅 `bg1sb → 18802`）；加实例 = 一行 + 重跑 `gen_hub_routes.py`。**标签规则**：主产品用裸呼号（`bg1sb`），附加产品加产品后缀（`bg1sb-legacy`）——
-见 `07-subject-area-model.md` §7.x.1
+- 注册表 `/etc/mrrc-hub/instances.tsv` —— 三列：`<标签> <回环端口> <上游 TLS 名>`。现网当前仅一行：
+  `bg1sb 18802 radio.vlsc.net`。加实例 = 一行 + 重跑 `gen_hub_routes.py`。
+  **第三列是逐实例证书校验的落点**（见下方「实例证书链」）；`bg1sb` 目前仍指向上游旧证书名，
+  尚未迁到它自己的 `<标签>.mrrc.vlsc.net` —— 迁移机制已就位、未施用。
+  **标签规则**：主产品用裸呼号（`bg1sb`），附加产品加产品后缀（`bg1sb-legacy`）—— 见 `07-subject-area-model.md` §7.x.1
+- `https://portal.mrrc.vlsc.net:8899/` —— **呼号自助注册**（面向公众，另一套 vhost，
+  与实例入口同证书）。运维审批台在 `/admin`。详见 §12.9
 
 ### 证书（NFR-H030 的落地）
 
@@ -120,10 +125,48 @@
 - 安装：`mrrc-hub-cert-hook.sh` 拷贝证书到 `/etc/mrrc-hub/tls/` 并 reload nginx
 - **www 边缘不再需要同步信任锚**：上游校验信任源是系统 CA。此前钉自签证书的做法咬过两次（换证书未同步 ⇒ 立即 502），已废弃
 
+### 实例证书链（一机一证，2026-10-01 就位）
+
+通配证书解决的是**入口**；另有一条链解决**hub → 实例**这一跳的身份。
+
+| 环节 | 实况 |
+| ------ | ------ |
+| 签发 | `deploy/make_instance_cert.sh <标签>`：自签证书，**签给实例自己的入口名**（`<标签>.mrrc.vlsc.net`），默认 3650 天，幂等（CN 匹配则不重签，`FORCE=1` 强制） |
+| 交付 | 实例侧设 `MRRC_SSL_CERT` / `MRRC_SSL_KEY`；**私钥永不外传**，只有公钥进 |
+| 钉住 | 公钥写入 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例证书）。现网 121 个证书块 |
+| 校验 | nginx `proxy_ssl_name $mrrc_tls_name` + `proxy_ssl_trusted_certificate …/trust-bundle.pem`，**校验始终开着**；自签证书靠"钉住它"通过，而不是靠关掉 verification |
+| 映射 | `$mrrc_tls_name` 由 `gen_hub_routes.py` 从注册表第三列生成；未指定时回落 `radio.vlsc.net`（兼容既有实例） |
+
+**为什么自签而不是给每台实例发真证书**：租户没有自己的域名，入口名在 `*.mrrc.vlsc.net` 下，
+而通配证书的私钥不可能下发给每个租户。自签 + 逐实例钉住能得到同一个安全属性（名字绑定的
+端到端校验），且不引入新的 CA 依赖。
+
+> 现网 `bg1sb` 仍在用 `radio.vlsc.net` 那张旧证书（注册表第三列未改）—— **能力已到位，迁移未做**。
+> 写文档时不要把"机制存在"写成"已在跑"。
+
+### 实例开通链（安装器，2026-10-01 就位）
+
+`deploy/install_instance_tunnel.sh`（macOS / Linux）与 `.ps1`（Windows）把开通变成一步：
+
+| 环节 | 实况 |
+| ------ | ------ |
+| frpc 来源（按优先级） | ① 安装包内嵌副本（与脚本同级或 `.frpc/`）→ ② 系统 `PATH` → ③ 从 frp 官方 release 下载**并校验 SHA-256**，不符即拒绝使用 |
+| 版本对齐 | `MRRC_FRP_VERSION` 默认 `0.71.0`，**与 hub 上的 frps 对齐（pin 死）** —— 客户端比服务端新可能握手失败 |
+| 缓存 | `~/.local/share/mrrc-fleet`（`MRRC_FRP_DIR` 可改） |
+| 常驻 | macOS = LaunchAgent + `KeepAlive`；Linux = systemd user unit（**登出后仍活**）；Windows = 计划任务 |
+| 载荷构建 | `deploy/fetch_installer_payload.sh` 逐个校验哈希；**openssl 的 URL/哈希不硬编码**，从 lock 读，缺条目就跳过 —— *宁可不打包，也不把来路不明的二进制塞进安装包* |
+
+**现阶段的边界**：安装器仍是**仓内脚本**，没有公开发布的安装包下载地址
+（已试 `www.vlsc.net/mrrc_hub/install.sh` 等路径均 404）。用户今天仍需先拿到仓库。
+安装包分发是下一步。
+
 ### 实例侧运行（重要运维事实）
 
-frpc 隧道是 **launchd 常驻**（`com.mrrc.fleet-tunnel.<呼号>`），重启自动恢复；
-**MRRC 服务本身不是常驻服务**（当前以源码方式运行，打包版尚未带本轮前端能力）。重启后需手动起：
+frpc 隧道是 **常驻服务**（macOS `com.mrrc.fleet-tunnel.<呼号>`，Linux systemd user unit），重启自动恢复。
+**MRRC 服务本身取决于跑的是哪个版本**：
+
+- **打包版（v1.22.0 及以后）**：已把本轮 Hub 前置能力（路径前缀 / 令牌不进 URL / 会话遥测 / PTT 活性闸门）带进安装包，按正常应用安装即可。
+- **源码运行**：仍非常驻，重启后要手动起：
 
 ```bash
 cd mrrc_modern
@@ -216,7 +259,7 @@ clublog.org 刷新，与 RumLogNG 同源）。Portal **直接采用同一套规�
 采用的规则（逐条对齐留言版）：
 
 | 项 | 规则 |
-|----|------|
+| ---- | ------ |
 | 格式 | `^[0-9]?[A-Z]{1,2}[0-9][A-Z]{1,3}$`（可选 1 位数字前缀 + 1-2 字母 + 分区数字 + 1-3 字母） |
 | 便携/前缀 | **拒绝** `BG1SB/P`、`4X/BG1SB` 等 —— 注册的是身份，便携是操作状态；且标签要当 DNS 名用 |
 | 基准呼号提取 | `4X/BG1SB`→`BG1SB`、`BG1SB/P`→`BG1SB`、`1A0C_14`→`1A0C`、`SOS`→'' |

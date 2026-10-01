@@ -10,8 +10,12 @@
 
 | # | 漂移 | 后果 |
 | --- | --- | --- |
-| **X1** | `deploy_hub_routes.sh` 生成**两个** server block（`listen 8899;` 明文 + 301、`listen 9988 ssl`）；而现网是**一个** block、且 `8899` 已是 **TLS** 入口 | 重跑会把 8899 从 TLS 退回明文 → 境内被改写（R-H13 的失效模式）。另：脚本头部注释仍写 "currently self-signed"，现网已是真 Let's Encrypt |
+| **X1** | `deploy_hub_routes.sh` 生成**两个** server block（`listen 8899;` 明文 + 301、`listen 9988 ssl`），而现网是**一个** block、且 `8899` 已是 **TLS**；且它生成的 `proxy_ssl_name` 写死 `radio.vlsc.net`、信任源写死系统 CA，**不认识 `$mrrc_tls_name` 与 `trust-bundle.pem`** | 重跑会**三重倒退**：① 8899 从 TLS 退回明文 → 境内被改写（R-H13 的失效模式）；② 抹掉**逐实例证书校验**，退回"所有实例共用 `radio.vlsc.net`"；③ 抹掉**信任包**，自签实例证书立即 502。另：脚本头部注释仍写 "currently self-signed"，现网已是真 Let's Encrypt |
 | **X2** | `deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | 重跑会把现网形态降级为 302 或子域代理，丢掉"标准端口 + 真证书 + 前缀透明"三项收益。www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的 |
+
+> **X1 现在是两者中最危险的**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
+> `proxy_ssl_name $mrrc_tls_name`）是在脚本之外手工落的。在那套校验写回脚本之前，
+> **不要重跑 `deploy_hub_routes.sh`**。参见 `SDD/12 §12.8 「实例证书链」`。
 
 **处置**：只记录，**不改脚本**（改部署脚本的风险与验证成本超出文档任务范围）。对齐留作独立变更。
 
@@ -153,7 +157,9 @@ manual 模式不会自动续订（脚本的错误信息里也写了这条退路�
 | --- | --- |
 | `/etc/mrrc-hub/instances.tsv` | 注册表：`<名字> <回环端口>`，一行一个实例（权威） |
 | `/usr/local/sbin/gen_hub_routes.py` | 把注册表生成成 nginx `map`（`/etc/nginx/conf.d/mrrc-hub-map.conf`），并校验端口落在 frps 的 `allowPorts` 内 |
-| `/etc/nginx/sites-available/mrrc-hub` | **唯一**的 vhost：`~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$` → `https://127.0.0.1:$mrrc_port`；未知名字 **404**（不回退到别的实例） |
+| `/etc/nginx/sites-available/mrrc-hub` | **唯一**的 vhost：`~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$` → `https://127.0.0.1:$mrrc_port`；未知名字 **404**（不回退到别的实例）。上游校验：`proxy_ssl_name $mrrc_tls_name` + `proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem`（**逐实例**，见下） |
+| `/etc/mrrc-hub/trust-bundle.pem` | 系统 CA + 各实例的自签证书公钥。自签证书靠"钉住它"通过校验，而不是靠关掉 verification |
+| `/etc/nginx/sites-available/mrrc-portal`〔+ `-edge`〕 | 呼号自助注册站点：`portal.mrrc.vlsc.net`（8899 面向用户 / 9988 面向边缘），`/apply` 带 `limit_req` |
 
 **加实例 = 注册表加一行 + 重跑生成器 + reload**，不再"每实例改 nginx"—— 那正是 B2 的痛
 （每加一个前端资源就要动中心配置、还踩过正则优先级）。
@@ -167,8 +173,13 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 经通配 vhost `test1.mrrc.vlsc.net:9988` → `/api/health` **401**、`/login` **200**；
 `nope.mrrc.vlsc.net:9988` → **404**（未知实例不误路由，NFR-H022）。
 
-**本阶段已知限制（阶段 2 替换）**：frp 用**单个共享 token**（frp 的模型），不是一机一证；
-这正是 hub SDD 把 frp 定位为 MVP 验证通道、把设备证书/mTLS 留给自研 Agent 的原因（AD-H11/AD-H13）。
+**本阶段已知限制（阶段 2 替换）**：**隧道自身的认证**仍是 frp 的**单个共享 token** ——
+这是 frp 的模型，也是 hub SDD 把 frp 定位为 MVP 验证通道、把设备 mTLS 留给自研 Agent 的原因（AD-H11/AD-H13）。
+
+但不要把这与另一件事混起来：**hub → 实例这一跳的 TLS 身份已经是一机一证**
+（`make_instance_cert.sh` 签自签证书 → 钉进 `trust-bundle.pem` → nginx 按 `$mrrc_tls_name` 逐实例校验）。
+两者层次不同：前者是"谁能接入隧道"，后者是"这台实例是不是它声称的那台"。
+详见 `../SDD/12-operational-model.md` §12.8 「实例证书链」与「实例开通链」。
 
 ## 两级入口：主路走 hub，退化路走海外 www（迂回方案）
 

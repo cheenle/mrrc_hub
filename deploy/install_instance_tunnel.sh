@@ -33,10 +33,72 @@ PLIST="$HOME/Library/LaunchAgents/com.mrrc.fleet-tunnel.$NAME.plist"
 LABEL="com.mrrc.fleet-tunnel.$NAME"
 FRPC="$(command -v frpc || echo "$HOME/bin/frpc")"
 
-[[ -x "$FRPC" ]] || {
-	echo "frpc not found — install it first (brew install frp, or a release tarball)" >&2
-	exit 2
+# frpc 从哪来（按优先级）：
+#   1. 安装包自带的副本（与脚本同级，或 .frpc/ 子目录）—— 离线也能装 ✓
+#   2. 系统 PATH 里已有的（brew 或发行版包）
+#   3. 从 frp 官方 release 下载 **并校验 SHA-256**；校验和不一致即拒绝使用
+# 版本与 hub 上的 frps 对齐（pin 死）：客户端比服务端新可能握手失败。
+FRP_VERSION="${MRRC_FRP_VERSION:-0.71.0}"
+FRP_CACHE="${MRRC_FRP_DIR:-$HOME/.local/share/mrrc-fleet}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+frpc_platform() {
+	case "$(uname -s)" in
+		Darwin) echo darwin ;;
+		Linux) echo linux ;;
+		*) echo "" ;;
+	esac
 }
+
+frpc_arch() {
+	case "$(uname -m)" in
+		arm64|aarch64) echo arm64 ;;
+		x86_64|amd64) echo amd64 ;;
+		*) echo "" ;;
+	esac
+}
+
+ensure_frpc() {                     # 结果写进全局 FRPC
+	local candidate os arch base url sums want got tmp
+	for candidate in "$SCRIPT_DIR/frpc" "$SCRIPT_DIR/.frpc/frpc"; do
+		if [[ -x "$candidate" ]]; then FRPC="$candidate"; echo "使用安装包自带的 frpc: $FRPC" >&2; return 0; fi
+	done
+	if candidate="$(command -v frpc 2>/dev/null)" && [[ -x "$candidate" ]]; then
+		FRPC="$candidate"; echo "使用系统中已有的 frpc: $FRPC" >&2; return 0
+	fi
+	os="$(frpc_platform)"; arch="$(frpc_arch)"
+	if [[ -z "$os" || -z "$arch" ]]; then
+		echo "没有自带 frpc，且 $(uname -s)/$(uname -m) 无官方构建可下载。" >&2
+		echo "请把 frpc 放到脚本同级目录（或用 MRRC_FRP_DIR 指定）后重跑。" >&2
+		return 1
+	fi
+	base="frp_${FRP_VERSION}_${os}_${arch}"
+	url="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${base}.tar.gz"
+	sums="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_checksums.txt"
+	mkdir -p "$FRP_CACHE"
+	tmp="$(mktemp -d)"
+	echo "下载 frpc ${FRP_VERSION} (${os}/${arch}) 并校验 SHA-256…" >&2
+	curl -fsSL --retry 3 -o "$tmp/$base.tar.gz" "$url" || { echo "下载失败: $url" >&2; rm -rf "$tmp"; return 1; }
+	curl -fsSL --retry 3 -o "$tmp/sums.txt" "$sums" || { echo "校验和文件下载失败: $sums" >&2; rm -rf "$tmp"; return 1; }
+	want="$(awk -v f="$base.tar.gz" '$2 == f {print $1}' "$tmp/sums.txt")"
+	if [[ -z "$want" ]]; then echo "校验和文件里没有 $base.tar.gz —— 拒绝安装" >&2; rm -rf "$tmp"; return 1; fi
+	if command -v sha256sum >/dev/null 2>&1; then
+		got="$(sha256sum "$tmp/$base.tar.gz" | awk '{print $1}')"
+	else
+		got="$(shasum -a 256 "$tmp/$base.tar.gz" | awk '{print $1}')"
+	fi
+	if [[ "$got" != "$want" ]]; then
+		echo "SHA-256 不匹配，拒绝安装（期望 $want，实得 $got）" >&2; rm -rf "$tmp"; return 1
+	fi
+	echo "校验通过 ✓" >&2
+	tar -xzf "$tmp/$base.tar.gz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+	install -m 755 "$tmp/$base/frpc" "$FRP_CACHE/frpc" || { rm -rf "$tmp"; return 1; }
+	rm -rf "$tmp"
+	FRPC="$FRP_CACHE/frpc"
+	echo "已安装: $FRPC（$("$FRPC" --version 2>/dev/null || echo 'version unknown')）" >&2
+}
+
+ensure_frpc || exit 2
 
 if pgrep -f "frpc -c .*mrrc" >/dev/null 2>&1 && [[ "${MRRC_FORCE:-0}" != "1" ]]; then
 	echo "a manually started frpc is already running; stop it first (or set MRRC_FORCE=1)" >&2

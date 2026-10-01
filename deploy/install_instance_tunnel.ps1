@@ -123,6 +123,36 @@ if ($env:MRRC_ENROLL_SECRET) {
 [Environment]::SetEnvironmentVariable("MRRC_REMOTE_SESSION_TX_HEARTBEAT_S", "5", "User")
 Write-Host "set MRRC_SSL_CERT / MRRC_SSL_KEY / MRRC_REMOTE_SESSION_TX_HEARTBEAT_S=5 (user scope)"
 
+# Also write them into the launcher's own config file. The launcher merges os.environ with
+# %LOCALAPPDATA%\MRRC-Modern\mrrc_modern.env, so a value written there is honoured no matter how
+# the app is started - from the Start menu, from a shortcut, or after a reboot. User-scope
+# variables alone are not enough: a process started by Explorer keeps the environment block
+# Explorer had when it started, which is why the app went on serving its own localhost
+# certificate and the hub refused the handshake.
+$appCfg = Join-Path $env:LOCALAPPDATA "MRRC-Modern\mrrc_modern.env"
+$cfgKeys = [ordered]@{
+    MRRC_SSL_CERT = $crt
+    MRRC_SSL_KEY  = $key
+    MRRC_WEB_PORT = "$LocalPort"
+    MRRC_REMOTE_SESSION_TX_HEARTBEAT_S = "5"
+}
+New-Item -ItemType Directory -Path (Split-Path $appCfg) -Force | Out-Null
+$existing = @{}
+if (Test-Path $appCfg) {
+    foreach ($line in Get-Content $appCfg) {
+        $l = $line.Trim()
+        if ($l -and -not $l.StartsWith("#") -and $l.Contains("=")) {
+            $kv = $l.Split("=", 2); $existing[$kv[0].Trim()] = $kv[1].Trim()
+        }
+    }
+}
+foreach ($k in $cfgKeys.Keys) { $existing[$k] = $cfgKeys[$k] }
+$out = New-Object System.Collections.Generic.List[string]
+$out.Add("# MRRC Modern configuration - certificate/port lines maintained by the hub onboarding script")
+foreach ($k in ($existing.Keys | Sort-Object)) { $out.Add($k + "=" + $existing[$k]) }
+Set-Content -Path $appCfg -Value $out -Encoding utf8
+Write-Host "wrote the certificate into the app config too: $appCfg"
+
 # 让应用用上新环境。写用户级环境变量**不会**改变已在运行的应用的环境块（从开始菜单启动的进程
 # 继承的是 Explorer 启动时的环境）：实测它因此继续用自己那张 localhost 证书，hub 侧报
 # "upstream SSL certificate verify error: (18:self-signed certificate)"，入口永远 502。

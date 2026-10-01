@@ -45,6 +45,22 @@ else
 	echo "  登录 shell: $PROFILE 已有来源行（未重复追加）"
 fi
 
+# 也写进启动器自己的配置文件：启动器把 os.environ 与这个文件合并，
+# 所以写在这里的值**无论怎么启动**都生效（访达双击、Dock、重启后），
+# 而用户级环境变量会被"进程启动时的旧环境块"挡住（Windows 上实测过这个坑）。
+APP_CFG="$HOME/Library/Application Support/MRRC-Modern/mrrc_modern.env"
+mkdir -p "$(dirname "$APP_CFG")"
+tmp_cfg="$APP_CFG.tmp.$$"
+{
+	# grep 在"没有匹配"时返回 1，而本脚本是 set -e ⇒ 必须放行（实测踩过 ✓）
+	[ -f "$APP_CFG" ] && { grep -vE '^(MRRC_SSL_CERT|MRRC_SSL_KEY|MRRC_WEB_PORT|MRRC_REMOTE_SESSION_TX_HEARTBEAT_S)=' "$APP_CFG" || true; }
+	[ -n "${MRRC_SSL_CERT:-}" ] && echo "MRRC_SSL_CERT=$MRRC_SSL_CERT"
+	[ -n "${MRRC_SSL_KEY:-}" ] && echo "MRRC_SSL_KEY=$MRRC_SSL_KEY"
+	echo "MRRC_WEB_PORT=$LOCAL_PORT"
+	echo "MRRC_REMOTE_SESSION_TX_HEARTBEAT_S=5"
+} > "$tmp_cfg" && mv "$tmp_cfg" "$APP_CFG"
+echo "  应用配置: ${APP_CFG}（启动器每次启动都会读它 ✓）"
+
 case "$OS" in
 Darwin)
 	PLIST="$HOME/Library/LaunchAgents/com.mrrc.fleet-env.plist"

@@ -85,6 +85,9 @@ def test_callsign_rules_match_the_feedback_board():
 def test_label_rule():
     check(cs.label_for("BG1SB") == "bg1sb", "主产品用裸呼号")
     check(cs.label_for("bg1sb", "modern") == "bg1sb", "modern 视为主产品")
+    check(cs.label_for("bg1sb", "mrrc_modern") == "bg1sb", "mrrc_modern 也视为主产品（应用实际发的值）")
+    check(cs.label_for("bg1sb", "MRRC-Modern") == "bg1sb", "大小写/连字符无关")
+    check(cs.label_for("bg1sb", "legacy") == "bg1sb-legacy", "其他产品仍加后缀")
     check(cs.label_for("BG1SB", "legacy") == "bg1sb-legacy", "附加产品加后缀")
     check(cs.label_for("BG1SB", "Old Rig") == "bg1sb-old-rig", "产品名 slug 化")
 

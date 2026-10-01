@@ -103,8 +103,8 @@
                 <tr>
                   <td>浏览器打不开</td>
                   <td>
-                    地址里<b>端口不能省</b>：是 <code>:9988</code> 或
-                    <code>:8899</code>。 海外边缘入口的路径要用<b>大写呼号</b>。
+                    地址里<b>不需要端口</b>（V0.21 起入口与其他服务同在 443）。历史写法是
+                    <code>:9988</code> / <code>:8899</code>。
                     别用明文端口拼 <code>https://</code>。
                   </td>
                 </tr>
@@ -166,7 +166,7 @@
                   </td>
                 </tr>
                 <tr>
-                  <td>海外边缘入口时通时不通</td>
+                  <td>（历史）海外边缘入口时通时不通</td>
                   <td>
                     <b>已复现的现网问题</b>（2026-10-01）：6 次请求中 3 次 20
                     秒无响应。 改用主路。详见<a
@@ -232,7 +232,7 @@ tail -20 "$HOME/Library/Application Support/mrrc-fleet/frpc-&lt;呼号&gt;.log"
 #   看到 login to server success + start proxy success  = 隧道正常
 
 # 2) 从公网看整条链路健康吗
-curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net:9988/api/health
+curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net/api/health
 #   401 = 隧道 + Hub 路由 + 实例鉴权 三层全通
 #   502 = 隧道在，但电台服务没起
 #   404 = Hub 不认这个呼号（注册表没这行）</code></pre>
@@ -321,7 +321,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net:99
                   <td><b>角色或鉴权</b> —— 看 4001 / 4003。</td>
                 </tr>
                 <tr>
-                  <td>主路正常，边缘路时通时不通</td>
+                  <td>（历史）主路正常、边缘路时通时不通</td>
                   <td>
                     <b>边缘 → Hub 这一跳</b> —— 已复现的现网问题，用主路。
                   </td>

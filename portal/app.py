@@ -171,7 +171,12 @@ class Portal:
             raise PermissionError(
                 f"拒绝分配：{normalized} 当前状态 {app.status}，只有 {STORE_VERIFIED} 才可分配入口"
             )
-        label = cs.label_for(normalized, app.product)     # ④ 分配
+        # 已经分配过入口的申请，重新申请必须沿用原来那个（标签 + 端口都由注册表承载，
+        # hub 的 nginx 路由从注册表生成）。否则重新申请会把入口指到别处。
+        if app.label and dict(self.registry.entries()).get(app.label):
+            label = app.label
+        else:
+            label = cs.label_for(normalized, app.product)     # ④ 分配
         # 同一呼号再次申请必须落到同一个入口：注册表是 label -> port，hub 的 nginx 路由由它
         # 生成。早先这里无条件取下一个空闲端口，于是重新申请会把入口指到一个没人监听的端口
         # （实测：老朋友 18804 仍在路由里，隧道却起来在 18803，入口 502）。

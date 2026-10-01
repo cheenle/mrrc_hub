@@ -57,19 +57,12 @@ cat >"$VHOST" <<EOF
 #
 # TLS is the hub's wildcard certificate (currently self-signed: a trusted one
 # needs DNS-01, i.e. DNS provider credentials — see deploy/README.md).
-server {
-    listen 8899;
-    listen [::]:8899;
-    server_name ~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net\$;
-
-    # Plain HTTP is not a usable path in the mainland region anyway (R-H13), so
-    # this port only points at the TLS one.
-    location / { return 301 https://\$host\$request_uri; }
-}
-
+# 一个 vhost 服务所有实例，且与其余服务同在 443（V0.21）。早先这里还有一个明文 8899 的
+# 301 跳转 vhost 与 9988 的 TLS vhost：容器合并到同一台机器后，多出来的端口只会分散
+# 排查面，且明文口在大陆地域本来就被途中改写（R-H13）。唯一保留的独立端口是隧道 8989。
 server {
     listen 443 ssl;
-    listen [::] ssl;
+    listen [::]:443 ssl;
     http2 on;
     server_name ~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net\$;
 

@@ -57,14 +57,14 @@ SHA-256 完全一致）。**不要在这里改它。**
 | 站点内容 | 事实源 |
 | --- | --- |
 | 入口 URL、端口、TLS 入口数量 | 现网 nginx 实际配置；`SDD/12 §12.8` |
-| 边缘入口的路径前缀、大小写规范 | 现网 www 的 `vlsc.net` vhost |
+| ~~边缘入口的路径前缀、大小写规范~~ | **已随 V0.21 取消**（现网只有一台机器的 443） |
 | 证书签发方式与有效期 | 现网证书文件 + `SDD/05 NFR-H030` |
 | 实例侧行为（口令、角色、数据通道、PTT） | `mrrc_modern` 源码 + `mrrc_modern/SDD/` |
 | 注册流程与核验理由 | `SDD/06 UC-H10`、`SDD/03 SC-H10` |
 | 安全不变量 | `SDD/08`（AD-H06/07/11）、`SDD/15` |
 | 排障条目 | `SDD/12 §12.7 §12.8`、`deploy/README.md` |
 | 运营事实（主机、注册表、运维命令） | `SDD/12 §12.8` |
-| Portal 自助入口与核验流程 | `SDD/12 §12.9`、`portal/README.md`；现网 `https://portal.mrrc.vlsc.net:8899/` |
+| Portal 自助入口与核验流程 | `SDD/12 §12.9`、`portal/README.md`；现网 `https://portal.mrrc.vlsc.net/` |
 | 实例证书链（一机一证、信任包、逐实例校验） | `SDD/12 §12.8`「实例证书链」；现网 `/etc/mrrc-hub/trust-bundle.pem` + 注册表第三列 |
 | 实例安装器（自取 frpc、校验哈希、三平台常驻） | `deploy/install_instance_tunnel.{sh,ps1}` 头部注释；`SDD/12 §12.8`「实例开通链」 |
 | 实例侧版本与能力 | `mrrc_modern/CHANGELOG.md`（当前权威：v1.22.0）+ 其 `SDD/` |
@@ -198,9 +198,9 @@ PY
 shasum -a 256 css/octen.css ../../mrrc_modern/website/css/octen.css
 
 # ④ 现网入口仍符合站点描述（页面里写的就是这些期望值）
-curl -s -o /dev/null -w "主路 /login    → %{http_code}（期望 200）\n" https://bg1sb.mrrc.vlsc.net:9988/login
-curl -s -o /dev/null -w "主路 /api/health → %{http_code}（期望 401）\n" https://bg1sb.mrrc.vlsc.net:9988/api/health
-curl -s -o /dev/null -w "备用口 :8899     → %{http_code}（期望 200）\n" https://bg1sb.mrrc.vlsc.net:8899/login
+curl -s -o /dev/null -w "主路 /login    → %{http_code}（期望 200）\n" https://bg1sb.mrrc.vlsc.net/login
+curl -s -o /dev/null -w "主路 /api/health → %{http_code}（期望 401）\n" https://bg1sb.mrrc.vlsc.net/api/health
+curl -s -o /dev/null -w "→ %{http_code}（期望 200）\n" https://bg1sb.mrrc.vlsc.net/login
 
 # ⑤ 仓库 SDD 约束
 python3 ../.agents/skills/sdd-guardian/harness/sdd_context.py check --staged
@@ -215,7 +215,7 @@ python3 ../.agents/skills/sdd-guardian/harness/sdd_context.py check --staged
 
 | 问题 | 状态 | 站内位置 |
 | --- | --- | --- |
-| 海外边缘入口 `www → hub:9988` 这一跳间歇性失败（2026-10-01 实测 6 次中 3 次 20 s 无响应） | **未修复**，已定位到 www 到 Hub 那一跳；已排除本地链路、www 静态服务、www 上另一条代理腿、Hub 侧 SNI/Host 组合 | `use.html#entries`、`design.html#status`、`trouble.html#symptoms` |
+| （历史）海外边缘入口 `www → hub:9988` 这一跳间歇性失败（2026-10-01 实测 6 次中 3 次 20 s 无响应） | **已随 V0.21 一并取消**（该路径整体删除）；当年已定位到 www 到 Hub 那一跳；已排除本地链路、www 静态服务、www 上另一条代理腿、Hub 侧 SNI/Host 组合 | `use.html#entries`、`design.html#status`、`trouble.html#symptoms` |
 | 登录限流在隧道路径下退化为全局桶 | 已决定暂缓 | `use.html#gaps` |
 | `deploy/*.sh` 与现网漂移（重跑会让现网退化） | 已记录未修。**X1 已升级为高危**：`deploy_hub_routes.sh` 还会抹掉逐实例校验与信任包 | `deploy/README.md` 的「⚠️ 脚本与现网漂移」 |
 | 实例证书链**机制就位、尚未施用**（现网 `bg1sb` 仍用 `radio.vlsc.net`） | 待迁移 | `index.html`、`design.html#status`、`SDD/12 §12.8` |

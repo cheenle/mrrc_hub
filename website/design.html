@@ -135,8 +135,8 @@
               <div class="hub-layer-body">
                 <strong>Hub 入口</strong>
                 <span
-                  >一条通配 vhost 服务所有实例（<code>:9988</code> 与
-                  <code>:8899</code>，均为 TLS）。终结 TLS、按 Host
+                  >一条通配 vhost 服务所有实例（<code>443</code>；历史:
+                  <code>443</code>）。终结 TLS、按 Host
                   取呼号、查表得端口、<b>按实例名校验上游证书</b>（信任包里钉着
                   各实例的公钥）、透明转发数据通道。呼号自助注册是<b>另一个</b>
                   vhost。</span
@@ -223,7 +223,7 @@
               </div>
             </div>
             <div class="arch-card">
-              <span class="label">L4 海外边缘</span>
+              <span class="label">L4 海外边缘（已取消）</span>
               <div class="endpoint">443 路径代理</div>
               <div class="dir">
                 反代整条会话（含全部数据通道），并告知实例当前路径前缀
@@ -402,7 +402,7 @@
                   </td>
                 </tr>
                 <tr>
-                  <td>海外边缘入口</td>
+                  <td>（历史）海外边缘入口</td>
                   <td><span class="hub-badge gap">间歇可用</span></td>
                   <td>
                     2026-10-01 实测 6 次中 3 次 20 秒无响应。
@@ -437,7 +437,7 @@
                     HTTP），服务为
                     <code>mrrc-portal.service</code>，本体只绑回环； 对外经
                     nginx 暴露为
-                    <code>portal.mrrc.vlsc.net:8899</code> 并在该层限流。授予后
+                    <code>https://portal.mrrc.vlsc.net</code> 并在该层限流。授予后
                     <code>gen_hub_routes.py</code> + reload 仍由 root
                     手执行（有意分工）。
                   </td>
@@ -491,7 +491,7 @@
 
         <section id="boundary">
           <h2>边界声明</h2>
-          <p>本页只讲<b>接入层</b>：隧道、入口、路由、证书、身份、边缘。</p>
+          <p>本页只讲<b>接入层</b>：隧道、入口、路由、证书、身份。（海外边缘一层已随 V0.21 取消。）</p>
           <p>
             电台控制、音频编解码、频谱、以及 <b>PTT 安全释放的全部细节</b>，
             权威在 MRRC Modern 自己的设计记录里 —— 本页不复制它们，

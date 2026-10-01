@@ -4,6 +4,22 @@
 > 下面「未部署」的叙述是当时的现场记录，保留供追溯。
 > **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」—— 其中两条会让现网退化。**
 
+## 现行形态（V0.21，2026-10-02）—— 一台机器，只留 8989
+
+**门户、实例入口、静态站点在同一台机器上**（香港 VPS `hub.vlsc.net` = `www.vlsc.net` =
+`portal.mrrc.vlsc.net`，203.25.119.168）。原先"hub 一台 + 海外 www 边缘一台"的两级入口
+**已删除**：两条路指向同一个 nginx，保留第二套只是多一处会坏的配置。
+
+| 用途 | 地址 | 端口 |
+| --- | --- | --- |
+| 实例入口（统一，标签=裸呼号） | `https://<呼号>.mrrc.vlsc.net/` | **443** |
+| 呼号自助门户（挂根） | `https://portal.mrrc.vlsc.net/` | **443** |
+| 静态站点与下载 | `https://www.vlsc.net/mrrc_modern/` | **443** |
+| 隧道控制（实例出站连它） | `tunnel.mrrc.vlsc.net` | **8989** |
+
+**防火墙只需要放行 8989 与 443**（`:9988` / `:8899` 两个监听已取消）。
+
+
 ## ⚠️ 脚本与现网漂移（2026-10-01 取证）
 
 以下两处**仓库脚本落后于现网**。重跑对应脚本会让现网退化，**务必先对齐再跑**：
@@ -35,18 +51,19 @@
 | DNS `radio.vlsc.net` | 家宽 IPv6（无 A），即实例侧现状入口 |
 | 实例证书 | `certs/fullchain.pem` = **真 Let's Encrypt**，`CN=radio.vlsc.net`，SAN 仅 `radio.vlsc.net`，2026-12-10 到期 |
 
-**推论**：SDD 里那套命名（`portal.mrrc.vlsc.net` / `tunnel.mrrc.vlsc.net` / `<id>.mrrc.vlsc.net`）
+**推论**：SDD 里那套命名（`https://portal.mrrc.vlsc.net` / `tunnel.mrrc.vlsc.net` / `<id>.mrrc.vlsc.net`）
 **今天就解析得到**，不需要动 DNS。而你说的 `hub.vlsc.net` 需要新增一条记录（它在 `vlsc.net`
 区下，不在那条通配里）。本目录默认用 `test1.mrrc.vlsc.net` 做验证，避开这个前置。
 
 ## 解除阻塞（三件，只有你能做）
 
-1. **阿里云控制台 → 安全组入方向**放行：**`8899/tcp`、`9988/tcp`、`8989/tcp`**
+1. **VPS 控制台 → 安全组入方向**放行：**`8989/tcp`（隧道控制）与 `443/tcp`（入口/门户/站点）**。
+   历史端口 `8899` / `9988` 已随 V0.21 取消，无需放行
 
    | 端口 | 用途 |
    | --- | --- |
-   | **8899** | 用户入口的明文口（只做 301 跳转；**不能**用于 ACME，见下） |
-   | **9988** | 用户入口的 TLS 口 —— 用户实际访问 `https://test1.mrrc.vlsc.net` |
+   | ~~8899~~ | **已取消**（原为明文 301 口，后升 TLS，V0.21 随合并删除） |
+   | ~~9988~~ | **已取消**（原为用户入口 TLS 口；现入口在 443） |
    | **8989** | frps 控制口，实例出站连它 |
 
    非标端口的代价已写进设计记录（AD-H02 的 port 修订、风险 R-H12）：**入口 URL 带端口**，
@@ -74,14 +91,14 @@ Hub ECS 8.160.161.80
            proxy_ssl_verify on                       ← 这一步是刻意的：
            proxy_ssl_name radio.vlsc.net                B2 现状是 proxy_ssl_verify off，
            proxy_ssl_trusted_certificate <系统 CA 库>    hub 侧必须开着校验证书
-  nginx :8899 301 → https://…（明文口只跳转）
+  nginx :443（入口、门户、站点同一个端口）
   frps :8989  bindPort（实例出站连它；token 鉴权 + TLS）
        :18888 tcp 代理端口（**只绑 127.0.0.1**，不暴露到公网）
        ▲
        │ 出站 WSS/TLS，客户侧零入站
        │
 家宽 Mac（实例侧）
-  frpc → 8.160.161.80:8989
+  frpc → tunnel.mrrc.vlsc.net:8989
       local 127.0.0.1:8888  ← MRRC_modern（真的 Let's Encrypt 证书）
 ```
 
@@ -160,7 +177,7 @@ manual 模式不会自动续订（脚本的错误信息里也写了这条退路�
 | `/usr/local/sbin/gen_hub_routes.py` | 把注册表生成成 nginx `map`（`/etc/nginx/conf.d/mrrc-hub-map.conf`），并校验端口落在 frps 的 `allowPorts` 内 |
 | `/etc/nginx/sites-available/mrrc-hub` | **唯一**的 vhost：`~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$` → `https://127.0.0.1:$mrrc_port`；未知名字 **404**（不回退到别的实例）。上游校验：`proxy_ssl_name $mrrc_tls_name` + `proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem`（**逐实例**，见下） |
 | `/etc/mrrc-hub/trust-bundle.pem` | 系统 CA + 各实例的自签证书公钥。自签证书靠"钉住它"通过校验，而不是靠关掉 verification |
-| `/etc/nginx/sites-available/mrrc-portal`〔+ `-edge`〕 | 呼号自助注册站点：`portal.mrrc.vlsc.net`（8899 面向用户 / 9988 面向边缘），`/apply` 带 `limit_req` |
+| `/etc/nginx/sites-available/mrrc-portal-mrrc` | 呼号自助注册站点：`https://portal.mrrc.vlsc.net/`（**挂在该名字的根**；旧 `/mrrc_portal/` 301 到根），带 `limit_req` |
 
 **加实例 = 注册表加一行 + 重跑生成器 + reload**，不再"每实例改 nginx"—— 那正是 B2 的痛
 （每加一个前端资源就要动中心配置、还踩过正则优先级）。
@@ -189,8 +206,8 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 
 | | 主路（低延迟） | 退化路（兼容性） |
 | --- | --- | --- |
-| URL | `https://<呼号>.mrrc.vlsc.net`（或 `:8899`） | `https://www.vlsc.net/mrrc_modern/<呼号大写>/` |
-| 落点 | 阿里云 hub（乌兰察布） | 海外 <www.vlsc.net> 的 443 **路径代理**，反代回 hub 的 9988 |
+| URL（历史） | `https://<呼号>.mrrc.vlsc.net:9988` / `:8899` | `https://www.vlsc.net/mrrc_modern/<呼号大写>/` |
+| 落点（历史） | hub | 海外 <www.vlsc.net> 的 443 路径代理，反代回 hub 的 9988 |
 | 证书 | **真 Let's Encrypt**（`*.mrrc.vlsc.net`，DNS-01，2026-09-30 → 2026-12-29，每日续期） | **真证书**（www 上 certbot HTTP-01，80/443 在此可用） |
 | 实测 RTT | **0.13 s**（`/login`） | **0.69 s**（`/login`，多一跳海外往返） |
 | 适用 | 绝大多数用户 | 只放行 80/443 出站的网络（公司/访客 Wi-Fi） |
@@ -233,7 +250,7 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 已验证（2026-09-30 真实公网，安全组放行后）
 
-安全组放行 8899/9988/8989 之后，**真实公网路径**（本机 → hub nginx → frps:8989 → frpc → 实例）
+安全组放行 443/8989 之后，**真实公网路径**（本机 → hub nginx → frps:8989 → frpc → 实例）
 实测通过，无 SSH 转发、无端口映射、客户侧零入站：
 
 | 检查 | 结果 |
@@ -262,7 +279,7 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 已验证（早前一轮：安全组未放行时用 SSH 转发绕开）
 
-安全组当时仍未放行，所以两条腿走了 SSH 本地转发（本地 18989→hub 8989、18988→hub 9988）。
+安全组当时仍未放行，所以两条腿走了 SSH 本地转发（本地 18989→hub 8989、18988→hub 9988（当时还有 9988））。
 **被验证的软件链条与真实部署完全一致**，只有"公网能不能到 hub"这一层没被覆盖。
 
 | 检查 | 结果 |

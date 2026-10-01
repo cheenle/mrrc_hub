@@ -15,11 +15,11 @@
 | 域名 | 用途 |
 |---|---|
 | `www.vlsc.net/mrrc_modern/` | 产品介绍、下载与现有文档入口（**现状，保留**） |
-| `portal.mrrc.vlsc.net` | Fleet Portal、账号与实例管理 |
-| `<呼号>.mrrc.vlsc.net` **:8899 / :9988** | 实例入口（AD-H15：呼号即租户名，如 `BG1SB`）。旧写法的 `<instance-id>` 同义 |
-| `<instance-id>.mrrc.vlsc.net`（历史） | 单实例远程访问入口；通配 DNS/TLS。**入口携带非标准端口**（明文 8899 只跳转，隧道控制 8989）—— 见 AD-H02 的 port 修订 |
-| `www.vlsc.net/mrrc_modern/…` | **退化入口（V0.4）**：海外主机终结 TLS（真证书、443）并把整条会话反代进 `tunnel.mrrc.vlsc.net:9988`，供只放行 80/443 的用户网络使用；代价是多一跳海外往返（实测 +0.56 s） |
-| `tunnel.mrrc.vlsc.net` **:8989** | 实例出站隧道入口（Agent 连到它；实测已通）。同理 `portal.mrrc.vlsc.net` 也在通配内 |
+| `https://portal.mrrc.vlsc.net` | Fleet Portal、账号与实例管理 |
+| `<呼号>.mrrc.vlsc.net`（443） | 实例入口（AD-H15：呼号即租户名，如 `BG1SB`）。标签即呼号，不再带产品后缀 |
+| `tunnel.mrrc.vlsc.net:8989` | 实例出站隧道的控制端口（**唯一保留的独立端口**）。入口、门户、站点全部合并到同一台机器的 443 |
+| `www.vlsc.net/mrrc_modern/…` | **退化入口（V0.4）**：海外主机终结 TLS（真证书、443）并把整条会话反代进 `tunnel.mrrc.vlsc.net:9988`，供只放行 80/443 的用户网络使用；代价是多一跳海外往返（实测 +0.56 s） | **—— 该路径已随 V0.21 删除**
+| `tunnel.mrrc.vlsc.net` **:8989** | 实例出站隧道入口（Agent 连到它；实测已通）。同理 `https://portal.mrrc.vlsc.net` 也在通配内 |
 
 **Cookie 规则**：实例子域会话必须 host-only，不设 `Domain=.mrrc.vlsc.net`；
 Hub 票证 Cookie 使用独立名称并遵守 AD-H09 —— 因为 Access 与实例**共享同一 origin**。

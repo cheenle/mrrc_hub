@@ -214,6 +214,10 @@ EOF
 	echo "unsupported platform: $(uname -s) — start it by hand: $FRPC -c $CONF" >&2
 	;;
 esac
+# ---- 应用侧环境：隧道通了不等于应用能接住；这两件事过去是分开的（见 SDD V0.15 遗留）----
+# 同一组变量在 Windows 安装器里已经写了；这里补上 macOS/Linux 的两种惯例位置。
+"$(dirname "${BASH_SOURCE[0]}")/wire_instance_env.sh" "${LOCAL_PORT}"
+
 echo "==> ${NAME} → https://${NAME}.mrrc.vlsc.net:9988 (local 127.0.0.1:${LOCAL_PORT})"
 echo
 echo "check:"

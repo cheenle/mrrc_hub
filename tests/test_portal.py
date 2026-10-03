@@ -8,7 +8,11 @@
  ② **未核验不得授予** —— 这是 UC-H10 的安全前置：呼号是公开标识、入口可枚举，
     所以防线只能放在"核验之后"（callsign.py 顶部有完整论证）
  ③ 查重冲突绝不静默覆盖（走申诉/转移），以及撤销会真的移除入口
+ ④ 「隧道在线」必须意味着实例真的在服务（V0.23）—— 旧判据只看回环端口能不能连上，
+    而 frps 是在 hub 本机接受连接的，frpc 只要注册过代理就永远连得上
 """
+from __future__ import annotations
+
 import contextlib
 import json
 import shutil

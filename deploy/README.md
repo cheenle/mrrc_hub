@@ -31,6 +31,18 @@ upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL hands
 `portal.mrrc.vlsc.net`，203.25.119.168）。原先"hub 一台 + 海外 www 边缘一台"的两级入口
 **已删除**：两条路指向同一个 nginx，保留第二套只是多一处会坏的配置。
 
+> **要 SSH 的是 `cheenle@www.vlsc.net`（203.25.119.168），不是 `8.160.161.80`。**
+> 本文下方标着「2026-09-30 实测」的拓扑、事实表与部署步骤描述的是**迁移前那台阿里云 ECS**
+> （`8.160.161.80` / `iZ0jlaouy9vk8n98wfp3a6Z`）—— 只作历史保留。**2026-10-03 重新取证**发现那台
+> 机器并未退役：它上面另跑着一套 frps + portal + nginx，注册表已经**分叉**（标签带 `-mrrc-modern`
+> 后缀），且**自 2026-09-30 19:22 起没有任何实例接入过**。它不承载任何现网入口，DNS 也不指向它。
+> 当日就因为这个过期段落把排查带错了方向 —— 所以这一条写在最前面。
+>
+> **现网 hub 的实测事实（2026-10-03）**：Ubuntu，**1 vCPU / 1914 MB 内存 / 磁盘 13721 MB（已用 5823）**；
+> `frps`（8989）· `nginx`（443）· `mrrc-portal`（127.0.0.1:8890，`User=mrrcportal`，无 sudo）
+> 四个单元常驻；`mrrc-hub-routes.timer`（30 s）见下方「路由重生成」一节。
+> SSH 为 `cheenle@www.vlsc.net`，**有 NOPASSWD sudo**（`sudo -n` 可直接用）。
+
 | 用途 | 地址 | 端口 |
 | --- | --- | --- |
 | 实例入口（统一，标签=裸呼号） | `https://<呼号>.mrrc.vlsc.net/` | **443** |
@@ -39,7 +51,6 @@ upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL hands
 | 隧道控制（实例出站连它） | `tunnel.mrrc.vlsc.net` | **8989** |
 
 **防火墙只需要放行 8989 与 443**（`:9988` / `:8899` 两个监听已取消）。
-
 
 ## ⚠️ 脚本与现网漂移（2026-10-01 取证，2026-10-02 按 V0.21 复核）
 
@@ -60,7 +71,9 @@ upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL hands
 
 **处置**：只记录，**不改脚本**（改部署脚本的风险与验证成本超出文档任务范围）。对齐留作独立变更。
 
-## 已探明的事实（2026-09-30 实测）
+## 已探明的事实（2026-09-30 实测，**指迁移前那台 `8.160.161.80`，仅作历史**）
+
+> 本节的"Hub 主机"是阿里云 ECS，**不是现网**。现网事实见文首提示框。
 
 | 项 | 事实 |
 | --- | --- |
@@ -131,6 +144,9 @@ Hub ECS 8.160.161.80
 同时覆盖两项设计主张：AD-H02（通配子域可行）与 NFR-H021（禁止 `proxy_ssl_verify off`）。
 
 ## 部署步骤
+
+> **注意**：下面的 `8.160.161.80` 是历史目标。现网重装/迁移走 `cheenle@www.vlsc.net`，步骤相同，
+> 但请同时确认 `mrrc-hub-routes.{sh,timer,service}` 三件套都装上了（见下方「路由重生成」）。
 
 ```bash
 # 1) hub 侧（需要第 1、2 项已解除）
@@ -406,7 +422,14 @@ www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续�
 - 为什么是 **timer** 而不是 path 单元：systemd 的 `PathChanged` 也包含**属性变化（含 atime）**，
   而服务本来就要读证书目录 ⇒ 会不断触发自己（实测 2 分钟 232 次 ✗）。30 秒一次的 timer 只花一次
   glob + 一次哈希比较 ✓，脚本**只在生成物真的变了**才 `nginx -t` + reload ✓（所以常态下不 reload ✓）。
-- 新装 hub：`bootstrap-hub.sh` 会一并安装 ✓（不会再漏 ✓）。
-- 验收：`touch /etc/mrrc-hub/instance-certs/<名>.pem` ⇒ 看
-  `journalctl -u mrrc-hub-routes.service` 出现 `nginx -t passed; reloading` ✓。
-
+- 新装 hub：`bootstrap-hub.sh` 会一并安装（`install -m 755/644` + `systemctl enable --now`）。
+  **但 2026-10-03 实测到一次装配缺失，所以别把这句话当保证**：现网那台 hub 上**只有**
+  `mrrc-hub-routes.service`，**包装脚本与 timer 都没装** ⇒ 该 unit 指向的
+  `/usr/local/sbin/mrrc-hub-routes.sh` 不存在 ⇒ 每次执行 `status=203/EXEC` ⇒ **自 2026-10-02 01:07
+  起路由从未重生成过**。症状：新实例的一切都就绪（frps 已在 `127.0.0.1:<端口>` 监听、
+  `instance-certs/<标签>.pem` 已登记、注册表有行），**只有入口 404**，因为 nginx 的
+  label→端口表里没有它。
+  确认方式：`systemctl is-enabled mrrc-hub-routes.timer`（期望 `enabled`）+ `sha256sum /usr/local/sbin/mrrc-hub-routes.sh`
+  与仓库 `deploy/mrrc-hub-routes.sh` 比对。
+- **验收**：① `touch /etc/mrrc-hub/instance-certs/<名>.pem` ⇒ `journalctl -u mrrc-hub-routes.service`
+  出现 `nginx -t passed; reloading`；② 常态下每 30 s 一行 `nothing changed; not reloading`。

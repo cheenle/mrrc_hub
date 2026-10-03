@@ -2,6 +2,18 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.26 — 2026-10-03 — 路由自动化在现网上其实一直是坏的（装配缺失），补齐并取证
+
+**触发**：一台新实例（`bg6lh`，端口 18806）走完了全流程 —— 申请 → 批准 → 客户端登记证书 → `instance-certs/bg6lh.pem` 落盘 → frps 已在 `127.0.0.1:18806` 监听 —— **而入口返回 404**。
+
+**取到的根因**：nginx 的 label→端口表由 `gen_hub_routes.py` 生成，它由 root 的 `mrrc-hub-routes.timer` 每 30 s 驱动；而现网 hub 上**只装了 `mrrc-hub-routes.service`**，包装脚本与 timer 都缺 ⇒ 该 unit 指向的 `/usr/local/sbin/mrrc-hub-routes.sh` 不存在 ⇒ 每次执行 `status=203/EXEC` ⇒ **自 2026-10-02 01:07 起路由从未重生成过**。`deploy/README.md` 里"`bootstrap-hub.sh` 会一并安装 ✓（不会再漏 ✓）"这句因此被实测推翻。
+
+**已做**：按 `bootstrap-hub.sh` 第 285–290 行的原意补齐两件 —— 包装脚本（`install -m 755`，sha256 与仓库逐字节一致）+ timer（`install -m 644` + `enable --now`），跑一次后 map 里出现 `bg6lh 18806`、`nginx -t` 通过并 reload；实测入口由 404 变 302，且 `bg1sb` / `bg9aaa` 未受影响。之后 timer 每 ~35 s 触发、常态输出 `nothing changed; not reloading`，**从此新实例的路由与信任包在 30 s 内自动就位**（信任包同样在哈希比较范围内，所以只登记证书、不动注册表也会触发 reload）。
+
+**同时修正的文案**：`portal/app.py` 的 `grant()` 对 `mrrc_modern` 客户端的 `next_step` 原写作"点「刷新状态」即自动完成" —— 自客户侧 v1.25.0 起应用会自己轮询并完成接入，该文案改为"无需操作；也可点刷新立即完成"。设计记录里的"path 单元"说明也已核对：`.path` 是**故意不装**的（`PathChanged` 会因 atime 更新自激，实测 2 分钟 232 次），只有 timer 该装。
+
+**未处置**：另一台阿里云 ECS `8.160.161.80` 上跑着一套**分叉**的 frps+portal+nginx（注册表标签带 `-mrrc-modern` 后缀，自 2026-09-30 19:22 起无实例接入，DNS 不指向它）。`deploy/README.md` 已把它标注为历史目标，其退役与否待定。
+
 ## V0.25 — 2026-10-03 — 管理台与自助页的窄屏可用性：宽表堆叠成卡片，状态色收进 CSS
 
 **触发**：V0.24 把实例页扩到 6 列之后，手机上已经没法看了 —— 证书主体

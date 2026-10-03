@@ -257,7 +257,8 @@ class Portal:
                 # 设置菜单里完成（申请→批准→应用自动签证书/登记/起隧道），租户没有任何命令要跑。
                 # 只有旧版应用才需要那份脚本，所以按 product 分叉。
                 "next_step": (
-                    "在应用里：设置 → 接入云端（Cloud Hub）→ 点「刷新状态」即自动完成；无需命令"
+                    "无需操作：批准后应用会自动完成接入（客户侧 v1.25.0 起每 30 秒自查一次）；"
+                    "想立即完成就在应用里点「设置 → 接入云端 → 刷新状态」"
                     if (app.product or "").strip() in ("mrrc_modern", "")
                     else f"在实例上运行 mrrc_hub/deploy/install_instance_tunnel.sh {label} {port}"
                 ),

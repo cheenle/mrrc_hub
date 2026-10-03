@@ -247,7 +247,12 @@ root 的 `mrrc-hub-routes.timer` 每 30 s 触发一次 `mrrc-hub-routes.sh`（�
 **只有生成物真的变了**才 `nginx -t` + `systemctl reload nginx`（`nginx -t` 不过就保持运行中的配置不动
 并报错退出）。**仍需人工的只有运维那一步**：在 `/admin` 里核验并批准。Portal 服务本身没有
 reload nginx 的权限，这是有意的分工（接收公网输入的服务不该持有它）。
-**已知滞后**：门户管理页的提示文案里仍印着那条手工 root 命令（`portal/app.py`），属文案未跟上，另案跟踪。
+**实测落差（2026-10-03，已修复）**：上面这段描述的是**设计**，而现网直到 2026-10-03 才真的成立：
+那台 hub 上只装了 `.service`，包装脚本与 timer 都缺 ⇒ 单元指向不存在的脚本、每次 `203/EXEC` ⇒ **路由自 2026-10-02 01:07 起从未重生成**，新实例全部 404（而 frps、证书、注册表都已就绪）。
+补齐包装脚本 + timer 后实测：入口 404 → 302，邻居 `bg1sb`/`bg9aaa` 不受影响，
+常态每 ~35 s 输出 `nothing changed; not reloading`。验收方式：`systemctl is-enabled mrrc-hub-routes.timer`
+应为 `enabled`，且 `/usr/local/sbin/mrrc-hub-routes.sh` 的 sha256 应与仓库 `deploy/mrrc-hub-routes.sh` 一致。
+**文案滞后已修**：`portal/app.py` 的 `grant()` 对 `mrrc_modern` 的 `next_step` 原写"点「刷新状态」即自动完成"；客户侧 v1.25.0 起应用自己轮询完成接入，文案已改为"无需操作"。
 
 **核验为何必须在授予之前**：呼号是公开标识、入口可枚举（I-H9 接受），
 所以防线只能放在"核验通过才给访问"，不能放在"别人猜不到"。完整论证见

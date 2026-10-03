@@ -4,6 +4,27 @@
 > 下面「未部署」的叙述是当时的现场记录，保留供追溯。
 > **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」—— 其中 X1 会让现网退化（X2/X3 已随 V0.21 失去对象，存史）。**
 
+## 注册表第三列：上游 TLS 校验名（老实例会被它绊住）
+
+`/etc/mrrc-hub/instances.tsv` 每行是 `标签 <tab> 回环端口 <tab> 上游 TLS 名`。
+第三列**留空**时生成器按"它自己的入口名"校验（`<标签>.mrrc.vlsc.net`）—— 对自签证书的实例正好 ✓。
+
+但**自带公有证书**的实例（例如早期用 Let's Encrypt 签了 `radio.vlsc.net` 的那台）必须**显式写第三列**，
+否则入口会是 502，而 nginx 日志说：
+
+```
+upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL handshaking to upstream
+```
+
+**排查顺序**（2026-10-03 实测）：
+
+1. 实例的隧道端口在听 ⇒ 可以**直接从隧道口取证书**（不需要那台机器配合）：
+   `openssl s_client -connect 127.0.0.1:<端口> -servername <标签>.mrrc.vlsc.net -showcerts </dev/null`
+2. 看 CN/SAN：是 `<标签>.mrrc.vlsc.net` ⇒ 什么都不用写 ✓；是别的名字（如 `radio.vlsc.net`）⇒ 写进第三列 ✓
+3. 证书放进 `/etc/mrrc-hub/instance-certs/<标签>.pem`（生成器按**文件名**匹配注册表 ✓）
+4. `sudo /usr/local/sbin/gen_hub_routes.py && sudo systemctl reload nginx`
+5. 复核入口：`curl -sk -o /dev/null -w '%{http_code}\n' https://<标签>.mrrc.vlsc.net/api/health` ⇒ 401 ✓
+
 ## 现行形态（V0.21，2026-10-02）—— 一台机器，只留 8989
 
 **门户、实例入口、静态站点在同一台机器上**（香港 VPS `hub.vlsc.net` = `www.vlsc.net` =

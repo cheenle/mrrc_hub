@@ -296,7 +296,7 @@ def _run_der(cmd, der: bytes, timeout: float = 5.0) -> str:
 
 
 def _host_resources() -> dict:
-    """第 1 层：hub 主机自身。全部来自 /proc、os 与 shutil，不需要特权。"""
+    """第 1 层：hub 主机自身。全部来自 /proc、os 与 `df -Pk`，不需要特权。"""
     out = {"load": "—", "cpu": "—", "mem": "—", "disk": "—", "uptime": "—",
            "python": sys.version.split()[0]}
     try:

@@ -1,8 +1,8 @@
 """注册表与端口分配（UC-H10 的最后一步：分配）。
 
-注册表就是 hub 上那份 `/etc/mrrc-hub/instances.tsv`（标签 + 远端端口，制表符分隔），
-`gen_hub_routes.py` 由它生成 nginx 的 map。Portal 只负责**追加一行**并选一个空闲端口；
-生成路由与 reload nginx 属于部署动作（需要 root），Portal 会明确提示这一步，
+注册表就是 hub 上那份 `/etc/mrrc-hub/instances.tsv`（标签 + 远端端口 + 可选的 `tls_name`，
+制表符分隔），`gen_hub_routes.py` 由它生成 nginx 的 map。Portal 只负责**追加一行**并选一个
+空闲端口；生成路由与 reload nginx 属于部署动作（需要 root），Portal 会明确提示这一步，
 而不是偷偷替运维做掉。
 """
 from __future__ import annotations
@@ -13,6 +13,23 @@ from pathlib import Path
 PORT_FIRST, PORT_LAST = 18802, 18999
 
 
+def _parse_port(text: str):
+    """注册表的端口列 → int，无效则 None。
+
+    注册表是 root 用编辑器手改的文件，所以宁可严一点：非十进制、或端口越界
+    （`999999` 以前会被照单收下，然后在探测与 nginx 那边才炸）一律当无效行跳过，
+    而不是让整个管理台 500。`isdigit()` 已保证 `int()` 不会抛，再包一层是防御性的：
+    这里的正确姿态是「跳过这一行」，不是「向上抛」。
+    """
+    if not text.isdigit():
+        return None
+    try:
+        port = int(text)
+    except ValueError:                     # isdigit() 之后不可能发生
+        return None
+    return port if 0 < port < 65536 else None
+
+
 class Registry:
     def __init__(self, path: str | Path, first: int = PORT_FIRST, last: int = PORT_LAST):
         self.path = Path(path)
@@ -20,17 +37,45 @@ class Registry:
 
     def entries(self) -> list:
         """返回 [(label, port)]，忽略空行与 # 注释。"""
+        return [(label, port) for label, port, _ in self.entries_full()]
+
+    def entries_full(self) -> list:
+        """返回 [(label, port, tls_name)]，第三列缺失时为空串。
+
+        第三列是老式实例自己的域名（如 bg1sb 的 `radio.vlsc.net`）；新式自签租户不写，
+        期望值就是它自己的入口名 `<label>.mrrc.vlsc.net`。`entries()` 只交出前两列，
+        于是管理台无法判断「实例在服务、但证书签给了错的名字」——而 nginx 对上游开着
+        证书校验，这种情况同样会 502。要能报出来，就得先拿到这一列。
+        """
         if not self.path.exists():
             return []
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except OSError as exc:
+            # **不能静默返回 []**：调用方（Portal.grant）用它查重并挑空闲端口，
+            # 读不到就当「注册表是空的」会把新实例分配到别人正在用的端口上，
+            # 直接切断一个活实例。宁可炸，也不要猜。
+            raise RuntimeError(f"注册表不可读：{self.path}（{exc}）") from exc
         out = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
+        for line in text.splitlines():
             line = line.split("#", 1)[0].strip()
             if not line:
                 continue
             parts = line.split()
-            if len(parts) >= 2 and parts[1].isdigit():
-                out.append((parts[0], int(parts[1])))
+            if len(parts) < 2:
+                continue
+            port = _parse_port(parts[1])
+            if port is None:
+                continue
+            out.append((parts[0], port, parts[2] if len(parts) > 2 else ""))
         return out
+
+    def tls_name_for(self, label: str) -> str:
+        """该实例的证书应当签给的名字：第三列，否则它自己的入口名。"""
+        for name, _, tls in self.entries_full():
+            if name == label:
+                return tls or f"{label}.mrrc.vlsc.net"
+        return ""
 
     def labels(self) -> set:
         return {label for label, _ in self.entries()}

@@ -259,38 +259,220 @@ TUNNEL_COLOR = {
 }
 
 
-def _probe_http_status(sock, host_header: str, timeout: float):
-    """要一次 `/api/health`，返回状态行；对端不给任何字节就返回 None。
+# ── 可观测面：系统 → 服务 → 隧道 → 实例 → 实例里的应用 ──────────────
+# 设计约束：本服务以非特权用户 mrrcportal 运行（NoNewPrivileges、不能 sudo）。
+# 2026-10-03 在 hub 上逐项实测的可达面：
+#   可读   /etc/mrrc-hub/instances.tsv、callsigns.txt、instance-certs/*.pem、
+#          /proc/{loadavg,meminfo,uptime}
+#   可执行 systemctl is-active/is-enabled/show、ss -tn / -ltn（不带 -p）、openssl、python3
+#   不可读 /var/log/nginx/*.log ⇒ **拿不到每实例的 nginx 错误计数**；/etc/frp/frps.toml
+# 每个采集器失败时都返回可读文案而**不抛异常** —— 管理台是排障入口，它自己崩了
+# 就什么都看不到了（与 _cert_days 同一个姿态）。
 
-    **任何状态码都算在服务**（包括 401/404）—— 这里要回答的是「后面有没有一个活的应用」，
-    不是「它健不健康」。跟 `mrrc_modern/launcher_net.answers()` 同一个判据：那边正是因为
-    把 401 当成失败，才让启动器在服务器明明活着的时候去开了另一个协议。
-    """
-    sock.settimeout(timeout)
-    sock.sendall((f"GET /api/health HTTP/1.0\r\nHost: {host_header}\r\n"
-                  f"User-Agent: mrrc-hub-probe\r\nConnection: close\r\n\r\n").encode("ascii"))
+#: 管理台要盯的单元。**缺单元本身就是要暴露的事实**：hub 上 mrrc-hub-routes.timer
+#: 根本没装（`is-enabled` = not-found），而 SDD V0.22 写着「V0.17 起 30 s timer 自动
+#: 重生成路由」⇒ 新增实例后 nginx 路由不会自动出现，入口一直 404 直到有人手工跑
+#: gen_hub_routes.py。这类漂移只有在页面上列出来才会被发现。
+WATCHED_UNITS = ("frps", "nginx", "mrrc-portal",
+                 "mrrc-hub-routes.timer", "mrrc-hub-routes.path", "certbot.timer")
+
+
+def _run(cmd, timeout: float = 5.0):
+    """跑一条只读命令 → (returncode, stdout)。任何异常都变成可读文案，不外抛。"""
     try:
-        head = sock.recv(64)
-    except OSError:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, (r.stdout or "").strip()
+    except Exception as exc:                                     # noqa: BLE001
+        return -1, f"{type(exc).__name__}: {exc}"
+
+
+def _run_der(cmd, der: bytes, timeout: float = 5.0) -> str:
+    """把 DER 从 stdin 喂给 openssl（避免落临时文件）。"""
+    try:
+        r = subprocess.run(cmd, input=der, capture_output=True, timeout=timeout)
+        return (r.stdout or b"").decode("utf-8", "replace").strip()
+    except Exception as exc:                                     # noqa: BLE001
+        return f"{type(exc).__name__}: {exc}"
+
+
+def _host_resources() -> dict:
+    """第 1 层：hub 主机自身。全部来自 /proc、os 与 shutil，不需要特权。"""
+    out = {"load": "—", "cpu": "—", "mem": "—", "disk": "—", "uptime": "—",
+           "python": sys.version.split()[0]}
+    try:
+        out["load"] = " ".join(f"{x:.2f}" for x in os.getloadavg())
+        out["cpu"] = f"{os.cpu_count()} 核"
+    except OSError as exc:
+        out["load"] = f"读不到：{exc}"
+    try:
+        mem = {}
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            k, _, rest = line.partition(":")
+            mem[k.strip()] = int(rest.strip().split()[0])          # kB
+        if "MemAvailable" in mem and "MemTotal" in mem:
+            out["mem"] = (f"可用 {mem['MemAvailable'] // 1024} MB / 共 {mem['MemTotal'] // 1024} MB"
+                          f"（{100 * mem['MemAvailable'] // max(1, mem['MemTotal'])}% 可用）")
+    except (OSError, ValueError, IndexError) as exc:
+        out["mem"] = f"读不到：{exc}"
+    try:
+        up = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
+        out["uptime"] = f"{int(up // 86400)} 天 {int(up % 86400 // 3600)} 小时"
+    except (OSError, ValueError, IndexError) as exc:
+        out["uptime"] = f"读不到：{exc}"
+    try:
+        import shutil
+        d = shutil.disk_usage("/")
+        out["disk"] = (f"/ 可用 {d.free // 2**20} MB / 共 {d.total // 2**20} MB"
+                       f"（已用 {d.used * 100 // d.total}%）")
+    except OSError as exc:
+        out["disk"] = f"读不到：{exc}"
+    return out
+
+
+def _service_states(units=WATCHED_UNITS) -> list:
+    """第 2 层：hub 上的服务 → [(单元, 状态, 开机自启, 起于, 重启次数)]。
+
+    「未安装」是一种**结论**而不是错误：单元文件在仓库里、却没装到 hub 上，
+    正是路由不会自动重生成的原因。
+    """
+    rows = []
+    for u in units:
+        rc, active = _run(["systemctl", "is-active", u], timeout=3)
+        if rc == -1:
+            # systemctl 根本跑不了（本机不是 systemd 系统，或 PATH 里没有）。
+            # 一行说清即可 —— 把同一条异常抄进四个单元格、还被 [:24] 截成半截词，
+            # 那是噪音不是信息。
+            rows.append((u, "systemctl 不可用", "—", "—", "—"))
+            continue
+        _, enabled = _run(["systemctl", "is-enabled", u], timeout=3)
+        state = active or "?"
+        if enabled == "not-found":
+            state = "未安装"
+        since = restarts = "—"
+        if state not in ("未安装",):
+            _, v = _run(["systemctl", "show", u, "-p", "ActiveEnterTimestamp", "--value"], timeout=3)
+            since = v[:24] or "—"
+            _, v = _run(["systemctl", "show", u, "-p", "NRestarts", "--value"], timeout=3)
+            restarts = v or "—"
+        rows.append((u, state, enabled or "—", since, restarts))
+    return rows
+
+
+def _net_facts() -> dict:
+    """第 3 层：frps 的监听口与 frpc 的控制连接（ss 不带 -p，非特权可用）。"""
+    out = {"listen": [], "peers": [], "note": ""}
+    _, lsn = _run(["ss", "-ltn"], timeout=3)
+    ports = set()
+    for line in lsn.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 4 and ":" in parts[3]:
+            try:
+                port = int(parts[3].rsplit(":", 1)[1])
+            except ValueError:
+                continue
+            if 18800 <= port <= 18999 or port == 8989:
+                ports.add(port)
+    out["listen"] = sorted(ports)
+    _, est = _run(["ss", "-tn"], timeout=3)
+    peers = set()
+    for line in est.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 5 and parts[3].endswith(":8989"):
+            ip = parts[4].rsplit(":", 1)[0].strip("[]")
+            peers.add(ip[7:] if ip.startswith("::ffff:") else ip)
+    out["peers"] = sorted(peers)
+    if not ports:
+        out["note"] = "ss 没有给出任何 frps 端口（ss 不可用？还是 frps 没在跑？）"
+    return out
+
+
+def _cert_facts(der: bytes, expect: str = "", inform: str = "der") -> dict:
+    """上游证书的主体/签发者/到期日，以及**名字是否与期望一致**。
+
+    用 openssl 解析而不是引第三方库 —— 与 `cert_names()` 同一个理由（stdlib 不能解析
+    证书，而本服务刻意不引依赖）。expect 为空表示无法判断（注册表没给 tls_name）。
+    """
+    out = {"subject": "—", "issuer": "—", "not_after": "—", "names": set(), "name_ok": None}
+    if not der:
+        return out
+    text = _run_der(["openssl", "x509", "-inform", inform, "-noout",
+                     "-subject", "-issuer", "-enddate", "-ext", "subjectAltName"], der)
+    for line in text.splitlines():
+        line = line.strip()
+        low = line.lower()
+        if low.startswith("subject="):
+            out["subject"] = line.split("=", 1)[1].strip()
+            m = re.search(r"CN\s*=\s*([^,/\n]+)", line)
+            if m:
+                out["names"].add(m.group(1).strip().lower())
+        elif low.startswith("issuer="):
+            out["issuer"] = line.split("=", 1)[1].strip()
+        elif low.startswith("notafter="):
+            out["not_after"] = line.split("=", 1)[1].strip()
+        elif low.startswith("dns:"):
+            out["names"].add(line[4:].strip().lower())
+        elif "DNS:" in line:                      # -ext 的多值行：DNS:a, DNS:b
+            for part in line.split("DNS:")[1:]:
+                name = part.split(",")[0].strip().lower()
+                if name:
+                    out["names"].add(name)
+    if expect:
+        out["name_ok"] = expect.strip().lower() in out["names"]
+    return out
+
+
+def _days_left(not_after: str):
+    """openssl 的 `notAfter=Sep 30 01:11:09 2036 GMT` → 剩余天数（解析不了就 None）。"""
+    if not not_after or not_after == "—":
         return None
-    if not head:
+    try:
+        import calendar
+        stamp = not_after.split("=", 1)[-1].strip()
+        # openssl 给的是 GMT，所以用 timegm 而不是 mktime —— 后者按本地时区解释，
+        # 会带进最多 ±14 小时的偏差（_cert_days 就有这个毛病，但那是既有行为，不在本轮改）。
+        end = calendar.timegm(time.strptime(" ".join(stamp.split()[:4]), "%b %d %H:%M:%S %Y"))
+        return int((end - time.time()) // 86400)
+    except (ValueError, IndexError):
         return None
-    return head.split(b"\r\n", 1)[0].decode("latin-1", "replace").strip() or None
 
 
-def _tunnel_state(port, label: str = "", timeout: float = 2.5):
-    """一个实例端口的 (状态, 说明)，从 hub 回环探测。
+def _hub_cert_inventory(cert_dir=None) -> list:
+    """hub 侧已登记的实例证书 → [(文件名, 主体, 到期, 剩余天数)]。
 
-    旧判据是「该端口能不能 TCP 连上」，那是个**假阳性**：frps 是在 hub 本机接受连接的，
-    只要 frpc 注册过代理，这个连接就永远成功，与隧道另一端有没有程序在服务无关。2026-10-03
-    的 bg7zhs 正是这个状态 —— frpc 控制连接活着、frps 在听 18805、hub 上实例证书也在，
-    总览于是显示「在线」，而从 hub 直连该端口**无论明文还是 TLS 都拿不到一个字节**，
-    每个访客得到 nginx 的 502（错误日志：`peer closed connection in SSL handshake
-    while SSL handshaking to upstream`）。所以判据必须问真正要问的那个问题。
+    这是「谁真的走完了批准→登记」的权威凭据：注册表里有一行只代表**预留**，
+    没有证书就说明它从未接入（bh1eih 就是这种，所以它的入口只能 502）。
+    `mrrcportal` 实测可读该目录，所以不需要提权。
+    """
+    d = Path(cert_dir or DEFAULT_CERT_DIR)
+    # Path.glob() 对不存在的目录**不抛异常、只返回空**，所以下面的 try/except 拦不住它。
+    # 而「读不到目录」与「没有实例登记过」在页面上必须长得不同：前者是权限/路径故障，
+    # 后者是业务事实。混为一谈会让运维以为没人接入过。
+    if not d.is_dir():
+        return [(f"（证书目录不存在或不可读：{d}）", "—", "—", None)]
+    out = []
+    try:
+        files = sorted(x for x in d.glob("*.pem") if x.is_file())
+    except OSError as exc:
+        return [(f"（读不到证书目录：{exc}）", "—", "—", None)]
+    for f in files:
+        try:
+            data = f.read_bytes()
+        except OSError as exc:
+            out.append((f.name, f"读不到：{exc}", "—", None))
+            continue
+        facts = _cert_facts(data, "", inform="pem")
+        out.append((f.name, facts["subject"], facts["not_after"], _days_left(facts["not_after"])))
+    return out
 
-    不校验证书：实例证书是自签的（CN=<label>.mrrc.vlsc.net），而 bg1sb 那类老实例用的是
-    自己的 `radio.vlsc.net`。证书名对不对是**另一个**故障模式（nginx 会记校验失败），
-    这里只回答「有没有在服务」。
+
+def _app_generation(port, label: str, timeout: float = 2.5) -> str:
+    """第 5 层：实例里那个应用的构建代号（`sw.js` 的 `CACHE = 'mrrc-vNN'`）。
+
+    **这不是 semver**：实例没有任何未鉴权的版本端点（`/api/*` 全部要令牌，
+    `/login`、`/manifest.json`、`/version.txt` 都不含版本号 —— 2026-10-03 实测），
+    所以只能取这个每次改静态资产都会 bump 的缓存代号，用来判断各实例**是否同代**。
+    要拿到确切版本，得让应用自己上报（它在轮询 /status 时带上 detect_version()），
+    那是一次应用侧改动，不在本服务能单独完成的范围内。
     """
     import contextlib
     import socket
@@ -299,8 +481,53 @@ def _tunnel_state(port, label: str = "", timeout: float = 2.5):
     host_header = f"{label}.mrrc.vlsc.net" if label else "127.0.0.1"
     try:
         raw = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
+    except OSError:
+        return "—"
+    with contextlib.closing(raw):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            tls = ctx.wrap_socket(raw, server_hostname=host_header)
+        except (ssl.SSLError, OSError):
+            return "—"
+        with contextlib.closing(tls):
+            try:
+                tls.settimeout(timeout)
+                tls.sendall(f"GET /sw.js HTTP/1.0\r\nHost: {host_header}\r\n"
+                            f"User-Agent: mrrc-hub-probe\r\n\r\n".encode("ascii"))
+                body = b""
+                while len(body) < 65536:
+                    chunk = tls.recv(4096)
+                    if not chunk:
+                        break
+                    body += chunk
+            except OSError:
+                return "—"
+    m = re.search(rb"CACHE\s*=\s*['\"]([^'\"]+)['\"]", body)
+    return m.group(1).decode("latin-1") if m else "（sw.js 里没有 CACHE 标记）"
+
+
+def _probe(port, label: str = "", tls_name: str = "", timeout: float = 2.5) -> dict:
+    """一次探测采齐一个实例的全部可见事实（判据见 _tunnel_state 的说明）。
+
+    证书是在**同一次 TLS 握手**里顺带取走的（getpeercert 的 DER 形式），不再多开连接；
+    `plain-http` 与 `hollow` 拿不到证书，因为握手根本没成。
+    """
+    import contextlib
+    import socket
+    import ssl
+
+    host_header = f"{label}.mrrc.vlsc.net" if label else "127.0.0.1"
+    rep = {"state": TUNNEL_DOWN, "detail": "", "status_line": "", "server": "",
+           "cert": {"subject": "—", "issuer": "—", "not_after": "—", "names": set(),
+                    "name_ok": None},
+           "generation": "—"}
+    try:
+        raw = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
     except OSError as exc:
-        return TUNNEL_DOWN, f"回环端口连不上（frpc 未注册代理）：{exc}"
+        rep["detail"] = f"回环端口连不上（frpc 未注册代理）：{exc}"
+        return rep
 
     tls_err = ""
     with contextlib.closing(raw):
@@ -313,21 +540,84 @@ def _tunnel_state(port, label: str = "", timeout: float = 2.5):
             tls_err = f"{type(exc).__name__}: {exc}"
         else:
             with contextlib.closing(tls):
-                status = _probe_http_status(tls, host_header, timeout)
+                try:
+                    der = tls.getpeercert(binary_form=True) or b""
+                except (ssl.SSLError, OSError):
+                    der = b""
+                rep["cert"] = _cert_facts(der, tls_name or host_header)
+                status, server = _probe_http(tls, host_header, timeout)
+                rep["status_line"], rep["server"] = status, server
             if status:
-                return TUNNEL_SERVING, status
-            return TUNNEL_HOLLOW, "TLS 握手成了，但没有任何 HTTP 应答"
+                rep["state"] = TUNNEL_SERVING
+                rep["detail"] = status
+                rep["generation"] = _app_generation(port, label, timeout)
+                return rep
+            rep["state"] = TUNNEL_HOLLOW
+            rep["detail"] = "TLS 握手成了，但没有任何 HTTP 应答"
+            return rep
 
     # TLS 走不通：后面是不是有个只说明文 HTTP 的应用？（v1.24.5「装完黑屏」的同一形状）
     try:
         plain = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
     except OSError:
-        return TUNNEL_HOLLOW, f"端口可连但无应答（TLS：{tls_err}）"
+        rep["state"] = TUNNEL_HOLLOW
+        rep["detail"] = f"端口可连但无应答（TLS：{tls_err}）"
+        return rep
     with contextlib.closing(plain):
-        status = _probe_http_status(plain, host_header, timeout)
+        status, server = _probe_http(plain, host_header, timeout)
+    rep["status_line"], rep["server"] = status, server
     if status:
-        return TUNNEL_PLAIN_HTTP, f"后端只说明文 HTTP（{status}），而 nginx 以 https 反代"
-    return TUNNEL_HOLLOW, f"端口可连、明文与 TLS 都无应答（TLS：{tls_err}）"
+        rep["state"] = TUNNEL_PLAIN_HTTP
+        rep["detail"] = f"后端只说明文 HTTP（{status}），而 nginx 以 https 反代"
+    else:
+        rep["state"] = TUNNEL_HOLLOW
+        rep["detail"] = f"端口可连、明文与 TLS 都无应答（TLS：{tls_err}）"
+    return rep
+
+
+def _probe_http(sock, host_header: str, timeout: float):
+    """要一次 `/api/health`，返回 (状态行, Server 头)；对端不给任何字节则两项皆空。
+
+    **任何状态码都算在服务**（包括 401/404）—— 这里要回答的是「后面有没有一个活的应用」，
+    不是「它健不健康」。跟 `mrrc_modern/launcher_net.answers()` 同一个判据：那边正是因为
+    把 401 当成失败，才让启动器在服务器明明活着的时候去开了另一个协议（v1.24.6 黑屏）。
+
+    读到 `\r\n\r\n` 为止而不是只读一行：`Server` 头在状态行之后，而它是判断上游到底是不是
+    本项目（实测为 `server: uvicorn`）的唯一未鉴权线索。
+    """
+    try:
+        sock.settimeout(timeout)
+        sock.sendall((f"GET /api/health HTTP/1.0\r\nHost: {host_header}\r\n"
+                      f"User-Agent: mrrc-hub-probe\r\nConnection: close\r\n\r\n").encode("ascii"))
+        head = b""
+        while b"\r\n\r\n" not in head and len(head) < 8192:
+            chunk = sock.recv(1024)
+            if not chunk:
+                break
+            head += chunk
+    except OSError:
+        return "", ""
+    if not head:
+        return "", ""
+    text = head.decode("latin-1", "replace")
+    lines = text.split("\r\n")
+    server = ""
+    for line in lines[1:]:
+        if line.lower().startswith("server:"):
+            server = line.split(":", 1)[1].strip()
+            break
+    return (lines[0].strip() if lines else ""), server
+
+
+def _tunnel_state(port, label: str = "", timeout: float = 2.5):
+    """一个实例端口的 (状态, 说明)。判据与四种结论的修法见 `_probe`。
+
+    旧判据只做一次 TCP 连接，那是个**假阳性**：frps 是在 hub 本机接受连接的，只要
+    frpc 注册过代理就永远连得上 —— 于是 bg7zhs 在隧道另一端空着的时候仍然显示「在线」，
+    而每个访客拿到 nginx 的 502（2026-10-03 实测）。
+    """
+    rep = _probe(port, label, "", timeout)
+    return rep["state"], rep["detail"]
 
 
 def _tunnel_states(entries, timeout: float = 2.5) -> dict:
@@ -343,6 +633,23 @@ def _tunnel_states(entries, timeout: float = 2.5) -> dict:
         futures = {pool.submit(_tunnel_state, port, label, timeout): port
                    for label, port in entries}
         return {port: fut.result() for fut, port in futures.items()}
+
+
+def _instance_reports(entries_full, timeout: float = 2.5) -> dict:
+    """并发采集每个实例的完整可见事实 ⇒ {label: 报告}。
+
+    与 `_tunnel_states` 一样并发：最坏情况是每个实例都黑洞（TLS 与明文各等满一次超时），
+    串行会把管理台页面拖成 N×2×timeout。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = [(label, port, tls) for label, port, tls in entries_full]
+    if not items:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(8, len(items))) as pool:
+        futures = {pool.submit(_probe, port, label, tls, timeout): label
+                   for label, port, tls in items}
+        return {label: fut.result() for fut, label in futures.items()}
 
 
 def _tunnel_online(port, label: str = "") -> bool:
@@ -532,19 +839,96 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     + rows({"granted"}, lambda c: act("/revoke", c, "撤销", "<input type=hidden name=reason value='撤销'>")) \
                     + rows({"rejected", "revoked"}, lambda c: "") + "</table>"
 
-            elif view == "instances":
-                states = _tunnel_states(entries)
+            elif view == "system":
+                res = _host_resources()
+                svc = _service_states()
+                net = _net_facts()
+                certs = _hub_cert_inventory()
+                rows_ = ''.join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(str(v))}</td></tr>"
+                                for k, v in (("负载 (1/5/15 分钟)", res["load"]), ("CPU", res["cpu"]),
+                                             ("内存", res["mem"]), ("磁盘", res["disk"]),
+                                             ("已运行", res["uptime"]), ("Python", res["python"])))
+                svc_rows = ''.join(
+                    f"<tr><td><code>{html.escape(u)}</code></td>"
+                    f"<td style='color:{'#34d399' if st == 'active' else '#f87171'}'>{html.escape(st)}</td>"
+                    f"<td>{html.escape(en)}</td><td>{html.escape(si)}</td><td>{html.escape(nr)}</td></tr>"
+                    for u, st, en, si, nr in svc)
+                reg_ports = {p for _, p in entries}
+                listening = [p for p in net["listen"] if 18800 <= p <= 18999]
+                missing = sorted(reg_ports - set(listening))
+                stray = sorted(set(listening) - reg_ports)
+                cert_rows = ''.join(
+                    f"<tr><td><code>{html.escape(n)}</code></td><td>{html.escape(su)}</td>"
+                    f"<td>{html.escape(na)}</td><td>{'—' if dy is None else str(dy) + ' 天'}</td></tr>"
+                    for n, su, na, dy in certs) or "<tr><td colspan=4>（无）</td></tr>"
+                body = (
+                    "<h2>系统</h2>"
+                    "<h3>① hub 主机</h3><table><tr><th>项</th><th>值</th></tr>" + rows_ + "</table>"
+                    "<h3>② hub 服务</h3><table><tr><th>单元</th><th>状态</th><th>开机自启</th>"
+                    "<th>起于</th><th>重启次数</th></tr>" + svc_rows + "</table>"
+                    "<p><small>「未安装」是一种<b>结论</b>而不是错误：单元文件在仓库里、却没装到 hub 上，"
+                    "正是路由不会自动重生成的原因（<code>mrrc-hub-routes.timer</code> 实测 "
+                    "<code>is-enabled</code> = not-found，而 SDD V0.22 写着「V0.17 起 30 s timer 自动」）。</small></p>"
+                    "<h3>③ 隧道层（frps）</h3><table><tr><th>项</th><th>值</th></tr>"
+                    f"<tr><td>frps 接入端口 8989</td><td>{'在听' if 8989 in net['listen'] else '<b>没在听</b>'}</td></tr>"
+                    f"<tr><td>frpc 控制连接</td><td>{len(net['peers'])} 条"
+                    f"{'：' + html.escape(', '.join(net['peers'])) if net['peers'] else ''}</td></tr>"
+                    f"<tr><td>注册表实例端口</td><td>{len(reg_ports)} 个</td></tr>"
+                    f"<tr><td>实际在听的实例端口</td><td>{len(listening)} 个"
+                    f"{'：' + ', '.join(str(x) for x in listening) if listening else ''}</td></tr>"
+                    f"<tr><td>注册了但没在听</td><td>{', '.join(str(x) for x in missing) or '（无）'}</td></tr>"
+                    f"<tr><td>在听但注册表里没有</td><td>{', '.join(str(x) for x in stray) or '（无）'}</td></tr>"
+                    "</table>"
+                    + (f"<p><small>⚠️ {html.escape(net['note'])}</small></p>" if net["note"] else "")
+                    + "<h3>④ hub 侧已登记的实例证书</h3>"
+                    "<table><tr><th>文件</th><th>主体</th><th>到期</th><th>剩余</th></tr>" + cert_rows + "</table>"
+                    "<p><small>注册表里有一行只代表<b>预留</b>；没有证书就说明该实例从未走完批准→登记，"
+                    "它的入口只能 502。<br>"
+                    "本页采集不到的：<code>/var/log/nginx/*.log</code>（mrrcportal 不可读 ⇒ 无每实例的 nginx 错误计数）、"
+                    "frps 的每代理统计（未配 <code>logFile</code>、未开 <code>webServer</code> 面板）、"
+                    "以及实例内部状态（电台/录音/会话都在令牌之后）。</small></p>")
 
-                def tunnel_cell(port):                 # 同一探测的 HTML 版本（实例页）
-                    state, detail = states.get(port, (TUNNEL_DOWN, "未探测"))
+            elif view == "instances":
+                reports = _instance_reports(registry.entries_full())
+
+                def tunnel_cell(rep):                  # 同一探测的 HTML 版本（实例页）
+                    state = rep.get("state", TUNNEL_DOWN)
                     return (f"<b style='color:{TUNNEL_COLOR[state]}' "
-                            f"title='{html.escape(detail, quote=True)}'>"
+                            f"title='{html.escape(rep.get('detail', '未探测'), quote=True)}'>"
                             f"{html.escape(TUNNEL_TEXT[state])}</b>")
+
+                def app_cell(rep):
+                    line = rep.get("status_line") or ""
+                    if not line:
+                        return "<small>—</small>"
+                    gen = rep.get("generation") or "—"
+                    srv = rep.get("server") or ""
+                    return (f"<small><code>{html.escape(line)}</code>"
+                            + (f"<br>server: {html.escape(srv)}" if srv else "")
+                            + f"<br>构建代号 <b>{html.escape(str(gen))}</b></small>")
+
+                def cert_cell(rep):
+                    c = rep.get("cert") or {}
+                    if not c or c.get("subject", "—") == "—":
+                        return "<small>—<br>（握手没成，拿不到证书）</small>"
+                    ok = c.get("name_ok")
+                    mark = ("<b style='color:#34d399'>名字相符</b>" if ok else
+                            "<b style='color:#f87171'>名字不符 ⇒ nginx 必 502</b>" if ok is False else "")
+                    issuer = "自签" if c.get("issuer") == c.get("subject") else (c.get("issuer") or "")[:44]
+                    days = _days_left(c.get("not_after", ""))
+                    return (f"<small><code>{html.escape(c.get('subject', ''))}</code><br>"
+                            f"{html.escape(issuer)}<br>到期 {html.escape(c.get('not_after', ''))}"
+                            f"{'（' + str(days) + ' 天）' if days is not None else ''}<br>{mark}</small>")
+
                 rows_ = ''.join(
-                    f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td><td>{tunnel_cell(p)}</td>"
+                    f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td>"
+                    f"<td>{tunnel_cell(reports.get(l, {}))}</td>"
+                    f"<td>{app_cell(reports.get(l, {}))}</td>"
+                    f"<td>{cert_cell(reports.get(l, {}))}</td>"
                     f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net/' target=_blank>打开入口</a></td></tr>"
-                    for l, p in sorted(entries)) or "<tr><td colspan=4>（注册表为空）</td></tr>"
-                body = ("<h2>实例</h2><table><tr><th>标签</th><th>端口</th><th>隧道</th><th>入口</th></tr>"
+                    for l, p in sorted(entries)) or "<tr><td colspan=6>（注册表为空）</td></tr>"
+                body = ("<h2>实例</h2><table><tr><th>标签</th><th>端口</th><th>隧道</th>"
+                        "<th>实例里的应用</th><th>上游证书</th><th>入口</th></tr>"
                         + rows_ + "</table><p><small>「在线」= 从 hub 回环向该端口完成 TLS 握手并拿到 HTTP 应答"
                         "（<b>任何</b>状态码都算，包括 401）；鼠标悬停可看探测详情。<br>"
                         "⚠️ 仅仅「端口可连」<b>不能</b>证明实例在服务：frps 是在 hub 本机接受连接的，"
@@ -576,10 +960,10 @@ def make_handler(portal: Portal, token: str, base: str = ""):
             return _page("MRRC Portal — 后台管理",
                          "<h1>呼号自助 — 后台管理</h1>"
                          + (f'<p class=msg>{html.escape(msg)}</p>' if msg else '')
-                         + f"<p>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('审计','audit')}{nav('呼号库','clublog')}</p>"
+                         + f"<p>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('系统','system')}{nav('审计','audit')}{nav('呼号库','clublog')}</p>"
                          + body, noindex=True)
 
-        # ---- routes ----        # ---- routes ----
+        # ---- routes ----
         def do_GET(self):                        # noqa: N802
             if self._route() == "/admin":
                 return self._send(200, _page(

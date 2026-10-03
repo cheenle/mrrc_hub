@@ -229,7 +229,8 @@ def test_admin_ui_flow_and_no_csrf_surface():
             check("总览" in page and "注册表实例" in page, "默认进入总览视图")
             # 五个视图各自可渲染（导航同样走 POST + 令牌字段，不改用 cookie）
             for view, needle in (("applications", "申请（全部状态）"), ("instances", "实例"),
-                                 ("audit", "审计（最近"), ("clublog", "呼号库")):
+                                 ("system", "hub 主机"), ("audit", "审计（最近"),
+                                 ("clublog", "呼号库")):
                 st, vp = post("/admin", {"token": "tok", "view": view})
                 check(st == 200 and needle in vp, f"{view} 视图可渲染")
             st, ap = post("/admin", {"token": "tok", "view": "applications"})
@@ -533,9 +534,16 @@ def _start_stub(kind: str, cert: Path | None = None, key: Path | None = None):
                 with contextlib.closing(talk):
                     try:
                         talk.settimeout(2.0)
-                        talk.recv(512)                     # 吃掉请求
-                        talk.sendall(b"HTTP/1.1 401 Unauthorized\r\n"
-                                     b"Content-Length: 0\r\nConnection: close\r\n\r\n")
+                        req = talk.recv(512)               # 吃掉请求，并按路径分流
+                        if b"/sw.js" in req:
+                            body = b"const CACHE = 'mrrc-v99';\n"
+                            talk.sendall(b"HTTP/1.1 200 OK\r\nServer: uvicorn\r\n"
+                                         b"Content-Type: application/javascript\r\n"
+                                         b"Content-Length: " + str(len(body)).encode()
+                                         + b"\r\nConnection: close\r\n\r\n" + body)
+                        else:
+                            talk.sendall(b"HTTP/1.1 401 Unauthorized\r\nServer: uvicorn\r\n"
+                                         b"Content-Length: 0\r\nConnection: close\r\n\r\n")
                     except OSError:
                         pass
 
@@ -611,6 +619,222 @@ def test_tunnel_probe_batch_does_not_serialise_dead_tunnels():
     check(elapsed < 3.5, f"并发探测（实测 {elapsed:.2f}s，串行应 ≥4.8s）")
 
 
+def test_registry_exposes_tls_name_and_rejects_bad_ports():
+    """第三列 tls_name 必须交得出来 —— 否则「证书签给了错的名字」永远看不见。"""
+    from portal.registry import _parse_port
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "instances.tsv"
+        path.write_text("bg1sb\t18802\tradio.vlsc.net\nbg9aaa\t18803\n"
+                        "# 注释行\n\nbad\t999999\nx\tnotanumber\n", encoding="utf-8")
+        r = reg.Registry(path)
+        check(r.entries_full() == [("bg1sb", 18802, "radio.vlsc.net"), ("bg9aaa", 18803, "")],
+              f"三列解析 + 跳过无效行（得到 {r.entries_full()}）")
+        check(r.entries() == [("bg1sb", 18802), ("bg9aaa", 18803)],
+              "entries() 仍是两列（既有调用点与测试不受影响）")
+        check(r.tls_name_for("bg1sb") == "radio.vlsc.net", "写了第三列就用它")
+        check(r.tls_name_for("bg9aaa") == "bg9aaa.mrrc.vlsc.net", "没写就派生自己的入口名")
+        check(r.tls_name_for("nobody") == "", "注册表里没有 ⇒ 空串（不做猜测）")
+    for bad in ("0", "65536", "999999", "-1", "abc", "1880x", ""):
+        check(_parse_port(bad) is None, f"端口 {bad!r} 应判无效")
+    check(_parse_port("18802") == 18802, "正常端口照收")
+
+
+def test_cert_facts_reads_subject_issuer_and_name_match():
+    """证书事实 + 名字是否相符：nginx 对上游开着校验，名字不符同样 502。"""
+    if not shutil.which("openssl"):
+        print("  提示: 无 openssl，跳过证书用例"); return
+    from portal.app import _cert_facts, _days_left
+    with tempfile.TemporaryDirectory() as td:
+        pair = _probe_cert(Path(td), "bg9aaa.mrrc.vlsc.net")
+        check(pair is not None, "夹具证书已生成")
+        if pair is None:
+            return
+        data = pair[0].read_bytes()
+        good = _cert_facts(data, "bg9aaa.mrrc.vlsc.net", inform="pem")
+        check("bg9aaa.mrrc.vlsc.net" in good["subject"], f"主体解析出来（{good['subject']}）")
+        check(good["name_ok"] is True, "名字相符 ⇒ True")
+        check(good["issuer"] == good["subject"], "自签证书 issuer == subject")
+        wrong = _cert_facts(data, "evil.mrrc.vlsc.net", inform="pem")
+        check(wrong["name_ok"] is False, "名字不符 ⇒ False（这就是 nginx 502 的那一类）")
+        unknown = _cert_facts(data, "", inform="pem")
+        check(unknown["name_ok"] is None, "没有期望名 ⇒ None（不猜）")
+        check(_cert_facts(b"", "x")["subject"] == "—", "空 DER 不抛异常")
+        days = _days_left(good["not_after"])
+        check(isinstance(days, int) and days >= 0,
+              f"剩余天数可算（夹具证书只签 1 天，不足一天时 0 是正确值，得到 {days}）")
+        # 容差 1 天：构造 future 与调用之间 time.time() 又走了几微秒，而 int() 向下截断，
+        # 所以「整整 40 天」几乎必然算成 39。钉死等号是把时钟抖动当成缺陷。
+        future = time.strftime("%b %d %H:%M:%S %Y GMT", time.gmtime(time.time() + 40 * 86400))
+        got = _days_left("notAfter=" + future)
+        check(got in (39, 40), f"40 天后的 GMT 日期算出 39~40 天（得到 {got}）")
+        check(_days_left("—") is None and _days_left("垃圾") is None, "解析不了就 None，不抛")
+
+
+def test_probe_captures_cert_http_and_app_generation():
+    """一次探测要把「隧道 / 应用 / 证书」三层事实一起采回来。"""
+    if not shutil.which("openssl"):
+        print("  提示: 无 openssl，跳过探测取证用例"); return
+    from portal.app import _probe, TUNNEL_SERVING
+    with tempfile.TemporaryDirectory() as td:
+        pair = _probe_cert(Path(td), "probe.mrrc.vlsc.net")
+        if pair is None:
+            FAILS.append("夹具证书没生成，无法验证探测取证"); return
+        port, stop = _start_stub("tls", pair[0], pair[1])
+        try:
+            rep = _probe(port, "probe", "probe.mrrc.vlsc.net", timeout=3.0)
+            check(rep["state"] == TUNNEL_SERVING, f"状态为 serving（得到 {rep['state']}）")
+            check("401" in rep["status_line"], f"带回真实状态行（{rep['status_line']}）")
+            check(rep["server"] == "uvicorn", f"带回 Server 头（{rep['server']!r}）")
+            check(rep["generation"] == "mrrc-v99", f"取到构建代号（{rep['generation']!r}）")
+            check("probe.mrrc.vlsc.net" in rep["cert"]["subject"], "同一次握手里取到证书主体")
+            check(rep["cert"]["name_ok"] is True, "证书名与注册表期望相符")
+        finally:
+            stop()
+
+
+def test_collectors_degrade_instead_of_raising():
+    """采集器必须给可读文案而不是抛异常 —— 管理台是排障入口，它自己崩了就什么都看不到。"""
+    import portal.app as pa
+    res = pa._host_resources()
+    for key in ("load", "cpu", "mem", "disk", "uptime", "python"):
+        check(isinstance(res.get(key), str) and res[key], f"主机资源 {key} 有值（{res.get(key)!r}）")
+    if not Path("/proc/meminfo").exists():
+        check(res["mem"].startswith("读不到"), "无 /proc 时给「读不到」文案而不是崩")
+
+    canned = {
+        ("systemctl", "is-active", "good.service"): (0, "active"),
+        ("systemctl", "is-enabled", "good.service"): (0, "enabled"),
+        ("systemctl", "is-active", "missing.timer"): (3, "inactive"),
+        ("systemctl", "is-enabled", "missing.timer"): (4, "not-found"),
+    }
+    saved = pa._run
+    pa._run = lambda cmd, timeout=5.0: canned.get(tuple(cmd), (0, "2026-10-03 10:00:00 CST"))
+    try:
+        rows = {u: (st, en) for u, st, en, _, _ in pa._service_states(["good.service", "missing.timer"])}
+    finally:
+        pa._run = saved
+    check(rows["good.service"][0] == "active", "在跑的服务报 active")
+    # systemctl 跑不了时：一行说清，不要把同一条异常抄进四个单元格
+    pa._run = lambda cmd, timeout=5.0: (-1, "FileNotFoundError: [Errno 2] No such file or directory: 'systemctl'")
+    try:
+        row = pa._service_states(["whatever.service"])[0]
+    finally:
+        pa._run = saved
+    check(row[1] == "systemctl 不可用" and row[2:] == ("—", "—", "—"),
+          f"systemctl 缺失时给简短结论（得到 {row}）")
+    check(rows["missing.timer"][0] == "未安装",
+          "单元不存在必须报「未安装」—— 这正是 hub 上 mrrc-hub-routes.timer 的真实状态")
+
+
+def test_net_facts_parses_ss_and_normalises_peers():
+    """ss 的输出要能解析出实例端口与 frpc 对端（含 ::ffff: 归一化）。"""
+    import portal.app as pa
+    lsn = ("State  Recv-Q Send-Q Local Address:Port  Peer Address:Port\n"
+           "LISTEN 0      4096          *:8989            *:*\n"
+           "LISTEN 0      4096  127.0.0.1:18802      0.0.0.0:*\n"
+           "LISTEN 0      4096  127.0.0.1:18803      0.0.0.0:*\n"
+           "LISTEN 0      128           *:22                *:*\n")
+    est = ("State  Recv-Q Send-Q Local Address:Port  Peer Address:Port\n"
+           "ESTAB 0      0      [::ffff:203.25.119.168]:8989 [::ffff:120.244.220.52]:24644\n"
+           "ESTAB 0      0      [::ffff:203.25.119.168]:8989 [::ffff:39.144.70.1]:53535\n"
+           "ESTAB 0      0      203.25.119.168:443       1.2.3.4:55555\n")
+    saved = pa._run
+    pa._run = lambda cmd, timeout=5.0: (0, lsn if "-ltn" in cmd else est)
+    try:
+        facts = pa._net_facts()
+    finally:
+        pa._run = saved
+    check(facts["listen"] == [8989, 18802, 18803], f"只收 frps 相关端口（得到 {facts['listen']}）")
+    check(facts["peers"] == ["120.244.220.52", "39.144.70.1"],
+          f"frpc 对端归一化成 IPv4（得到 {facts['peers']}）")
+    check(facts["note"] == "", "有端口时不给告警文案")
+
+
+def test_hub_cert_inventory_lists_enrolled_instances():
+    """hub 侧证书清单 = 谁真的走完了批准→登记（注册表有一行只代表预留）。"""
+    if not shutil.which("openssl"):
+        print("  提示: 无 openssl，跳过证书清单用例"); return
+    from portal.app import _hub_cert_inventory
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        pair = _probe_cert(d, "bg9aaa.mrrc.vlsc.net")
+        check(pair is not None, "夹具证书已生成")
+        if pair is None:
+            return
+        rows = _hub_cert_inventory(d)
+        check(len(rows) == 1 and rows[0][0] == "probe.pem", f"列出证书文件（{rows}）")
+        check("bg9aaa.mrrc.vlsc.net" in rows[0][1], "带出主体")
+        check(isinstance(rows[0][3], int) and rows[0][3] >= 0, f"带出剩余天数（{rows[0][3]}）")
+        missing = _hub_cert_inventory(Path(td) / "nope")
+        check(missing and "证书目录" in missing[0][0],
+              f"目录不存在时要说清是「读不到」而不是显示成「没有实例」（{missing[0][0] if missing else '空'}）")
+
+
+def test_admin_views_render_the_probe_facts_end_to_end():
+    """管理台真的把探测事实渲染出来了吗 —— 用活体桩后端走一遍 HTTP。
+
+    既有的 `test_admin_ui_flow_and_no_csrf_surface` 是用**空注册表**渲染实例页的，
+    所以「应用状态行 / 构建代号 / 证书名字比对」这几列从来没被真正渲染过；
+    helper 各自返回对的值，并不等于页面把它们拼对了。
+    """
+    if not shutil.which("openssl"):
+        print("  提示: 无 openssl，跳过端到端渲染用例"); return
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        pair = _probe_cert(tmp, "probe.mrrc.vlsc.net")
+        if pair is None:
+            FAILS.append("夹具证书没生成，无法验证端到端渲染"); return
+        port, stop = _start_stub("tls", pair[0], pair[1])
+        # 注册表带上第三列：证书应当签给这个名字
+        reg_path = tmp / "instances.tsv"
+        reg_path.write_text(f"probe\t{port}\tprobe.mrrc.vlsc.net\n", encoding="utf-8")
+        (tmp / "callsigns.txt").write_text("NOBODY\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(reg_path),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        from http.server import ThreadingHTTPServer
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+        def view(name):
+            data = urllib.parse.urlencode({"token": "tok", "view": name}).encode()
+            with urllib.request.urlopen(base + "/admin", data=data, timeout=30) as r:
+                return r.status, r.read().decode()
+
+        try:
+            st, page = view("instances")
+            check(st == 200, f"实例页 200（得到 {st}）")
+            for needle, why in (
+                    ("在线", "隧道状态"),
+                    ("401", "实例的 HTTP 状态行"),
+                    ("uvicorn", "上游 Server 头"),
+                    ("mrrc-v99", "实例应用的构建代号"),
+                    ("probe.mrrc.vlsc.net", "上游证书主体"),
+                    ("名字相符", "证书名与注册表第三列的比对结论"),
+                    ("自签", "签发者被识别为自签")):
+                check(needle in page, f"实例页渲染出{why}（{needle!r}）")
+            check("打开入口" in page, "实例页仍有入口链接")
+
+            st, page = view("system")
+            check(st == 200, f"系统页 200（得到 {st}）")
+            for needle, why in (
+                    ("hub 主机", "① 主机层"),
+                    ("负载", "主机负载"),
+                    ("hub 服务", "② 服务层"),
+                    ("隧道层", "③ 隧道层"),
+                    ("frpc 控制连接", "frpc 对端"),
+                    ("已登记的实例证书", "④ hub 侧证书清单"),
+                    ("本页采集不到的", "如实写明采集边界")):
+                check(needle in page, f"系统页渲染出{why}（{needle!r}）")
+
+            # 导航里必须有新视图的按钮，否则运维进不去
+            _, nav_page = view("overview")
+            check("name=view value='system'" in nav_page, "导航里有「系统」按钮")
+        finally:
+            stop()
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:
@@ -620,7 +844,7 @@ def main():
         for f in FAILS:
             print("   -", f)
         return 1
-    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门/隧道探测")
+    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门/隧道探测/注册表三列/证书事实/采集器降级")
     return 0
 
 

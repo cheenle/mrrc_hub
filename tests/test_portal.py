@@ -701,6 +701,27 @@ def test_collectors_degrade_instead_of_raising():
     if not Path("/proc/meminfo").exists():
         check(res["mem"].startswith("读不到"), "无 /proc 时给「读不到」文案而不是崩")
 
+    # 磁盘用 df 的口径，不用 shutil.disk_usage：APFS 上后者的 used = 容器 total - 容器 free，
+    # 会把别的卷算进来（实测显示「已用 95%」而 df 说 51%）。运维会拿页面数字和 df 对照。
+    # 单位是 1024 字节块：10485760 块 = 10240 MB，5242880 块 = 5120 MB（取能整除的值，
+    # 免得断言里再算一次除法 —— 上一版就是把「块」当成「MB」断言，被自己的用例绊了一下）
+    df_out = ("Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+              "/dev/disk3s1 10485760 5242880 5242880 58% /\n")
+    saved = pa._run
+    pa._run = lambda cmd, timeout=5.0: (0, df_out) if cmd[:2] == ["df", "-Pk"] else saved(cmd, timeout)
+    try:
+        disk = pa._host_resources()["disk"]
+    finally:
+        pa._run = saved
+    check("5120 MB" in disk and "10240 MB" in disk and "58%" in disk,
+          f"磁盘按 df -Pk 的口径渲染：可用/总量换算成 MB、百分比取 df 自己的（得到 {disk!r}）")
+    pa._run = lambda cmd, timeout=5.0: (-1, "FileNotFoundError: 'df'")
+    try:
+        disk = pa._host_resources()["disk"]
+    finally:
+        pa._run = saved
+    check("df 没有给出可解析的行" in disk, f"df 不可用时给可读文案（{disk!r}）")
+
     canned = {
         ("systemctl", "is-active", "good.service"): (0, "active"),
         ("systemctl", "is-enabled", "good.service"): (0, "enabled"),

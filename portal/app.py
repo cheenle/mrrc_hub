@@ -319,13 +319,19 @@ def _host_resources() -> dict:
         out["uptime"] = f"{int(up // 86400)} 天 {int(up % 86400 // 3600)} 小时"
     except (OSError, ValueError, IndexError) as exc:
         out["uptime"] = f"读不到：{exc}"
-    try:
-        import shutil
-        d = shutil.disk_usage("/")
-        out["disk"] = (f"/ 可用 {d.free // 2**20} MB / 共 {d.total // 2**20} MB"
-                       f"（已用 {d.used * 100 // d.total}%）")
-    except OSError as exc:
-        out["disk"] = f"读不到：{exc}"
+    # 用 df 而不是 shutil.disk_usage：APFS 上后者拿到的 total 是**整个容器**、free 是
+    # 容器剩余，于是 used = total - free 把别的卷也算了进来 —— macOS 上实测显示
+    # 「已用 95%」，而 df 说 51%（本卷只用 11.7 GB / 容器 233 GB）。排障时运维会拿页面
+    # 数字和 df 对照，差这么多足以让他去追一个不存在的磁盘问题。
+    # `-k` 固定 1024 字节块：BSD 的 `-P` 默认 512 字节块（除非设 POSIXLY_CORRECT），
+    # Linux 是 1024，不统一就会算错一倍。
+    rc, text = _run(["df", "-Pk", "/"], timeout=3)
+    fields = text.splitlines()[1].split() if rc == 0 and len(text.splitlines()) > 1 else []
+    if len(fields) >= 5 and fields[1].isdigit() and fields[3].isdigit():
+        out["disk"] = (f"/ 可用 {int(fields[3]) // 1024} MB / 共 {int(fields[1]) // 1024} MB"
+                       f"（已用 {fields[4]}）")
+    else:
+        out["disk"] = f"df 没有给出可解析的行（rc={rc}）：{text[:60]}"
     return out
 
 

@@ -60,10 +60,12 @@ DEFAULT_CERT_DIR = os.environ.get("MRRC_PORTAL_CERT_DIR", "/etc/mrrc-hub/instanc
 # 但样式内联、不外链 CSS —— 门户自身保持零依赖，www 不可用时注册页仍完整可用。
 _PORTAL_CSS = """
 :root{--accent:#22d3ee;--bg:#000;--bg2:#0d1117;--card:rgba(255,255,255,.03);
---tx:#fff;--tx2:#8899aa;--txm:#5c6370;--bd:rgba(255,255,255,.08);}
+--tx:#fff;--tx2:#8899aa;--txm:#5c6370;--bd:rgba(255,255,255,.08);
+--ok:#34d399;--warn:#fbbf24;--bad:#f87171;}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--tx2);
-font:15px/1.7 'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;}
+font:15px/1.7 'Inter',-apple-system,BlinkMacSystemFont,'SF Pro Display','PingFang SC',sans-serif;
+-webkit-text-size-adjust:100%;}
 .p-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
 max-width:960px;margin:0 auto;padding:1.5rem 1.25rem .25rem;}
 .p-brand{color:var(--tx);text-decoration:none;font-weight:700;font-size:1.1rem;letter-spacing:-.02em;}
@@ -78,7 +80,25 @@ code{font-family:'JetBrains Mono','SF Mono',monospace;font-size:.85em;
 background:rgba(34,211,238,.09);color:#7dd3fc;padding:.12em .4em;border-radius:5px;}
 table{border-collapse:collapse;width:100%;margin:1rem 0 1.6rem;background:var(--card);
 border:1px solid var(--bd);border-radius:10px;overflow:hidden;}
-td,th{border-bottom:1px solid var(--bd);padding:.55rem .8rem;text-align:left;font-size:.875rem;color:var(--tx2);}
+td,th{border-bottom:1px solid var(--bd);padding:.55rem .8rem;text-align:left;font-size:.875rem;
+color:var(--tx2);overflow-wrap:anywhere;word-break:break-word;vertical-align:top;}
+/* 长串（证书主体、SHA、HTTP 状态行）不许撑破布局 */
+td code{font-size:.78rem;white-space:normal}
+/* 状态徽章：颜色集中在 CSS，不再散落成各视图里的内联 style */
+.pill{display:inline-block;padding:.12rem .55rem;border-radius:999px;font-size:.75rem;
+font-weight:600;line-height:1.55;white-space:nowrap;border:1px solid transparent}
+.pill.ok{background:rgba(52,211,153,.14);color:var(--ok);border-color:rgba(52,211,153,.32)}
+.pill.warn{background:rgba(251,191,36,.13);color:var(--warn);border-color:rgba(251,191,36,.32)}
+.pill.bad{background:rgba(248,113,113,.13);color:var(--bad);border-color:rgba(248,113,113,.32)}
+.pill.mute{background:rgba(255,255,255,.06);color:var(--tx2)}
+h3{color:var(--tx);font-size:.95rem;margin:1.5rem 0 .3rem}
+/* 导航：可换行、触摸目标 ≥44px、当前页用 aria-current 标记（不是内联 font-weight）*/
+.nav{display:flex;flex-wrap:wrap;gap:.4rem;margin:.7rem 0 1.1rem}
+.nav form{margin:0}
+.nav button{min-height:44px;padding:.5rem 1rem;font-size:.9rem}
+.nav button[aria-current=page]{background:var(--tx);border-color:var(--tx);color:#000}
+td form{display:inline-block;margin:.15rem .25rem .15rem 0}
+td button{min-height:36px;padding:.35rem .7rem;font-size:.8125rem}
 th{color:var(--txm);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;background:rgba(255,255,255,.02);}
 tr:last-child td{border-bottom:0}
 td b{color:var(--tx)}
@@ -96,7 +116,32 @@ small{color:var(--txm);font-size:.8125rem;line-height:1.7;}
 color:var(--txm);font-size:.8125rem;}
 .p-apply{display:grid;gap:.6rem;grid-template-columns:repeat(3,1fr);margin:1rem 0;}
 .p-apply button{grid-column:1/-1;}
-@media(max-width:720px){.p-apply{grid-template-columns:1fr}}
+@media(max-width:720px){
+.p-apply{grid-template-columns:1fr}
+.p-head{padding:1rem .9rem .2rem;flex-wrap:wrap;gap:.25rem}
+.p-main{padding:.6rem .9rem 2rem}
+.p-foot{padding:1rem .9rem 2rem}
+h1{font-size:1.35rem;margin:.9rem 0 .5rem}
+h2{font-size:1.05rem;margin:1.5rem 0 .5rem}
+h3{font-size:.9rem;margin:1.2rem 0 .25rem}
+td,th{padding:.5rem .6rem;font-size:.8125rem}
+.nav{gap:.35rem}
+.nav button{flex:1 1 auto;padding:.5rem .6rem}
+small{font-size:.78rem}
+/* 宽表在窄屏堆叠成卡片：每格用 data-label 当小标题（表头对读屏仍可用，只是视觉隐藏）*/
+table.stack{display:block;border:0;background:none;margin:.7rem 0 1.2rem}
+table.stack thead{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
+overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+table.stack tr{display:block;border:1px solid var(--bd);border-radius:10px;
+background:var(--card);margin:.55rem 0;overflow:hidden}
+table.stack td{display:block;border-bottom:1px solid var(--bd);padding:.5rem .75rem}
+table.stack tr td:last-child{border-bottom:0}
+table.stack td::before{content:attr(data-label);display:block;color:var(--txm);font-size:.66rem;
+text-transform:uppercase;letter-spacing:.07em;margin-bottom:.18rem}
+table.stack td:not([data-label])::before{content:none}
+/* 两列的「项/值」表本来就窄，保持表格但允许横向滚动兜底 */
+table.kv{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+}
 """
 
 
@@ -124,6 +169,21 @@ def _page(title: str, body: str, noindex: bool = False) -> str:
 <script src="https://www.vlsc.net/js/global-nav.js?v=8" defer></script>
 </body>
 </html>"""
+
+
+def trow(*cells) -> str:
+    """一行表格；每个 cell 是 (窄屏标签, HTML)，也可以只给 HTML（表示不需要小标题）。
+
+    标签写进 `data-label`：窄屏下 `table.stack` 会堆叠成卡片，每格用 `::before` 显示它
+    （见 `_PORTAL_CSS`）。标签与单元格**写在同一处**，所以以后加一列不可能忘了配标签 ——
+    `tests/test_portal.py` 有一条守卫会检查 stack 表里每个 td 都带 data-label。
+    """
+    out = ["<tr>"]
+    for cell in cells:
+        label, value = cell if isinstance(cell, tuple) else ("", cell)
+        attr = f' data-label="{html.escape(label, quote=True)}"' if label else ""
+        out.append(f"<td{attr}>{value}</td>")
+    return "".join(out) + "</tr>"
 
 
 def build_verifier(callsign_db: str | Path = DEFAULT_CALLSIGN_DB,
@@ -249,13 +309,13 @@ TUNNEL_TEXT = {
     TUNNEL_DOWN: "未连接",
 }
 
-#: 总览页给每种状态的颜色：能服务=绿，两类「连得上但用不了」=琥珀（容易和真离线混淆，
-#: 所以不用红），完全没连上=红。
-TUNNEL_COLOR = {
-    TUNNEL_SERVING: "#34d399",
-    TUNNEL_PLAIN_HTTP: "#fbbf24",
-    TUNNEL_HOLLOW: "#fbbf24",
-    TUNNEL_DOWN: "#f87171",
+#: 每种状态对应的徽章类。能服务=绿；两类「连得上但用不了」=琥珀（容易和真离线混淆，
+#: 所以不用红）；完全没连上=红。颜色本身在 CSS 里，这里只给类名。
+TUNNEL_PILL = {
+    TUNNEL_SERVING: "ok",
+    TUNNEL_PLAIN_HTTP: "warn",
+    TUNNEL_HOLLOW: "warn",
+    TUNNEL_DOWN: "bad",
 }
 
 
@@ -780,11 +840,11 @@ def make_handler(portal: Portal, token: str, base: str = ""):
             """
             token_attr = html.escape(token_value)
             def nav(label, target):
-                state = " style='font-weight:700'" if target == view else ""
-                return (f"<form method=post style='display:inline'>"
+                cur = " aria-current=page" if target == view else ""
+                return (f"<form method=post>"
                         f"<input type=hidden name=token value='{token_attr}'>"
                         f"<input type=hidden name=view value='{target}'>"
-                        f"<button{state}>{html.escape(label)}</button></form>")
+                        f"<button{cur}>{html.escape(label)}</button></form>")
             def act(route, callsign, label, extra=""):
                 return (f"<form method=post action={route} style='display:inline'>"
                         f"<input type=hidden name=callsign value='{html.escape(callsign)}'>"
@@ -810,11 +870,11 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 not_serving = [(l, p) + states[p] for l, p in entries
                                if states[p][0] != TUNNEL_SERVING]
                 bad = "".join(
-                    f"<br><small style='color:{TUNNEL_COLOR[s]}'>⚠️ <code>{html.escape(l)}</code>:{p} — "
-                    f"{html.escape(TUNNEL_TEXT[s])}（{html.escape(d)}）</small>"
+                    f"<br><small><span class='pill {TUNNEL_PILL[s]}'>{html.escape(TUNNEL_TEXT[s])}</span> "
+                    f"<code>{html.escape(l)}</code>:{p} — {html.escape(d)}</small>"
                     for l, p, s, d in not_serving)
                 body = f"""<h2>总览</h2>
-<table><tr><th>项</th><th>值</th></tr>
+<table class=kv><tr><th>项</th><th>值</th></tr>
 <tr><td>申请</td><td>{'　'.join(f"{k}={v}" for k, v in sorted(by.items())) or '（无）'}</td></tr>
 <tr><td>注册表实例</td><td>{len(entries)} 个，其中<b>真正在服务</b> {online} 个{bad}</td></tr>
 <tr><td>入口证书剩余</td><td>{cert}</td></tr>
@@ -831,15 +891,18 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     for c, a in sorted(apps.items()):
                         if a["status"] not in statuses:
                             continue
-                        out.append(f"<tr><td><code>{html.escape(c)}</code></td><td>{html.escape(a['status'])}</td>"
-                                   f"<td>{html.escape(a.get('product') or '主产品')}</td>"
-                                   f"<td>{html.escape(a.get('label') or '—')}</td><td>{a.get('port') or '—'}</td>"
-                                   f"<td>{html.escape((a.get('evidence') or '')[:70])}"
-                                   + (f"<br><small>登记口令: <code>{html.escape(a['enroll_secret'])}</code></small>"
-                                      if a.get('enroll_secret') and a['status'] == 'granted' else '')
-                                   + f"</td><td>{actions(c)}</td></tr>")
+                        out.append(trow(
+                            ("呼号", f"<code>{html.escape(c)}</code>"),
+                            ("状态", f"<span class='pill mute'>{html.escape(a['status'])}</span>"),
+                            ("产品", html.escape(a.get('product') or '主产品')),
+                            ("标签", html.escape(a.get('label') or '—')),
+                            ("端口", str(a.get('port') or '—')),
+                            ("依据", html.escape((a.get('evidence') or '')[:70])
+                             + (f"<br><small>登记口令: <code>{html.escape(a['enroll_secret'])}</code></small>"
+                                if a.get('enroll_secret') and a['status'] == 'granted' else '')),
+                            ("动作", actions(c))))
                     return ''.join(out) or "<tr><td colspan=7>（无）</td></tr>"
-                body = "<h2>申请（全部状态）</h2><table><tr><th>呼号</th><th>状态</th><th>产品</th><th>标签</th><th>端口</th><th>依据</th><th>动作</th></tr>" \
+                body = "<h2>申请（全部状态）</h2><table class=stack><tr><th>呼号</th><th>状态</th><th>产品</th><th>标签</th><th>端口</th><th>依据</th><th>动作</th></tr>" \
                     + rows({"applied"}, lambda c: act("/verify", c, "核验通过", "<input type=hidden name=evidence value='人工核验通过'>") + act("/reject", c, "拒绝", "<input type=hidden name=reason value='材料不足'>")) \
                     + rows({"verified"}, lambda c: act("/grant", c, "分配入口") + act("/reject", c, "拒绝", "<input type=hidden name=reason value='核验后驳回'>")) \
                     + rows({"granted"}, lambda c: act("/revoke", c, "撤销", "<input type=hidden name=reason value='撤销'>")) \
@@ -850,32 +913,36 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 svc = _service_states()
                 net = _net_facts()
                 certs = _hub_cert_inventory()
-                rows_ = ''.join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(str(v))}</td></tr>"
+                rows_ = ''.join(trow((html.escape(k), html.escape(str(v))))
                                 for k, v in (("负载 (1/5/15 分钟)", res["load"]), ("CPU", res["cpu"]),
                                              ("内存", res["mem"]), ("磁盘", res["disk"]),
                                              ("已运行", res["uptime"]), ("Python", res["python"])))
-                svc_rows = ''.join(
-                    f"<tr><td><code>{html.escape(u)}</code></td>"
-                    f"<td style='color:{'#34d399' if st == 'active' else '#f87171'}'>{html.escape(st)}</td>"
-                    f"<td>{html.escape(en)}</td><td>{html.escape(si)}</td><td>{html.escape(nr)}</td></tr>"
+                svc_rows = ''.join(trow(
+                    ("单元", f"<code>{html.escape(u)}</code>"),
+                    ("状态", f"<span class='pill {'ok' if st == 'active' else 'bad'}'>{html.escape(st)}</span>"),
+                    ("开机自启", html.escape(en)),
+                    ("起于", html.escape(si)),
+                    ("重启次数", html.escape(nr)))
                     for u, st, en, si, nr in svc)
                 reg_ports = {p for _, p in entries}
                 listening = [p for p in net["listen"] if 18800 <= p <= 18999]
                 missing = sorted(reg_ports - set(listening))
                 stray = sorted(set(listening) - reg_ports)
-                cert_rows = ''.join(
-                    f"<tr><td><code>{html.escape(n)}</code></td><td>{html.escape(su)}</td>"
-                    f"<td>{html.escape(na)}</td><td>{'—' if dy is None else str(dy) + ' 天'}</td></tr>"
+                cert_rows = ''.join(trow(
+                    ("文件", f"<code>{html.escape(n)}</code>"),
+                    ("主体", html.escape(su)),
+                    ("到期", html.escape(na)),
+                    ("剩余", "—" if dy is None else f"{dy} 天"))
                     for n, su, na, dy in certs) or "<tr><td colspan=4>（无）</td></tr>"
                 body = (
                     "<h2>系统</h2>"
-                    "<h3>① hub 主机</h3><table><tr><th>项</th><th>值</th></tr>" + rows_ + "</table>"
-                    "<h3>② hub 服务</h3><table><tr><th>单元</th><th>状态</th><th>开机自启</th>"
+                    "<h3>① hub 主机</h3><table class=kv><tr><th>项</th><th>值</th></tr>" + rows_ + "</table>"
+                    "<h3>② hub 服务</h3><table class=stack><tr><th>单元</th><th>状态</th><th>开机自启</th>"
                     "<th>起于</th><th>重启次数</th></tr>" + svc_rows + "</table>"
                     "<p><small>「未安装」是一种<b>结论</b>而不是错误：单元文件在仓库里、却没装到 hub 上，"
                     "正是路由不会自动重生成的原因（<code>mrrc-hub-routes.timer</code> 实测 "
                     "<code>is-enabled</code> = not-found，而 SDD V0.22 写着「V0.17 起 30 s timer 自动」）。</small></p>"
-                    "<h3>③ 隧道层（frps）</h3><table><tr><th>项</th><th>值</th></tr>"
+                    "<h3>③ 隧道层（frps）</h3><table class=kv><tr><th>项</th><th>值</th></tr>"
                     f"<tr><td>frps 接入端口 8989</td><td>{'在听' if 8989 in net['listen'] else '<b>没在听</b>'}</td></tr>"
                     f"<tr><td>frpc 控制连接</td><td>{len(net['peers'])} 条"
                     f"{'：' + html.escape(', '.join(net['peers'])) if net['peers'] else ''}</td></tr>"
@@ -887,7 +954,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     "</table>"
                     + (f"<p><small>⚠️ {html.escape(net['note'])}</small></p>" if net["note"] else "")
                     + "<h3>④ hub 侧已登记的实例证书</h3>"
-                    "<table><tr><th>文件</th><th>主体</th><th>到期</th><th>剩余</th></tr>" + cert_rows + "</table>"
+                    "<table class=stack><tr><th>文件</th><th>主体</th><th>到期</th><th>剩余</th></tr>" + cert_rows + "</table>"
                     "<p><small>注册表里有一行只代表<b>预留</b>；没有证书就说明该实例从未走完批准→登记，"
                     "它的入口只能 502。<br>"
                     "本页采集不到的：<code>/var/log/nginx/*.log</code>（mrrcportal 不可读 ⇒ 无每实例的 nginx 错误计数）、"
@@ -899,9 +966,9 @@ def make_handler(portal: Portal, token: str, base: str = ""):
 
                 def tunnel_cell(rep):                  # 同一探测的 HTML 版本（实例页）
                     state = rep.get("state", TUNNEL_DOWN)
-                    return (f"<b style='color:{TUNNEL_COLOR[state]}' "
+                    return (f"<span class='pill {TUNNEL_PILL[state]}' "
                             f"title='{html.escape(rep.get('detail', '未探测'), quote=True)}'>"
-                            f"{html.escape(TUNNEL_TEXT[state])}</b>")
+                            f"{html.escape(TUNNEL_TEXT[state])}</span>")
 
                 def app_cell(rep):
                     line = rep.get("status_line") or ""
@@ -918,22 +985,24 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     if not c or c.get("subject", "—") == "—":
                         return "<small>—<br>（握手没成，拿不到证书）</small>"
                     ok = c.get("name_ok")
-                    mark = ("<b style='color:#34d399'>名字相符</b>" if ok else
-                            "<b style='color:#f87171'>名字不符 ⇒ nginx 必 502</b>" if ok is False else "")
+                    mark = ("<span class='pill ok'>名字相符</span>" if ok else
+                            "<span class='pill bad'>名字不符 ⇒ nginx 必 502</span>" if ok is False else "")
                     issuer = "自签" if c.get("issuer") == c.get("subject") else (c.get("issuer") or "")[:44]
                     days = _days_left(c.get("not_after", ""))
                     return (f"<small><code>{html.escape(c.get('subject', ''))}</code><br>"
                             f"{html.escape(issuer)}<br>到期 {html.escape(c.get('not_after', ''))}"
                             f"{'（' + str(days) + ' 天）' if days is not None else ''}<br>{mark}</small>")
 
-                rows_ = ''.join(
-                    f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td>"
-                    f"<td>{tunnel_cell(reports.get(l, {}))}</td>"
-                    f"<td>{app_cell(reports.get(l, {}))}</td>"
-                    f"<td>{cert_cell(reports.get(l, {}))}</td>"
-                    f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net/' target=_blank>打开入口</a></td></tr>"
+                rows_ = ''.join(trow(
+                    ("标签", f"<code>{html.escape(l)}</code>"),
+                    ("端口", str(p)),
+                    ("隧道", tunnel_cell(reports.get(l, {}))),
+                    ("实例里的应用", app_cell(reports.get(l, {}))),
+                    ("上游证书", cert_cell(reports.get(l, {}))),
+                    ("入口", f"<a href='https://{html.escape(l)}.mrrc.vlsc.net/' target=_blank "
+                            f"rel=noopener>打开入口</a>"))
                     for l, p in sorted(entries)) or "<tr><td colspan=6>（注册表为空）</td></tr>"
-                body = ("<h2>实例</h2><table><tr><th>标签</th><th>端口</th><th>隧道</th>"
+                body = ("<h2>实例</h2><table class=stack><tr><th>标签</th><th>端口</th><th>隧道</th>"
                         "<th>实例里的应用</th><th>上游证书</th><th>入口</th></tr>"
                         + rows_ + "</table><p><small>「在线」= 从 hub 回环向该端口完成 TLS 握手并拿到 HTTP 应答"
                         "（<b>任何</b>状态码都算，包括 401）；鼠标悬停可看探测详情。<br>"
@@ -947,16 +1016,17 @@ def make_handler(portal: Portal, token: str, base: str = ""):
 
             elif view == "audit":
                 entries_a = list(reversed(portal.store.audit()))[:60]
-                rows_ = ''.join(
-                    f"<tr><td>{time.strftime('%m-%d %H:%M', time.localtime(e['at']))}</td>"
-                    f"<td><code>{html.escape(e['callsign'])}</code></td><td>{html.escape(e['event'])}</td>"
-                    f"<td>{html.escape((e.get('detail') or '')[:90])}</td></tr>" for e in entries_a)
-                body = ("<h2>审计（最近 60 条，追加式）</h2><table><tr><th>时间</th><th>呼号</th><th>事件</th><th>细节</th></tr>"
+                rows_ = ''.join(trow(
+                    ("时间", time.strftime('%m-%d %H:%M', time.localtime(e['at']))),
+                    ("呼号", f"<code>{html.escape(e['callsign'])}</code>"),
+                    ("事件", html.escape(e['event'])),
+                    ("细节", html.escape((e.get('detail') or '')[:90]))) for e in entries_a)
+                body = ("<h2>审计（最近 60 条，追加式）</h2><table class=stack><tr><th>时间</th><th>呼号</th><th>事件</th><th>细节</th></tr>"
                         + (rows_ or "<tr><td colspan=4>（无）</td></tr>") + "</table>")
 
             else:  # clublog
                 cl = _clublog_info()
-                body = (f"<h2>呼号库</h2><table><tr><th>项</th><th>值</th></tr>"
+                body = (f"<h2>呼号库</h2><table class=kv><tr><th>项</th><th>值</th></tr>"
                         f"<tr><td>来源</td><td>Club Log（与站内留言版 www.vlsc.net/feedback 同源）</td></tr>"
                         f"<tr><td>状态</td><td>{cl}</td></tr>"
                         f"<tr><td>路径</td><td><code>{html.escape(str(DEFAULT_CLUBLOG))}</code></td></tr></table>"
@@ -966,7 +1036,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
             return _page("MRRC Portal — 后台管理",
                          "<h1>呼号自助 — 后台管理</h1>"
                          + (f'<p class=msg>{html.escape(msg)}</p>' if msg else '')
-                         + f"<p>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('系统','system')}{nav('审计','audit')}{nav('呼号库','clublog')}</p>"
+                         + f"<nav class=nav>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('系统','system')}{nav('审计','audit')}{nav('呼号库','clublog')}</nav>"
                          + body, noindex=True)
 
         # ---- routes ----
@@ -983,9 +1053,12 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     noindex=True), ctype="text/html; charset=utf-8")
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})
-            rows = "".join(
-                f"<tr><td>{html.escape(a['callsign'])}</td><td>{html.escape(a['status'])}</td>"
-                f"<td>{html.escape(a['label'] or '—')}</td><td>{a['port'] or '—'}</td></tr>"
+            # 这是租户在**自己手机上**看的那张表，所以同样要能在窄屏堆叠。
+            rows = "".join(trow(
+                ("呼号", f"<code>{html.escape(a['callsign'])}</code>"),
+                ("状态", f"<span class='pill ok'>{html.escape(a['status'])}</span>"),
+                ("标签", html.escape(a['label'] or '—')),
+                ("端口", str(a['port'] or '—')))
                 for a in portal.store.bindings().values()
             ) or "<tr><td colspan=4>（暂无已授予实例）</td></tr>"
             self._send(200, _page(
@@ -1001,7 +1074,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 "<p><small>为什么必须核验：呼号是<strong>公开标识</strong>，入口名就是呼号，"
                 "因此实例存在性必然可枚举（I-H9 已接受）。防不了“被猜到”，就只能守住"
                 "“核验通过才授予访问”。冒用可被举报并撤销（<code>/revoke</code>）。</small></p>"
-                f"<h2>已授予</h2><table><tr><th>呼号</th><th>状态</th><th>标签</th><th>端口</th></tr>{rows}</table>"),
+                f"<h2>已授予</h2><table class=stack><tr><th>呼号</th><th>状态</th><th>标签</th><th>端口</th></tr>{rows}</table>"),
                        ctype="text/html; charset=utf-8")
 
         def do_POST(self):                       # noqa: N802

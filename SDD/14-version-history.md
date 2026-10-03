@@ -2,6 +2,58 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.25 — 2026-10-03 — 管理台与自助页的窄屏可用性：宽表堆叠成卡片，状态色收进 CSS
+
+**触发**：V0.24 把实例页扩到 6 列之后，手机上已经没法看了 —— 证书主体
+（`CN=bg9aaa.mrrc.vlsc.net`）、签发者（`C=US, O=Let's Encrypt, CN=YE1`）、HTTP 状态行
+这类长串会把 6 列挤成一团或撑破容器。而运维**恰恰是在现场用手机**看这个页面的。
+根因不是"列太多"，是整份 CSS 只有一条媒体查询、且只管 `.p-apply` 表单：表格、导航、
+长字符串全都没有窄屏处理，`_page()` 有 viewport meta 但没有任何配套的响应式规则。
+
+**已做**：
+
+- **宽表在 ≤720px 堆叠成卡片**（`table.stack`）：每行变成一张卡，每格用 `::before` 显示
+  小标题，标题取自该格的 `data-label`。表头不删除而是**视觉隐藏**（`clip:rect(0 0 0 0)`），
+  读屏仍能拿到列名。两列的「项/值」表（总览、主机、隧道层、呼号库）本来就窄，标为
+  `table.kv` 保持表格形态，只加 `overflow-x:auto` 兜底。
+- **新增 `trow()` 助手**：一行由 `(窄屏标签, HTML)` 组成，标签与单元格**写在同一处**。
+  这是刻意的结构选择 —— 若标签写在 CSS 里按列序号配（`td:nth-child(3)::before{content:"隧道"}`），
+  以后插一列就会整体错位，而且错得静默。六个视图的行构造器全部改用它。
+- **状态色从内联 `style='color:#34d399'` 收进 CSS 类**（`.pill.ok/.warn/.bad/.mute`），
+  Python 侧只保留 `TUNNEL_PILL` 这个状态→类名的映射（`TUNNEL_COLOR` 删除）。
+  散落各视图的内联颜色既无法统一主题，也让"哪些状态是同一严重级"看不出来。
+- **导航改成 `<nav class=nav>` 弹性条**：可换行、按钮 `min-height:44px`（触摸目标下限），
+  当前页用 **`aria-current=page`** 标记而不是内联 `font-weight:700`（语义 + 可被 CSS 控制）。
+  表格内的动作按钮单独给 36px，不与主导航抢视觉重量。
+- **长串不许撑破布局**：`td,th{overflow-wrap:anywhere;word-break:break-word}`，
+  `td code` 允许换行（`white-space:normal`）；`body` 加 `-webkit-text-size-adjust:100%`
+  防止 iOS 横竖屏切换时自动放大字号打乱布局。
+- **公开自助页的「已授予」表同样处理** —— 那是租户在**自己手机上**看的表，
+  不是运维内部页面，优先级不低于管理台。
+
+**守卫**（`tests/test_portal.py`，套件 26 → **27 组**）：新增 `test_pages_are_mobile_suitable`，
+用 stdlib `HTMLParser` **真解析**渲染结果（正则糊不住嵌套表格），对 7 个页面逐页断言：
+有 viewport meta；**`stack` 表里每个 `td` 都带 `data-label`**（`colspan` 占位行除外）；
+没有内联 `style='color:'`；导航恰有一项 `aria-current=page`；**每个视图至少有 N 张表挂着
+`class=stack`**（这条是补的盲区：宽表若丢了 `class=stack`，它的 td 就退出 `data-label`
+检查范围，守卫会静默放行）；CSS 里必须能找到窄屏断点、`::before` 小标题、`attr(data-label)`、
+表头视觉隐藏、`min-height:44px`、`overflow-wrap:anywhere` 与徽章类；并断言 `TUNNEL_COLOR`
+这个内联颜色字典已不存在。还有一条防空跑断言：实际检查到的 stack 单元格必须 > 20 个，
+否则"页面没渲染出内容"会被当成"没有问题"。
+
+**六处变异严格隔离验证**（改一处 → 跑 → 还原 → 断言干净），每处只打中该打的那条：
+实例页某列丢掉 `data-label`；CSS 窄屏断点消失；`_page()` 丢掉 viewport meta；
+状态色退回内联 `style`；实例页宽表丢掉 `class=stack`；CSS 丢掉 `min-height:44px`。
+
+**边界**：
+
+- 未做真机/浏览器实测。判据是**结构与 CSS 规则**层面的（DOM 里有 `data-label`、
+  CSS 里有对应规则、无内联色），不是"在 iPhone Safari 上截图确认好看"。
+  卡片式堆叠是成熟模式，但字号/间距的最终观感仍需一次真机过目。
+- 打印样式、深色/浅色主题切换、以及 `prefers-reduced-motion` 均未涉及（页面本就无动画）。
+- 只改了 portal 自己的 `_PORTAL_CSS`；`www.vlsc.net/js/global-nav.js` 那个全站导航条
+  不在本仓，它在窄屏上的表现未验证。
+
 ## V0.24 — 2026-10-03 — 后台管理台的可观测面：从 hub 主机一路看到实例里那个应用
 
 **触发**：V0.23 把「在线」的判据修对了，但管理台仍然只回答一个是/否。排 bg7zhs 时需要的事实散在

@@ -23,6 +23,8 @@ import sys
 import tempfile
 import threading
 import time
+from html.parser import HTMLParser
+
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -856,6 +858,113 @@ def test_admin_views_render_the_probe_facts_end_to_end():
             httpd.shutdown()
 
 
+class _MobileProbe(HTMLParser):
+    """解析渲染出的页面，检查窄屏可用性不变量（正则糊不住嵌套表格，必须真解析）。"""
+
+    def __init__(self):
+        super().__init__()
+        self.tables = []          # 每层 table 是否 class=stack
+        self.stack_tables = 0     # class=stack 的表有几张
+        self.stack_tds = 0        # stack 表里的 td 总数
+        self.bad_tds = []         # stack 表里缺 data-label 的 td
+        self.viewport = False
+        self.aria_current = 0
+        self.inline_color = 0
+        self.pill = 0
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "meta" and a.get("name") == "viewport":
+            self.viewport = True
+        elif tag == "table":
+            is_stack = "stack" in (a.get("class") or "").split()
+            self.tables.append(is_stack)
+            self.stack_tables += 1 if is_stack else 0
+        elif tag == "td" and self.tables and self.tables[-1]:
+            self.stack_tds += 1
+            if not a.get("colspan") and not a.get("data-label"):
+                self.bad_tds.append((a.get("colspan"), str(self.getpos())))
+        elif tag == "button" and a.get("aria-current") == "page":
+            self.aria_current += 1
+        elif tag == "span" and "pill" in (a.get("class") or ""):
+            self.pill += 1
+        if "color:" in (a.get("style") or ""):
+            self.inline_color += 1
+
+    def handle_endtag(self, tag):
+        if tag == "table" and self.tables:
+            self.tables.pop()
+
+
+def test_pages_are_mobile_suitable():
+    """窄屏可用性守卫：宽表必须能在手机上堆叠成卡片，且每格有小标题。
+
+    没有这条守卫，以后给实例页加一列时忘了配 `data-label`，手机上那一格就会
+    **静默地**变成没有标题的一坨 —— 布局退化不会让任何测试变红，只会让运维在
+    现场用手机看状态时读不懂。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
+        (tmp / "instances.tsv").write_text("bg1sb\t18802\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        portal.apply("bg1sb")                      # 让申请视图与审计视图有内容可渲染
+        from http.server import ThreadingHTTPServer
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+
+        def get(path):
+            with urllib.request.urlopen(base + path, timeout=30) as r:
+                return r.read().decode()
+
+        def post(view):
+            data = urllib.parse.urlencode({"token": "tok", "view": view}).encode()
+            with urllib.request.urlopen(base + "/admin", data=data, timeout=60) as r:
+                return r.read().decode()
+
+        try:
+            pages = {"公开注册页": get("/")}
+            for v in ("overview", "applications", "instances", "system", "audit", "clublog"):
+                pages[v] = post(v)
+
+            total_tds = 0
+            for name, page in pages.items():
+                pr = _MobileProbe(); pr.feed(page)
+                check(pr.viewport, f"{name}: 有 viewport meta（缺了手机会按桌面宽度渲染）")
+                check(pr.inline_color == 0,
+                      f"{name}: 没有内联 style='color:'（状态色应在 CSS 类里，共 {pr.inline_color} 处）")
+                check(not pr.bad_tds,
+                      f"{name}: stack 表里每个 td 都有 data-label（缺 {len(pr.bad_tds)} 个: {pr.bad_tds[:3]}）")
+                total_tds += pr.stack_tds
+                if name in ("instances", "applications", "audit", "system"):
+                    check(pr.aria_current == 1,
+                          f"{name}: 导航恰有一项标了 aria-current=page（得到 {pr.aria_current}）")
+                # 宽表必须挂着 class=stack：丢了它，那些 td 就退出 data-label 检查范围，
+                # 守卫会静默放行，手机上退回难看的挤压布局。
+                need = {"instances": 1, "applications": 1, "audit": 1, "system": 2,
+                        "overview": 0, "clublog": 0, "公开注册页": 1}
+                check(pr.stack_tables >= need[name],
+                      f"{name}: 至少 {need[name]} 张宽表挂了 class=stack（得到 {pr.stack_tables}）")
+            check(total_tds > 20, f"确实检查到了 stack 单元格（共 {total_tds} 个，避免空跑假通过）")
+
+            # CSS 本身要含窄屏堆叠规则与触摸目标尺寸
+            from portal.app import _PORTAL_CSS as css
+            for needle, why in (("@media(max-width:720px)", "窄屏断点"),
+                                ("table.stack td::before", "堆叠后的小标题"),
+                                ("content:attr(data-label)", "小标题取自 data-label"),
+                                ("clip:rect(0 0 0 0)", "表头对读屏保留、只视觉隐藏"),
+                                ("min-height:44px", "触摸目标 ≥44px"),
+                                ("overflow-wrap:anywhere", "长串不撑破布局"),
+                                (".pill.ok", "状态徽章类")):
+                check(needle in css, f"CSS 含{why}（{needle}）")
+            check("TUNNEL_COLOR" not in Path("portal/app.py").read_text(encoding="utf-8"),
+                  "内联颜色字典 TUNNEL_COLOR 已被 CSS 类取代")
+        finally:
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:
@@ -865,7 +974,7 @@ def main():
         for f in FAILS:
             print("   -", f)
         return 1
-    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门/隧道探测/注册表三列/证书事实/采集器降级")
+    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门/隧道探测/注册表三列/证书事实/采集器降级/窄屏可用性")
     return 0
 
 

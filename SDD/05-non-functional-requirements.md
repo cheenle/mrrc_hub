@@ -8,14 +8,14 @@
 
 | ID | Requirement | Target | Priority | Verification |
 | --- | --- | --- | --- | --- |
-| NFR-H001 | 客户侧零入站：实例只需**出站**连接（隧道口 **8989/tcp**，V0.2 port 修订），不需要公网 IP、端口映射或 UPnP。**用户侧另需能出站访问入口 9988/tcp** —— 这是两条不同的约束，别并成一条（见 R-H12） | 出站可达即在线 | Critical | 无公网 IP、UPnP 关闭的家宽环境完成 10 实例试点；用户侧至少覆盖一家公司/访客网络实测 |（V0.21 起入口在 443，用户侧只需出站 443）
+| NFR-H001 | 客户侧零入站：实例只需**出站**连接（隧道口 **8989/tcp**，V0.2 port 修订），不需要公网 IP、端口映射或 UPnP。**用户侧另需能出站访问入口** —— 这是两条不同的约束，别并成一条（见 R-H12）；**V0.21 起入口在 443，用户侧只需出站 443**（原 `9988/tcp` 已取消） | 出站可达即在线 | Critical | 无公网 IP、UPnP 关闭的家宽环境完成 10 实例试点；用户侧至少覆盖一家公司/访客网络实测 |
 
 ## 5.2 Performance Requirements
 
 | ID | Requirement | Target | Priority | Verification |
 | --- | --- | --- | --- | --- |
 | NFR-H004 | 新会话建立（Hub 控制路径，不含互联网 RTT） | P95 ≤ 2 s | High | 会话建立计时埋点 |
-| NFR-H005 | Hub 引入的控制路径额外延迟（同地域） | P95 ≤ 50 ms | High | 端到端 RTT 对比（同地域直连 vs 经 Hub） | **（V0.4：该目标针对同地域直连路径；经海外 www 边缘的退化路径实测多一跳 0.4–0.6 s，仅用于只放行 80/443 的网络）**
+| NFR-H005 | Hub 引入的控制路径额外延迟（同地域） | P95 ≤ 50 ms | High | 端到端 RTT 对比（同地域直连 vs 经 Hub）。**（V0.4 存史：该目标针对同地域直连路径；当时另有一条经海外 www 边缘的退化路径，实测多一跳 0.4–0.6 s，仅用于只放行 80/443 的网络。V0.21 起入口自身就在 443，那条约束已满足，退化路径整体删除）** |
 | NFR-H007 | 单会话带宽预算 | 全控 ≈ 0.48 Mbps（RX Opus 64 kbps + 频谱 408 kbps）；Listener ≈ 0.20 Mbps | Critical | 代码实测：`opus_rx.py` `DEFAULT_BITRATE=64000`；`server.py` `/WSspectrum` 1701 B/帧 × 30 fps |
 | NFR-H008 | 频谱帧预算 | 1701 B/帧（1 B 版本 + 850 B wf1 + 850 B wf2）、~30 fps、二进制 `send_bytes`（无 base64 膨胀）；Listener 按 `LISTEN_SPECTRUM_DIVIDER=3` 降为 1/3 帧率 | Critical | `server.py` `/WSspectrum` docstring 与 `LISTEN_SPECTRUM_DIVIDER` |
 | NFR-H009 | 客户上行护栏 | 实例上行利用率告警线 60%，扩容/降级线 80% | High | 实例侧 `send_bytes` 计数上报（AD-H13） |

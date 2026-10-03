@@ -1,0 +1,359 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3200" height="2000" viewBox="0 0 3200 2000" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif">
+<style>
+  .bt{font-size:21px;font-weight:700;color:#1f2937;margin:0 0 8px}
+  .bt.small{font-size:19px}
+  .bi{font-size:16.5px;color:#374151;margin:0 0 6px;line-height:1.5}
+  .bi b{color:#111827}
+  .bi.tight{font-size:15.5px;line-height:1.42;margin:0 0 5px}
+  .tiny{font-size:14.5px;color:#6b7280;margin:4px 0 0;line-height:1.45}
+  .cd{font-family:'JetBrains Mono','SF Mono',Menlo,monospace;font-size:.92em;background:#eef2f7;border-radius:4px;padding:0 4px}
+  .tag{display:inline-block;font-size:12.5px;font-weight:700;border-radius:999px;padding:1px 10px;margin-left:8px;vertical-align:2px;border:1px solid}
+  .tag.live{color:#047857;border-color:#7fd0ae;background:#e9f8f1}
+  .tag.p2{color:#b45309;border-color:#f0b35c;background:#fff7e8}
+  .tag.p3{color:#64748b;border-color:#cbd5e1;background:#f1f5f9}
+  .tag.hist{color:#64748b;border-color:#cbd5e1;background:#f1f5f9}
+  .dashbox .bt,.dashbox .bi{color:#6b7280}
+  div{box-sizing:border-box}
+</style>
+<defs>
+  <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+    <feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.10"/>
+  </filter>
+  <filter id="shs" x="-20%" y="-20%" width="140%" height="140%">
+    <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.08"/>
+  </filter>
+  <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#ea6a12"/>
+  </marker>
+  <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#0d9f6e"/>
+  </marker>
+  <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+  </marker>
+</defs>
+
+<rect width="3200" height="2000" fill="#f5f7fa"/>
+
+<!-- ═════════ 头部 ═════════ -->
+<text x="80" y="92" font-size="46" font-weight="700" fill="#111827">MRRC Cloud Hub 远程接入 · 总体架构（as-built 校验版 · V0.21 一台机器）</text>
+<text x="80" y="134" font-size="20" fill="#64748b">客户内网实例主动出站 · 呼号即通配子域入口（443）· PTT 释放权威永远在实例本地 · 实线 = 阶段 1 已运行 ／ 虚线 = 阶段 2–3 目标态</text>
+<text x="80" y="166" font-size="16" fill="#94a3b8">事实源：SDD/09 §9.9 · SDD/12 §12.8–§12.9 · SDD/14 V0.19–V0.21 · deploy/README · portal/ 代码 · 2026-10-02 合并后记录（新主机逐项读数未全部复测）</text>
+<line x1="80" y1="190" x2="3120" y2="190" stroke="#dfe5ec" stroke-width="1.5"/>
+
+<rect x="330" y="214" width="2540" height="66" rx="33" fill="#fff4ea" stroke="#f0a875" stroke-width="1.6" filter="url(#shs)"/>
+<text x="1600" y="254" font-size="19" font-weight="600" fill="#c2410c" text-anchor="middle">架构决策：MVP 用 frp 反向隧道（共享 token）验证通路，目标态为内置 Fleet Agent + 一机一证；入口为无状态 nginx 通配 vhost 并逐实例校验上游证书；V0.21 起门户 / 实例入口 / 站点合并在一台机器的 443，:9988 与 :8899 取消、海外边缘退化路删除，唯一独立端口是隧道控制 8989</text>
+
+<!-- ═════════ 泳道 ═════════ -->
+<rect x="70" y="320" width="750" height="940" rx="18" fill="#fff8ec" stroke="#edaf54" stroke-width="1.8" filter="url(#sh)"/>
+<rect x="860" y="320" width="1560" height="1360" rx="18" fill="#eef4fc" stroke="#8fb3f2" stroke-width="1.8" filter="url(#sh)"/>
+<rect x="2460" y="320" width="670" height="1200" rx="18" fill="#eafaf2" stroke="#86d3b0" stroke-width="1.8" filter="url(#sh)"/>
+
+<text x="445" y="374" font-size="26" font-weight="700" fill="#b45309" text-anchor="middle">客户内网 · MRRC 实例 ×200+</text>
+<text x="445" y="404" font-size="15" fill="#6b7280" text-anchor="middle">无公网 IP · 不开放入站端口 · 仅出站 8989（隧道控制口）</text>
+<text x="1640" y="374" font-size="26" font-weight="700" fill="#1d4ed8" text-anchor="middle">MRRC Cloud Hub · 一台机器（hub ＝ www ＝ portal）</text>
+<text x="1640" y="404" font-size="15" fill="#6b7280" text-anchor="middle">香港 VPS hub.vlsc.net · 203.25.119.168 · Ubuntu 26.04 · 公网只需放行 443 与 8989 · 规格与安全组明细未取证</text>
+<text x="2795" y="374" font-size="26" font-weight="700" fill="#047857" text-anchor="middle">远程用户与运营角色</text>
+<text x="2795" y="404" font-size="14.5" fill="#6b7280" text-anchor="middle">HTTPS/WSS · 呼号子域是唯一入口（443）· 局域网可直连 :8888</text>
+
+<!-- ═════════ 左列盒子 ═════════ -->
+<g filter="url(#shs)">
+  <rect x="100" y="430" width="690" height="210" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="100" y="430" width="690" height="210">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px 22px">
+      <p class="bt">MRRC_modern 实例 A（as-built 运行中）</p>
+      <p class="bi"><b>HF/50MHz 电台</b> —— USB CAT + 音频；位置/天线/电源不变</p>
+      <p class="bi"><b>本机服务 :8888</b> —— FastAPI + 4+1 WS 端点不重写；LAN 密码模式保留</p>
+      <p class="bi"><b>角色 gate</b> —— 主口令 <span class="cd">/</span>、监听口令 <span class="cd">/listen</span>；Listener 连 TX 通道被 <b>4003</b> 服务端拒绝</p>
+      <p class="bi" style="margin:0"><b>PTT 释放权威</b> —— Layer 0–8 本地强制回 RX + 发射时长硬上限，<b>不依赖云端</b>（AD-H06）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="100" y="660" width="690" height="200" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="100" y="660" width="690" height="200">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px 22px">
+      <p class="bt">出站隧道（as-built）<span class="tag live">已运行</span></p>
+      <p class="bi"><span class="cd">frpc</span> 常驻：macOS LaunchAgent / Linux systemd user unit / Windows 计划任务；KeepAlive，崩溃·重启·换网自恢复</p>
+      <p class="bi">配置 <span class="cd">0600</span>，token 只落盘不进 argv；<span class="cd">type=tcp</span> 让 hub 的 nginx 对实例证书全程校验（NFR-H021）</p>
+      <p class="bi" style="margin:0">出站 <span class="cd">tunnel.mrrc.vlsc.net:8989</span>（共享 token + TLS）—— 定位为 MVP 验证通道</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)" class="dashbox">
+  <rect x="100" y="880" width="690" height="140" rx="12" fill="#fbfcfe" stroke="#94a3b8" stroke-width="1.3" stroke-dasharray="7 5"/>
+  <foreignObject x="100" y="880" width="690" height="140">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px 22px">
+      <p class="bt">Fleet Agent（目标态内置）<span class="tag p2">阶段 2</span></p>
+      <p class="bi">出站 WSS/<b>mTLS 一机一证</b>、心跳、自动重连、虚拟流复用（AD-H11/AD-H13）</p>
+      <p class="bi" style="margin:0">远程会话活性层（TX 期间 500 ms 心跳）已在实例侧 V2.62/V2.63 落地（I-H6）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="100" y="1040" width="690" height="200" rx="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.3"/>
+  <foreignObject x="100" y="1040" width="690" height="200">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px 22px">
+      <p class="bt">实例边界与策略</p>
+      <p class="bi"><b>标签＝裸呼号</b>（<span class="cd">bg1sb</span>）；只有附加产品带后缀（<span class="cd">bg1sb-legacy</span>）—— V0.21</p>
+      <p class="bi">operator 单写：as-built 由<b>实例侧仲裁</b>发射权；Hub 租约为目标态（AD-H05）</p>
+      <p class="bi">RX 扇出按需启用，不阻塞 MVP（AD-H12 条件触发）；OTA/诊断默认关闭，授权后限时开启（AD-H13）</p>
+      <p class="bi" style="margin:0">实例 B…N：每实例 = 注册表一行 + 一条 frpc 代理（AD-H02）</p>
+    </div>
+  </foreignObject>
+</g>
+
+<!-- ═════════ 中列：入口层 ═════════ -->
+<rect x="890" y="430" width="1500" height="330" rx="14" fill="#e8f0fe" stroke="#9dbcf7" stroke-width="1.6" filter="url(#shs)"/>
+<text x="1640" y="470" font-size="21" font-weight="700" fill="#1d4ed8" text-anchor="middle">公网入口层（as-built · 同一台机器的三套 vhost，全在 443）</text>
+<rect x="2290" y="452" width="76" height="26" rx="13" fill="#e9f8f1" stroke="#7fd0ae"/><text x="2328" y="470" font-size="13" font-weight="700" fill="#047857" text-anchor="middle">已运行</text>
+<g filter="url(#shs)">
+  <rect x="915" y="492" width="470" height="168" rx="10" fill="#ffffff" stroke="#dbe4f0" stroke-width="1.2"/>
+  <foreignObject x="915" y="492" width="470" height="168">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:13px 20px">
+      <p class="bt small" style="color:#1d4ed8">实例入口 · 呼号通配 vhost</p>
+      <p class="bi"><span class="cd">https://&lt;呼号&gt;.mrrc.vlsc.net/</span> —— <b>443，不带端口</b>（原 <span class="cd">:9988</span>/<span class="cd">:8899</span> 已取消）</p>
+      <p class="bi" style="margin:0">nginx 正则取呼号 → map 查注册表 → 回环 188xx；<b>未知呼号 404，不回退</b>（NFR-H022）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="1405" y="492" width="470" height="168" rx="10" fill="#ffffff" stroke="#dbe4f0" stroke-width="1.2"/>
+  <foreignObject x="1405" y="492" width="470" height="168">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:13px 20px">
+      <p class="bt small" style="color:#1d4ed8">门户 · 挂在根</p>
+      <p class="bi"><span class="cd">https://portal.mrrc.vlsc.net/</span>（旧 <span class="cd">/mrrc_portal/</span> <b>301</b> 到根）；审批台 <span class="cd">/admin</span></p>
+      <p class="bi" style="margin:0">服务只绑 <span class="cd">127.0.0.1:8890</span>；nginx 那层对 <span class="cd">/apply</span> 限流 10 r/m（burst 5）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="1895" y="492" width="470" height="168" rx="10" fill="#ffffff" stroke="#dbe4f0" stroke-width="1.2"/>
+  <foreignObject x="1895" y="492" width="470" height="168">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:13px 20px">
+      <p class="bt small" style="color:#1d4ed8">站点与下载 · 同机</p>
+      <p class="bi"><span class="cd">www.vlsc.net/mrrc_modern/</span> 产品介绍 + 安装包 + <span class="cd">latest.json</span></p>
+      <p class="bi" style="margin:0"><span class="cd">www.vlsc.net/mrrc_hub/</span> 文档站（5 页）；载荷 URL 与 SHA-256 由 <span class="cd">payload.lock</span> 钉住</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="915" y="676" width="1450" height="72" rx="10" fill="#ffffff" stroke="#dbe4f0" stroke-width="1.2"/>
+  <foreignObject x="915" y="676" width="1450" height="72">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:11px 20px">
+      <p class="bi" style="margin:0"><b style="color:#1d4ed8">公网只剩两个口</b>：443（三套 vhost 共用一张通配真证书）与 8989（隧道控制）。海外边缘 <span class="cd">www.vlsc.net/mrrc_modern/&lt;呼号大写&gt;/</span> 反代路径<b>已整体删除</b> —— 两条路本就指向同一个 nginx，留第二套只是多一处会坏的配置<span class="tag hist">V0.21</span></p>
+    </div>
+  </foreignObject>
+</g>
+
+<!-- ═════════ 中列：接入与数据面 ═════════ -->
+<rect x="890" y="790" width="1500" height="340" rx="14" fill="#fff1e7" stroke="#f2a077" stroke-width="1.6" filter="url(#shs)"/>
+<text x="1640" y="830" font-size="21" font-weight="700" fill="#c2410c" text-anchor="middle">① 接入与数据面（as-built）</text>
+<rect x="1762" y="812" width="76" height="26" rx="13" fill="#e9f8f1" stroke="#7fd0ae"/><text x="1800" y="830" font-size="13" font-weight="700" fill="#047857" text-anchor="middle">已运行</text>
+<g filter="url(#shs)">
+  <rect x="915" y="852" width="470" height="160" rx="10" fill="#ffffff" stroke="#f0d9c8" stroke-width="1.2"/>
+  <foreignObject x="915" y="852" width="470" height="160">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 18px">
+      <p class="bt small" style="color:#c2410c">nginx 通配 vhost :443</p>
+      <p class="bi">无状态：终结 TLS、Host 取呼号、查 map、<b>校验上游证书</b></p>
+      <p class="bi">5 WS 透明转发，保留 4001/4003 自定义关闭码</p>
+      <p class="tiny" style="margin:0">含 <span class="cd">listen [::]:443</span>；新机 IPv6 可达性<b>未取证</b>（旧 hub 的 v6 是坏的，见 V0.19）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="1405" y="852" width="470" height="160" rx="10" fill="#ffffff" stroke="#f0d9c8" stroke-width="1.2"/>
+  <foreignObject x="1405" y="852" width="470" height="160">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 18px">
+      <p class="bt small" style="color:#c2410c">frps 0.71.0</p>
+      <p class="bi">控制口 <span class="cd">tunnel.mrrc.vlsc.net:8989</span>（token+TLS，<span class="cd">tls.force</span>）</p>
+      <p class="bi">代理端口<b>只绑 127.0.0.1</b>（frp 默认 0.0.0.0 是踩过的坑）</p>
+      <p class="tiny" style="margin:0"><span class="cd">allowPorts 18800–18999</span>；门户分配池 <span class="cd">18802–18999</span></p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="1895" y="852" width="470" height="160" rx="10" fill="#ffffff" stroke="#f0d9c8" stroke-width="1.2"/>
+  <foreignObject x="1895" y="852" width="470" height="160">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:12px 18px">
+      <p class="bt small" style="color:#c2410c">注册表 + 30 s 路由 timer</p>
+      <p class="bi"><span class="cd">instances.tsv</span> 是唯一权威；<span class="cd">gen_hub_routes.py</span> 生成 map 与信任包</p>
+      <p class="bi" style="margin:0"><span class="cd">mrrc-hub-routes.timer</span>（root）哈希比对，<b>真变了才</b> <span class="cd">nginx -t</span> + reload</p>
+    </div>
+  </foreignObject>
+</g>
+<text x="1640" y="1052" font-size="16" fill="#9a3412" text-anchor="middle">数据路径：浏览器 <tspan fill="#ea6a12" font-weight="700">→</tspan> nginx :443 <tspan fill="#ea6a12" font-weight="700">→</tspan> 127.0.0.1:188xx <tspan fill="#ea6a12" font-weight="700">→</tspan> frps 隧道 <tspan fill="#ea6a12" font-weight="700">→</tspan> frpc <tspan fill="#ea6a12" font-weight="700">→</tspan> 实例 :8888</text>
+<rect x="915" y="1070" width="1450" height="44" rx="8" fill="#eef1f5" stroke="#d7dce3"/>
+<text x="1640" y="1098" font-size="15" fill="#374151" text-anchor="middle">as-built 存储：文件（instances.tsv / portal.json / 追加式审计）+ nginx 访问日志（只记路径、不记查询串，AD-H07）</text>
+
+<!-- ═════════ 中列：证书与信任横切 ═════════ -->
+<rect x="890" y="1150" width="1500" height="112" rx="14" fill="#f4f0ff" stroke="#b9a6ee" stroke-width="1.6" filter="url(#shs)"/>
+<text x="1640" y="1184" font-size="19" font-weight="700" fill="#6d28d9" text-anchor="middle">② 证书与信任（横切 · as-built）</text>
+<rect x="1782" y="1166" width="76" height="26" rx="13" fill="#e9f8f1" stroke="#7fd0ae"/><text x="1820" y="1184" font-size="13" font-weight="700" fill="#047857" text-anchor="middle">已运行</text>
+<text x="1640" y="1214" font-size="15" fill="#4c3a8c" text-anchor="middle">入口：certbot DNS-01（自建阿里云 hook）签 *.mrrc.vlsc.net 通配 + 裸域 · 每日 08:00 cron 续期 + &lt;14 天告警 · deploy-hook 装到 /etc/mrrc-hub/tls/ 并 reload · 同机之后零跨机证书同步</text>
+<text x="1640" y="1242" font-size="15" fill="#4c3a8c" text-anchor="middle">hub → 实例：实例自签证书（CN=&lt;标签&gt;.mrrc.vlsc.net，私钥永不出机）→ POST /enroll 登记公钥 → trust-bundle.pem 钉住 → nginx proxy_ssl_name $mrrc_tls_name 逐实例校验，校验始终开着（NFR-H021/H031）</text>
+
+<!-- ═════════ 中列：控制面（目标态） ═════════ -->
+<rect x="890" y="1286" width="1500" height="380" rx="14" fill="#e8f0fe" stroke="#9dbcf7" stroke-width="1.6" stroke-dasharray="9 6" filter="url(#shs)"/>
+<text x="1640" y="1326" font-size="21" font-weight="700" fill="#1d4ed8" text-anchor="middle">③ Fleet 控制面（目标态 · 无状态服务、状态外置）</text>
+<g filter="url(#shs)">
+  <rect x="915" y="1346" width="470" height="126" rx="10" fill="#ffffff" stroke="#dbe4f0" stroke-width="1.2"/>
+  <foreignObject x="915" y="1346" width="470" height="126">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:11px 18px">
+      <p class="bt small" style="color:#1d4ed8">Portal / IAM / ACL</p>
+      <p class="bi">呼号注册四步（规范化→查重→核验→分配）+ 令牌交付 / <span class="cd">/status</span> / <span class="cd">/claim</span> / <span class="cd">/enroll</span><span class="tag live">已实现</span></p>
+      <p class="tiny" style="margin:0">成员授权 / MFA / 配额 <span class="tag p2">阶段 2</span></p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)" class="dashbox">
+  <rect x="1405" y="1346" width="470" height="126" rx="10" fill="#fbfcfe" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="7 5"/>
+  <foreignObject x="1405" y="1346" width="470" height="126">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:11px 18px">
+      <p class="bt small">Fleet Registry 服务化 <span class="tag p2">阶段 2</span></p>
+      <p class="bi">心跳续期归属映射 · 在线识别 ≤45 s</p>
+      <p class="tiny" style="margin:0">as-built 为文件注册表（instances.tsv）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)" class="dashbox">
+  <rect x="1895" y="1346" width="470" height="126" rx="10" fill="#fbfcfe" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="7 5"/>
+  <foreignObject x="1895" y="1346" width="470" height="126">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:11px 18px">
+      <p class="bt small">Ticket / Policy <span class="tag p2">阶段 2</span></p>
+      <p class="bi">一次性 nonce ≤60 s · 配额</p>
+      <p class="tiny" style="margin:0">as-built 为 host-only Cookie 会话（凭据不进 URL）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)" class="dashbox">
+  <rect x="915" y="1486" width="470" height="112" rx="10" fill="#fbfcfe" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="7 5"/>
+  <foreignObject x="915" y="1486" width="470" height="112">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:11px 18px">
+      <p class="bt small">Operator Lease <span class="tag p2">阶段 2</span></p>
+      <p class="bi">PTT 单写租约 · 排队/降级/TTL</p>
+      <p class="tiny" style="margin:0">as-built 由实例侧仲裁谁在发射</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)" class="dashbox">
+  <rect x="1405" y="1486" width="470" height="112" rx="10" fill="#fbfcfe" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="7 5"/>
+  <foreignObject x="1405" y="1486" width="470" height="112">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:11px 18px">
+      <p class="bt small">OTA / Diagnostics <span class="tag p3">阶段 3</span></p>
+      <p class="bi">灰度签名升级 · 限时诊断</p>
+      <p class="tiny" style="margin:0">复用 upgrade_core / support_bundle（AD-H13）</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)" class="dashbox">
+  <rect x="1895" y="1486" width="470" height="112" rx="10" fill="#fbfcfe" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="7 5"/>
+  <foreignObject x="1895" y="1486" width="470" height="112">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:11px 18px">
+      <p class="bt small">Observability / Audit <span class="tag p3">阶段 3</span></p>
+      <p class="bi">在线率 / 流量 / 登录 / PTT 审计</p>
+      <p class="tiny" style="margin:0">as-built 为日志 + 会话并发遥测端点</p>
+    </div>
+  </foreignObject>
+</g>
+<rect x="915" y="1610" width="1450" height="44" rx="8" fill="#fbfcfe" stroke="#94a3b8" stroke-dasharray="7 5"/>
+<text x="1640" y="1638" font-size="15" fill="#6b7280" text-anchor="middle">目标态存储：Redis（会话/租约/节点映射）· RDS（实例/用户/ACL/审计）· OSS/CDN（OTA）· SLS/CloudMonitor</text>
+
+<!-- ═════════ 右列盒子 ═════════ -->
+<g filter="url(#shs)">
+  <rect x="2485" y="430" width="620" height="150" rx="12" fill="#ffffff" stroke="#cdeadd" stroke-width="1.3"/>
+  <foreignObject x="2485" y="430" width="620" height="150">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:14px 20px">
+      <p class="bt">Owner / Fleet Admin</p>
+      <p class="bi">呼号注册与撤销、注册表维护<span class="tag live">已运行</span>（Portal <span class="cd">/admin</span> + 运维令牌）</p>
+      <p class="bi">授予后路由与信任包由 <b>30 s timer 自动</b>重生成并 reload（V0.17 起不再手工）</p>
+      <p class="tiny" style="margin:0">成员授权/配额/OTA 编排 <span class="tag p2">阶段 2</span></p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="2485" y="600" width="620" height="140" rx="12" fill="#ffffff" stroke="#cdeadd" stroke-width="1.3"/>
+  <foreignObject x="2485" y="600" width="620" height="140">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:14px 20px">
+      <p class="bt">Operator（单写）</p>
+      <p class="bi"><b>主口令</b>登录 <span class="cd">/</span>：控制台 · CAT · PTT · TX/RX 音频 · 录制</p>
+      <p class="tiny" style="margin:0">as-built：多人同登时发射权由实例侧仲裁；目标态：operator 租约排队</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="2485" y="760" width="620" height="140" rx="12" fill="#ffffff" stroke="#cdeadd" stroke-width="1.3"/>
+  <foreignObject x="2485" y="760" width="620" height="140">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:14px 20px">
+      <p class="bt">Listener（多读）<span class="tag live">已运行</span></p>
+      <p class="bi"><b>监听口令</b>登录 <span class="cd">/listen</span>：RX 音频 · 频谱/瀑布 · 调频/换模式</p>
+      <p class="tiny" style="margin:0">不能发射是<b>服务端强制</b>（TX 通道 4003、REST 非 GET 403），不是藏按钮</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="2485" y="920" width="620" height="340" rx="12" fill="#ffffff" stroke="#cdeadd" stroke-width="1.3"/>
+  <foreignObject x="2485" y="920" width="620" height="340">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:14px 20px">
+      <p class="bt">开通与访问链路（as-built 六步）</p>
+      <p class="bi tight">1. <span class="cd">POST /apply</span> —— 呼号核验（Club Log 27 万条同源库）；应答交付 <b>request_token</b>（只此一次）</p>
+      <p class="bi tight">2. 应用凭令牌轮询 <span class="cd">POST /status</span>；网页申请走 <span class="cd">POST /claim</span>（运维给口令）</p>
+      <p class="bi tight">3. 运维在 <span class="cd">/admin</span>：核验通过 → 分配入口（注册表一行：裸呼号 + 188xx）—— <b>唯一手工步骤</b></p>
+      <p class="bi tight">4. 应用自动接入：签自签证书 → <span class="cd">POST /enroll</span> 登记公钥 → 装常驻隧道（v1.24.0 起租户<b>不敲命令</b>）</p>
+      <p class="bi tight">5. 浏览器开 <span class="cd">https://&lt;呼号&gt;.mrrc.vlsc.net/</span>（443）</p>
+      <p class="bi tight">6. 主/监听口令登录（host-only Cookie，凭据不进 URL）</p>
+      <p class="tiny" style="margin:0">目标态追加：Portal 签发一次性 ticket → Access → 归属 Tunnel Node → 实例</p>
+    </div>
+  </foreignObject>
+</g>
+<g filter="url(#shs)">
+  <rect x="2485" y="1280" width="620" height="218" rx="12" fill="#fff1e7" stroke="#f2a077" stroke-width="1.4"/>
+  <foreignObject x="2485" y="1280" width="620" height="218">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="padding:14px 20px">
+      <p class="bt" style="color:#c2410c">PTT 安全不变量（横切）</p>
+      <p class="bi">Hub 与隧道<b>永远不是 PTT 写者</b>：只发关流通知（TX_ABORT ≠ TX0）</p>
+      <p class="bi">断线/半开/拔网线：实例 Layer 0–8 + 远程会话活性层强制回 RX</p>
+      <p class="bi" style="margin:0">逐跳校验证书：关掉校验（哪怕"先跑通"）即视为缺陷（NFR-H021）</p>
+    </div>
+  </foreignObject>
+</g>
+
+<!-- ═════════ 连接箭头 ═════════ -->
+<!-- 用户 → 入口层（绿色实线，走顶部走廊） -->
+<path d="M 2795 320 V 302 H 1640 V 424" fill="none" stroke="#0d9f6e" stroke-width="3" marker-end="url(#ag)"/>
+<text x="2210" y="292" font-size="15" font-weight="600" fill="#0d9f6e" text-anchor="middle">HTTPS/WSS · 呼号子域（唯一入口 · 443）</text>
+<!-- 门户 → Owner/Fleet Admin（绿色虚线） -->
+<path d="M 2390 470 H 2481" fill="none" stroke="#0d9f6e" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ag)"/>
+<text x="2438" y="560" font-size="14.5" font-weight="600" fill="#0d9f6e" text-anchor="middle" transform="rotate(-90 2438 560)">自助申请 · 审批在 /admin</text>
+<!-- 实例隧道 ⇄ 数据面（橙色双向：隧道本就双向承载） -->
+<path d="M 794 800 H 886" fill="none" stroke="#ea6a12" stroke-width="3" marker-start="url(#ao)" marker-end="url(#ao)"/>
+<text x="840" y="794" font-size="14.5" font-weight="600" fill="#ea6a12" text-anchor="middle" transform="rotate(-90 840 794)">出站隧道 ⇄ 回程 · token+TLS · 客户侧零入站 · nginx 校验实例证书</text>
+<!-- 入口层 → 数据面（橙色短箭头） -->
+<path d="M 1640 760 V 786" fill="none" stroke="#ea6a12" stroke-width="3" marker-end="url(#ao)"/>
+<text x="1662" y="782" font-size="14.5" font-weight="600" fill="#ea6a12">呼号 → map → 188xx</text>
+<!-- 控制面 → 数据面（蓝色虚线，走中列右边距走廊，避开证书横切条） -->
+<path d="M 2390 1480 H 2406 V 1118 H 2394" fill="none" stroke="#2563eb" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ab)"/>
+<text x="2406" y="1300" font-size="14.5" font-weight="600" fill="#2563eb" text-anchor="middle" transform="rotate(-90 2406 1300)">目录/策略 · 心跳（目标态服务化）</text>
+<!-- 数据面 → Listener（绿色虚线） -->
+<path d="M 2392 955 C 2440 955, 2440 830, 2481 830" fill="none" stroke="#0d9f6e" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ag)"/>
+<text x="2424" y="900" font-size="14.5" font-weight="600" fill="#0d9f6e" text-anchor="middle" transform="rotate(-90 2424 900)">RX 音频/频谱 · Listener 多读</text>
+
+<!-- ═════════ 页脚 ═════════ -->
+<line x1="80" y1="1710" x2="3120" y2="1710" stroke="#dfe5ec" stroke-width="1.5"/>
+<text x="80" y="1750" font-size="17" fill="#374151"><tspan font-weight="700">MVP 必修项状态：</tspan>I-H6 / AD-H07 / AD-H09 已实现（mrrc_modern V2.62/V2.63）· 通配真证书已实现（DNS-01）· <tspan font-weight="700">入口已在 443，R-H13「备案后回 443」消退（存史）</tspan> · 剩余：一机一证迁移（bg1sb 仍指旧证书名）、Operator 租约、成员管理</text>
+<text x="80" y="1786" font-size="17" fill="#374151"><tspan font-weight="700">实测：</tspan>公网往返 118–168 ms 是<tspan font-weight="700">旧 hub 时期</tspan>的读数，迁港后未复测 · 频谱 1701 B/帧 × 30 fps ≈ 408 kbps，占单会话 ~86%（杠杆在频谱不在音频）· 登录限流 5 次/300 s（隧道方式下退化为全局桶，已接受）</text>
+<text x="80" y="1822" font-size="17" fill="#374151"><tspan font-weight="700">容量基线（规划值，未压测）：</tspan>200 注册实例 / 500 在线隧道 / 1000 活跃会话 / 5000 WebSocket / 出口 200 Mbps 起步 —— I-H1/I-H2 采集后修订</text>
+
+<g font-size="16" fill="#374151">
+  <rect x="80" y="1860" width="26" height="18" rx="4" fill="#fff8ec" stroke="#edaf54" stroke-width="1.4"/><text x="116" y="1875">客户内网</text>
+  <rect x="260" y="1860" width="26" height="18" rx="4" fill="#e8f0fe" stroke="#9dbcf7" stroke-width="1.4"/><text x="296" y="1875">入口 / 控制面</text>
+  <rect x="470" y="1860" width="26" height="18" rx="4" fill="#fff1e7" stroke="#f2a077" stroke-width="1.4"/><text x="506" y="1875">接入 / 数据面</text>
+  <rect x="680" y="1860" width="26" height="18" rx="4" fill="#f4f0ff" stroke="#b9a6ee" stroke-width="1.4"/><text x="716" y="1875">证书横切</text>
+  <rect x="860" y="1860" width="26" height="18" rx="4" fill="#eafaf2" stroke="#86d3b0" stroke-width="1.4"/><text x="896" y="1875">用户 / 角色</text>
+  <rect x="1060" y="1860" width="26" height="18" rx="4" fill="#fbfcfe" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="5 4"/><text x="1096" y="1875">目标态（阶段 2/3）</text>
+  <path d="M 1330 1869 h 44" stroke="#ea6a12" stroke-width="3" marker-start="url(#ao)" marker-end="url(#ao)"/><text x="1390" y="1875">as-built 隧道/数据路径（双向）</text>
+  <path d="M 1620 1869 h 44" stroke="#0d9f6e" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ag)"/><text x="1680" y="1875">用户会话 / 注册流</text>
+  <path d="M 1880 1869 h 44" stroke="#2563eb" stroke-width="2.6" stroke-dasharray="8 6" marker-end="url(#ab)"/><text x="1940" y="1875">控制面目标态耦合</text>
+</g>
+<text x="3120" y="1960" font-size="15" fill="#94a3b8" text-anchor="end">as-built 校验版 2026-10-02（V0.21 一台机器）· 对 2026-10-01「两条路」版本的逐条订正见同目录 HTML 附录</text>
+</svg>

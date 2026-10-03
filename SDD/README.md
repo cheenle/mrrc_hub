@@ -24,10 +24,10 @@
 | 2 | Business Direction | [02-business-direction.md](02-business-direction.md) |
 | 3 | Project Definition（scope, SC-H1…SC-H9） | [03-project-definition.md](03-project-definition.md) |
 | 4 | System Context（actors, interfaces, data flows） | [04-system-context.md](04-system-context.md) |
-| 5 | Non-Functional Requirements（NFR-H001…NFR-H018） | [05-non-functional-requirements.md](05-non-functional-requirements.md) |
+| 5 | Non-Functional Requirements（NFR-H001…NFR-H033） | [05-non-functional-requirements.md](05-non-functional-requirements.md) |
 | 6 | Use Case Model（UC-H01…UC-H09） | [06-use-case-model.md](06-use-case-model.md) |
 | 7 | Subject Area Model（entities, state ownership） | [07-subject-area-model.md](07-subject-area-model.md) |
-| 8 | Architecture Decisions（AD-H01…AD-H14） | [08-architecture-decisions.md](08-architecture-decisions.md) |
+| 8 | Architecture Decisions（AD-H01…AD-H15，另有卷首未编号的 V0.21 决定） | [08-architecture-decisions.md](08-architecture-decisions.md) |
 | 9 | Architecture Overview（pipelines, routing, failover） | [09-architecture-overview.md](09-architecture-overview.md) |
 | 10 | Service Model（Portal/REST, Registry, Tunnel, Ticket, Lease） | [10-service-model.md](10-service-model.md) |
 | 11 | Component Model | [11-component-model.md](11-component-model.md) |
@@ -41,9 +41,9 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.20 |
+| SDD Version | V0.21 |
 | Baseline Date | 2026-10-01 |
-| Status | **阶段 1 通路已在真实公网跑通**（实例入口 → 隧道 → 实例；早期记录的 `bg1sb.mrrc.vlsc.net:9988` 现已无端口，见 V0.21）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL：**hub 侧已实现**（日志不记 query）；**实例侧在 mrrc_modern feat/hub 已改纯 Cookie 传递（C2），未合并 main**，Stable v1.21.0 仍拼 `?token=`（11 §11.3 对账注）；**呼号注册已上线公网自助**（`https://portal.mrrc.vlsc.net`，见 §12.9）；**实例证书链已闭环并在真实租户机上验证（签发 → 登记 200 → 信任包 → 入口可达）。剩余：隧道层 PTT 半开释放（MVP，I-H6 open）、Operator 租约、设备 mTLS、安装包分发、ICP 备案 |
+| Status | **阶段 1 通路已在真实公网跑通**（实例入口 → 隧道 → 实例；早期记录的 `bg1sb.mrrc.vlsc.net:9988` 现已无端口，见 V0.21）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL：**hub 侧已实现**（日志不记 query）；**实例侧在 mrrc_modern feat/hub 已改纯 Cookie 传递（C2），未合并 main**，Stable v1.21.0 仍拼 `?token=`（11 §11.3 对账注）；**呼号注册已上线公网自助**（`https://portal.mrrc.vlsc.net`，见 §12.9）；**实例证书链已闭环并在真实租户机上验证**（签发 → 登记 200 → 信任包 → 入口可达）。剩余：隧道层 PTT 半开释放（MVP，I-H6 open）、Operator 租约、设备 mTLS、安装包分发。**ICP 备案不再是剩余项**：V0.21 起入口已在 443、无明文跳转口（R-H13 消退，见 13 §13.2） |
 | Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
 | 客户侧前提 | 实例仅需出站 TCP **8989**（隧道口）；无公网 IP、无端口映射、无 UPnP（SC-H1）。**用户侧只需能出站 443**（入口、门户、站点都在 443）—— 见 NFR-H001 / R-H12 |
 | 入口规划 | **一条路**：`https://<呼号>.mrrc.vlsc.net/`（443 + 通配真证书，与站点、门户同机同端口，V0.21）。隧道控制 `tunnel.mrrc.vlsc.net:8989` 是唯一保留的独立端口；早期的「9988 主路 + 边缘退化路」两级方案已删除 |
@@ -121,6 +121,6 @@ MRRC Fleet Agent（客户内网）
 | **组件模型里“目标态 vs 在跑的”对照** | `11` **§11.1 as-built 指认**（逐行给出子集 vs 目标态） |
 | **服务模型里“目标态契约 vs 现网路径”** | `10` **§10.1 as-built 指认**（实跑四端点与两种传令方式） |
 | **实例开通链 / 安装器**（自取 frpc 并校验哈希、三平台常驻） | `12-operational-model.md` **§12.8 「实例开通链」** |
-| as-built 总体架构图（含对目标态旧图的逐条订正） | `../docs/architecture-2026-10-01-as-built.svg`（同目录 PNG / HTML） |
+| as-built 总体架构图（含对 2026-10-01「两条路」旧图的逐条订正） | `../docs/architecture-2026-10-02-as-built.svg`（同目录 PNG / HTML） |
 | **面向用户的文档站**（5 页：概览/接入/使用/排障 + 单独一页设计） | `../website/`（先看 `../website/README.md` 的事实源映射与发布前复验清单） |
 | **部署脚本与现网的漂移**（重跑会让现网退化） | `../deploy/README.md` 的「⚠️ 脚本与现网漂移」 |

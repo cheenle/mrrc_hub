@@ -72,7 +72,7 @@
 ## 10.8 实况指认（as-built，2026-09-30）
 
 **已上线的服务面**：隧道网关（frps 0.71.0，控制口 8989，代理端口显式绑回环）、
-入口 nginx（呼号通配 vhost + 海外边缘路径反代两条入口，Let's Encrypt 真证书）、
+入口 nginx（**一条**呼号通配 vhost，443，Let's Encrypt 真证书；海外边缘路径反代已随 V0.21 删除）、
 注册表与路由生成（`/etc/mrrc-hub/instances.tsv` ＋ `gen_hub_routes.py`）、
 证书服务（DNS-01，自建 hook，每日 8:00 cron 自动续期）。
 

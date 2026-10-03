@@ -2,7 +2,7 @@
 
 > **状态（2026-10-01 复核）：阶段 1 已部署并在真实公网验证通过。** 本目录的脚本是那一次的落地工具。
 > 下面「未部署」的叙述是当时的现场记录，保留供追溯。
-> **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」—— 其中两条会让现网退化。**
+> **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」—— 其中 X1 会让现网退化（X2/X3 已随 V0.21 失去对象，存史）。**
 
 ## 现行形态（V0.21，2026-10-02）—— 一台机器，只留 8989
 
@@ -20,19 +20,22 @@
 **防火墙只需要放行 8989 与 443**（`:9988` / `:8899` 两个监听已取消）。
 
 
-## ⚠️ 脚本与现网漂移（2026-10-01 取证）
+## ⚠️ 脚本与现网漂移（2026-10-01 取证，2026-10-02 按 V0.21 复核）
 
-以下两处**仓库脚本落后于现网**。重跑对应脚本会让现网退化，**务必先对齐再跑**：
+**仓库脚本落后于现网**。2026-10-01 记的是三条；V0.21 删掉海外边缘那条反代路径之后，**X2 / X3 已失去对象**
+（保留为记录，不删行），X1 里原先的三项倒退有两项已对齐、只剩两处仍是活的漂移。
+重跑 `deploy_hub_routes.sh` 仍会让现网退化，**务必先对齐再跑**：
 
 | # | 漂移 | 后果 |
 | --- | --- | --- |
-| **X1** | `deploy_hub_routes.sh` 生成**两个** server block（`listen 8899;` 明文 + 301、`listen 9988 ssl`），而现网是**一个** block、且 `8899` 已是 **TLS**；且它生成的 `proxy_ssl_name` 写死 `radio.vlsc.net`、信任源写死系统 CA，**不认识 `$mrrc_tls_name` 与 `trust-bundle.pem`** | 重跑会**三重倒退**：① 8899 从 TLS 退回明文 → 境内被改写（R-H13 的失效模式）；② 抹掉**逐实例证书校验**，退回"所有实例共用 `radio.vlsc.net`"；③ 抹掉**信任包**，自签实例证书立即 502。另：脚本头部注释仍写 "currently self-signed"，现网已是真 Let's Encrypt |
-| **X3** | （2026-10-02）边缘 nginx 里指向 hub 的两处 `proxy_pass`（`/mrrc_modern/BG1SB/` 与 `/mrrc_portal/`）现为 **hub 的 IPv4 字面量** `8.160.161.80`，不是脚本里的主机名 | 主机名 + hub 的 AAAA ⇒ nginx 选中不可达的 IPv6，任何 reload 都会把边缘路径打黑（实测 0/4；见 SDD/12 §12.8 排障增补）。hub 的 v6 验通后可改成 upstream 双地址（v6 优先 + 3 s 退 v4）；**别在没重测前把这两行改回主机名** |
-| **X2** | `deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | 重跑会把现网形态降级为 302 或子域代理，丢掉"标准端口 + 真证书 + 前缀透明"三项收益。www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的 |
+| **X1**（**仍是活的**） | **已对齐的两项**：脚本现在只生成**一个** `listen 443 ssl` 的 vhost（`8899` / `9988` 两个口已随 V0.21 取消，无处可退），并且已经写入 `proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem`。**仍漂移的两处**（读脚本取证）：① `proxy_ssl_name` 用的是写死的 `${MRRC_UPSTREAM_SSL_NAME:-radio.vlsc.net}`（第 24、88 行），**不引用 `gen_hub_routes.py` 生成的 `$mrrc_tls_name`**；② vhost 头部注释仍写 `currently self-signed: a trusted one needs DNS-01`（第 58–59 行），而现网是真 Let's Encrypt（DNS-01 已跑通并每日续期） | 重跑会把逐实例的**校验名压平成 `radio.vlsc.net`** ⇒ 凡按自己入口名 `<标签>.mrrc.vlsc.net` 签证的实例立即 502（`bg1sb` 的第三列本来就写着 `radio.vlsc.net`，反而不受影响）。信任包这一项不再倒退；`$mrrc_tls_name` 的 map 仍会被生成（脚本第 49 行会跑生成器），只是 vhost 不再引用它。② 属注释误导，不影响运行 |
+| **X3**（存史，**已失去对象**） | 原漂移：边缘 nginx 里指向 hub 的两处 `proxy_pass`（`/mrrc_modern/BG1SB/` 与 `/mrrc_portal/`）为 **hub 的 IPv4 字面量** `8.160.161.80`，不是脚本里的主机名 | **V0.21 删除了海外边缘那条反代路径**，这两处 `proxy_pass` 连同所在的 vhost 段一起不再存在 ⇒ 本条今天没有对象。**留档理由**：根因（裸主机名 + AAAA ⇒ nginx 无 `resolver` 时只在启动解析一次，于是选中不可达的 IPv6）与旧 hub 的 v6 不可达都还在记录里，而**新机器的 IPv6 可达性未取证**（搬迁后没人复测）；将来若再引入「主机名式 upstream」，同一条会再咬一次（见 `SDD/12 §12.8` 排障增补、`SDD/14` V0.19） |
+| **X2**（存史，**已失去对象**） | 原漂移：`deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | **V0.21 删除了边缘路径** ⇒ 现网已没有那段手工配置可供降级，整个脚本也就没有落点（脚本仍在仓内，两种模式的代码未动，可复核；当时 www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的）。**留档理由**：那段 `path proxy` 从来没有脚本能复现 —— 将来若再需要「另一台机器上的路径入口」，得先把它写回脚本 |
 
-> **X1 现在是两者中最危险的**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
-> `proxy_ssl_name $mrrc_tls_name`）是在脚本之外手工落的。在那套校验写回脚本之前，
-> **不要重跑 `deploy_hub_routes.sh`**。参见 `SDD/12 §12.8 「实例证书链」`。
+> **X1 现在是唯一需要防的一条**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
+> `proxy_ssl_name $mrrc_tls_name`）里，信任包那一半已经写回脚本，**校验名那一半仍是手工落的**。
+> 在 `proxy_ssl_name $mrrc_tls_name` 写回脚本之前，**不要重跑 `deploy_hub_routes.sh`**。
+> 参见 `SDD/12 §12.8 「实例证书链」`。
 
 **处置**：只记录，**不改脚本**（改部署脚本的风险与验证成本超出文档任务范围）。对齐留作独立变更。
 

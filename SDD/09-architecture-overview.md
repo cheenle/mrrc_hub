@@ -91,14 +91,12 @@ MVP 的代理必须**对 5 个 WebSocket 端点与静态资源完全透明**：
 
 **`:9988` 与 `:8899` 两个监听已取消**（V0.21）；海外边缘那条反代路径整体删除。
 尚未落地的是设备 mTLS 与 Operator 租约（阶段 2）。
-
-尚未落地的是管理 Portal、设备 mTLS 与 Operator 租约（阶段 2）。
-逐项事实（三台主机、两个入口、证书全流程、运维命令、已知退化）见
+逐项事实（一台机器、一个入口、证书全流程、运维命令、已知退化）见
 `12-operational-model.md` §12.8 —— 与本章不一致时以 §12.8 为准并回改本章。
 
-**物理架构图**（机器/进程/文件/端口/cron 一级，2026-10-01 现场读数）：
-[`../docs/physical-architecture-2026-10-01.svg`](../docs/physical-architecture-2026-10-01.svg)（同目录 PNG 为渲染件）。
+**物理架构图**（机器/进程/文件/端口/cron 一级，按 V0.21 记录重绘；新主机上的逐项现场读数**尚未全部复测**）：
+[`../docs/physical-architecture-2026-10-02.svg`](../docs/physical-architecture-2026-10-02.svg)（同目录 PNG 为渲染件）。
 
-**as-built 校验版总体架构图**（2026-10-01，含对 2026-09-30 目标态旧图的逐条订正记录）：
-源为 [`../docs/architecture-2026-10-01-as-built.svg`](../docs/architecture-2026-10-01-as-built.svg)
+**as-built 校验版总体架构图**（2026-10-02，含对 2026-10-01「两条路」版本的逐条订正记录）：
+源为 [`../docs/architecture-2026-10-02-as-built.svg`](../docs/architecture-2026-10-02-as-built.svg)
 （同目录 PNG 为其渲染件，HTML 为校验记录页；改图改 SVG 后重渲染）。

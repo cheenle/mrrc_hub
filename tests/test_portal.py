@@ -9,11 +9,16 @@
     所以防线只能放在"核验之后"（callsign.py 顶部有完整论证）
  ③ 查重冲突绝不静默覆盖（走申诉/转移），以及撤销会真的移除入口
 """
+import contextlib
 import json
+import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,7 +29,9 @@ sys.path.insert(0, str(ROOT))
 
 from portal import callsign as cs            # noqa: E402
 from portal import registry as reg           # noqa: E402
-from portal.app import Portal, make_handler  # noqa: E402
+from portal.app import (TUNNEL_DOWN, TUNNEL_HOLLOW, TUNNEL_PLAIN_HTTP,  # noqa: E402
+                        TUNNEL_SERVING, Portal, _tunnel_online, _tunnel_state,
+                        _tunnel_states, make_handler)
 from portal.store import Store               # noqa: E402
 from portal.verify import (CallsignListVerifier, ClubLogVerifier,  # noqa: E402
                            ManualVerifier, VerificationOutcome)
@@ -442,14 +449,14 @@ def test_claim_adopts_an_approved_application():
 
         try:
             portal.apply("bg8aaa", product="mrrc_modern")
-            secret = portal.store.get("BG8AAA").enroll_secret
+            secret = stored(portal.store, "BG8AAA").enroll_secret
             code, _ = post({"callsign": "BG8AAA", "secret": secret})
             check(code == 403, "未批准时认领 → 403")
 
             portal.store.mark_verified("BG8AAA", "测试")
             granted = portal.grant("BG8AAA")          # Portal.grant 只收呼号：label/端口由它分配
             label, port = granted["label"], granted["port"]
-            secret = portal.store.get("BG8AAA").enroll_secret
+            secret = stored(portal.store, "BG8AAA").enroll_secret
 
             code, _ = post({"callsign": "BG8AAA", "secret": "wrong"})
             check(code == 403, "错口令认领 → 403")
@@ -464,6 +471,142 @@ def test_claim_adopts_an_approved_application():
             httpd.shutdown()
 
 
+def _probe_cert(tmp: Path, cn: str):
+    """夹具证书。用 -config 而不是 -addext（macOS 自带的是 LibreSSL，没有 -addext）。"""
+    cfg = tmp / "probe.cnf"
+    cfg.write_text(
+        "[req]\ndistinguished_name=dn\nx509_extensions=v3\nprompt=no\n"
+        f"[dn]\nCN={cn}\n[v3]\nsubjectAltName=DNS:{cn}\nbasicConstraints=critical,CA:FALSE\n",
+        encoding="utf-8")
+    cert, key = tmp / "probe.pem", tmp / "probe.key"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                    "-keyout", str(key), "-out", str(cert), "-config", str(cfg)],
+                   capture_output=True, text=True)
+    return (cert, key) if cert.exists() and key.exists() else None
+
+
+def _start_stub(kind: str, cert: Path | None = None, key: Path | None = None):
+    """在临时端口上起一个假后端，返回 (port, stop)。
+
+    ``tls``       完成 TLS 握手并回一行 HTTP 状态（健康实例，如 bg9aaa）
+    ``plain``     只说明文 HTTP（实例没加载证书 ⇒ nginx 以 https 反代必 502）
+    ``hollow``    接受 TCP 连接后**一个字节也不回**就关 —— 这正是 frps 在隧道另一端
+                  没有程序时的行为（bg7zhs 于 2026-10-03 的实测状态）
+    ``blackhole`` 接受连接但不回应也不关（探测只能等到超时），用来验证并发
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    port = srv.getsockname()[1]
+    stop = threading.Event()
+    ctx = None
+    if kind == "tls":
+        if cert is None or key is None:
+            raise ValueError("kind='tls' 需要 cert 与 key")
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert, key)
+
+    def loop():
+        srv.settimeout(0.2)
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            with contextlib.closing(conn):
+                if kind == "hollow":
+                    continue                              # 不给一个字节，直接关
+                if kind == "blackhole":
+                    time.sleep(30)                        # 挂着，让探测去超时
+                    continue
+                try:
+                    talk = ctx.wrap_socket(conn, server_side=True) if ctx else conn
+                except OSError:
+                    continue                              # 对端说了明文，TLS 口不接
+                with contextlib.closing(talk):
+                    try:
+                        talk.settimeout(2.0)
+                        talk.recv(512)                     # 吃掉请求
+                        talk.sendall(b"HTTP/1.1 401 Unauthorized\r\n"
+                                     b"Content-Length: 0\r\nConnection: close\r\n\r\n")
+                    except OSError:
+                        pass
+
+    threading.Thread(target=loop, daemon=True).start()
+    return port, (lambda: (stop.set(), srv.close()))
+
+
+def test_tunnel_probe_answers_whether_the_instance_serves():
+    """「在线」必须意味着**真的在服务**，而不是「frpc 注册过代理」。
+
+    旧判据只做一次 TCP 连接：frps 是在 hub 本机接受连接的，只要 frpc 注册过代理就永远
+    连得上 —— 于是 bg7zhs 在隧道另一端空着的时候仍然显示「在线」，而每个访客拿到 502。
+    这里把四种后端形态分开钉住，因为**它们的修法完全不同**。
+    """
+    if not shutil.which("openssl"):
+        print("  提示: 无 openssl，跳过隧道探测用例"); return
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        pair = _probe_cert(tmp, "probe.mrrc.vlsc.net")
+        check(pair is not None, "夹具证书已生成")
+        if pair is None:
+            return
+        cert, key = pair
+        tls_port, stop_tls = _start_stub("tls", cert, key)
+        plain_port, stop_plain = _start_stub("plain")
+        hollow_port, stop_hollow = _start_stub("hollow")
+        try:
+            state, detail = _tunnel_state(tls_port, "probe", timeout=3.0)
+            check(state == TUNNEL_SERVING, f"TLS+HTTP 应答 ⇒ serving（得到 {state}: {detail}）")
+            check("401" in detail, f"详情带上真实状态行（{detail}）")
+
+            state, detail = _tunnel_state(plain_port, "probe", timeout=3.0)
+            check(state == TUNNEL_PLAIN_HTTP, f"只说明文 HTTP ⇒ plain-http（得到 {state}）")
+            check("https" in detail, f"详情要点明 nginx 是以 https 反代（{detail}）")
+
+            state, detail = _tunnel_state(hollow_port, "probe", timeout=3.0)
+            check(state == TUNNEL_HOLLOW, f"连得上但无应答 ⇒ hollow（得到 {state}）")
+
+            # 回归守卫：这就是旧代码的假阳性——端口可连，但后面什么都没有。
+            check(_tunnel_online(hollow_port, "probe") is False,
+                  "hollow 不得再被当成在线（旧判据在此假阳性）")
+            check(_tunnel_online(tls_port, "probe") is True, "真正在服务才算在线")
+        finally:
+            stop_tls(); stop_plain(); stop_hollow()
+
+
+def test_tunnel_probe_separates_no_proxy_from_empty_backend():
+    """frpc 根本没跑（端口没人听）与「隧道在、后端空」是两回事，必须分开报。"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    closed_port = s.getsockname()[1]
+    s.close()
+    state, detail = _tunnel_state(closed_port, "probe", timeout=2.0)
+    check(state == TUNNEL_DOWN, f"端口没人听 ⇒ down（得到 {state}）")
+    check("frpc" in detail, f"详情应指向 frpc 未注册代理（{detail}）")
+
+
+def test_tunnel_probe_batch_does_not_serialise_dead_tunnels():
+    """一个黑洞隧道不得把整页拖成串行等待：总览页对每个实例都要探一次。"""
+    stubs = [_start_stub("blackhole") for _ in range(3)]
+    started = time.monotonic()
+    try:
+        states = _tunnel_states([("probe%d" % i, port) for i, (port, _) in enumerate(stubs)],
+                                timeout=0.8)
+    finally:
+        for _, stop in stubs:
+            stop()
+    elapsed = time.monotonic() - started
+    check(set(states) == {port for port, _ in stubs}, "批量探测每个端口都给一个结论")
+    check(all(s == TUNNEL_HOLLOW for s, _ in states.values()),
+          f"黑洞端口均判为 hollow（得到 {[s for s, _ in states.values()]}）")
+    # 串行 = 3 端口 ×（TLS 超时 + 明文超时）≈ 4.8 s；并发则约等于单个的 1.6 s。
+    check(elapsed < 3.5, f"并发探测（实测 {elapsed:.2f}s，串行应 ≥4.8s）")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:
@@ -473,7 +616,7 @@ def main():
         for f in FAILS:
             print("   -", f)
         return 1
-    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门")
+    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门/隧道探测")
     return 0
 
 

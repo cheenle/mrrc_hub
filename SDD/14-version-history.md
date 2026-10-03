@@ -2,6 +2,65 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.23 — 2026-10-03 — 「在线」必须意味着真的在服务：隧道判据从 TCP 可连改为拿到 HTTP 应答
+
+**触发**：bg7zhs 排障。门户总览与实例页判定「隧道在线」的依据是 *hub 回环上该端口能不能 TCP 连上*，
+而 **frps 是在 hub 本机接受连接的** —— 只要 frpc 注册过代理，这个连接就永远成功，与隧道另一端有没有
+程序在服务**完全无关**。bg7zhs 正是这个状态：frpc 控制连接活着（来自 `39.144.70.1`，与 bg1sb/bg9aaa 的
+`120.244.220.52` 不同网段）、frps 在听 `127.0.0.1:18805`、hub 上 `bg7zhs.pem` 已于当天 10:37 签发，
+总览于是显示「在线」；而从 hub 直连 18805，**明文与 TLS 都拿不到一个字节**，每个访客得到 nginx 的 502
+（`error.log`: `peer closed connection in SSL handshake while SSL handshaking to upstream`,
+`upstream: "https://127.0.0.1:18805"`）。对照组 bg9aaa(18803)/bg1sb(18802) 同样的探测分别得到
+TLS 200 + `CN=bg9aaa.mrrc.vlsc.net`（自签）与 TLS 200 + `CN=radio.vlsc.net`（Let's Encrypt）。
+**后果是排障方向被指错**：运维照着「在线」两个字会一路查 nginx 与证书，而真因在租户机器上。
+
+**已做**：
+
+- `_tunnel_state()` 取代布尔判据：完成 TLS 握手并要一次 `/api/health`，**任何 HTTP 状态码都算在服务**
+  （包括 401/404）—— 与 `mrrc_modern/launcher_net.answers()` 同一个判据；那边正是因为把 401 当失败，
+  才让启动器在服务器明明活着的时候去开了另一个协议（v1.24.6「装完黑屏」）。
+- **四种结论而不是两种，因为修法完全不同**：`serving`；`plain-http`（应用起来了但没加载证书，而 nginx
+  以 https 反代并校验上游 ⇒ 访客必 502，即 v1.24.5 黑屏的同一形状）；`hollow`（隧道在、后端空：frpc 在跑
+  但它转发的本地端口上没有程序 —— 应用没起 / `localPort` 与 `MRRC_WEB_PORT` 不一致 / 绑到了别的地址）；
+  `down`（端口没人听 ⇒ frpc 根本没注册代理）。bg7zhs = `hollow`，bh1eih = `down`（无证书、18804 未监听）。
+- **不校验证书**：实例证书是自签的（`CN=<label>.mrrc.vlsc.net`），而 bg1sb 那类老实例用自己的
+  `radio.vlsc.net`（注册表第三列 `tls_name`，且 `Registry.entries()` 只返回 `(label, port)`、第三列被丢掉）。
+  证书名对不对是**另一个**故障模式（nginx 会记校验失败），这里只回答「有没有在服务」。
+- `_tunnel_states()` **并发**探测：最坏情况是每个实例都黑洞（要等到超时），4 个实例串行就是 4×2×timeout，
+  总览页不该为此卡住。实测 3 个黑洞端口：并发 1.6 s、串行 4.82 s。
+- 页面文案跟着判据改：总览不再只给一个数字，而是「注册表实例 N 个，其中**真正在服务** M 个」，并把每个
+  不在服务的实例连**原因**一起列出；实例页状态格用琥珀色区分两类「连得上但用不了」（`plain-http`/`hollow`）
+  与红色的真离线，`title` 悬停给探测详情；脚注从「「在线」= hub 回环上该端口可连接 ⇒ frpc 隧道已建立」
+  改为实测判据，并写明 `hollow` 时该去租户机查哪三件事（应用在不在跑、frpc 的 `localPort` 是否等于
+  `MRRC_WEB_PORT`、`MRRC_WEB_HOST` 是否被改成局域网 IP —— 那就只听那个地址，frpc 拨 127.0.0.1 必然失败）。
+- 测试 16 → **19 组**：用 openssl 造夹具证书（沿用本仓既有的 `-config` 形式，macOS 自带 LibreSSL 没有
+  `-addext`），起四种假后端（`tls`/`plain`/`hollow`/`blackhole`）。**`hollow` 那条是回归守卫**：
+  旧判据在它面前返回 True。**五处变异逐条验证**，每处只打中该打的那条断言：改回旧的 TCP-only 判据 ⇒
+  「hollow 不得再被当成在线」红；批量改回串行 ⇒ 「并发探测（实测 4.82s）」红；明文 HTTP 也算在线 ⇒
+  两条 `plain-http` 断言红；`down` 报成 `hollow`、`hollow` 报成 `down` 两个方向各红一组。
+- 顺带修掉 `tests/test_portal.py` 里两处对 `store.get()` 结果直接取属性的既有告警，改用本文件自己的
+  `stored()` 助手（其 docstring 即「用清晰的失败代替对 None 取属性」）。
+- 顺带订正本卷自身的漂移：`SDD/README` 的 `SDD Version` 停在 **V0.21**，而 V0.22 已经入档
+  （V0.22 条目自称把 README 从 V0.20 改到 V0.21，漏了它自己）。本仓没有文档一致性门禁
+  （`tests/` 只有 `test_portal.py`，不像 `mrrc_modern` 有 `release_check.py` + 版本一致性测试），
+  所以这类漂移只能靠人；本次一并改到 V0.23。
+
+**边界**：
+
+- **未部署**：改动只在仓库里，hub 上跑的 `mrrc-portal` 仍是旧判据（需重启服务才生效）。
+- **证书名不匹配仍不可见**：`plain-http` 与 `hollow` 已可区分，但「实例在服务、只是证书签给了错的名字」
+  会显示为 `serving`，而 nginx 那一跳同样 502。要覆盖它得在探测里比对证书 CN/SAN 与注册表的
+  `tls_name`（并让 `Registry.entries()` 交出第三列）。
+- **frps 侧零可观测性依旧**：`/etc/frp/frps.toml` 没配 `logFile`、没开面板（`webServer`），journald 里
+  只有 systemd 的启停行、**没有任何 frps 应用日志**。本次排障因此只能靠 nginx 错误日志 + 从 hub 直接探测
+  反推，拿不到「工作连接为什么失败」的服务端证据。建议至少把 frps 日志接到 journald 并开 info 级。
+- **另有一台同角色机器**：`8.160.161.80`（阿里云，hostname `iZ0jlaouy9vk8n98wfp3a6Z`）跑着同样的
+  frps/mrrc-portal/nginx 与**已分叉的注册表**（`bg9aaa-mrrc-modern`/`bh1eih-mrrc-modern`，带后缀，
+  与真 hub 的 `bg9aaa`/`bh1eih`/`bg7zhs` 不一致），自 2026-09-30 19:22 起**从未有客户端连上**；
+  而 `deploy/README.md` 仍把 SSH 地址写成它 —— 本轮排障一开始就被带错，据此得出过「三实例全离线」的
+  错误结论。与 V0.22 边界里记的 `deploy/frpc-instance.toml.example` 的 `serverAddr` 仍是 `8.160.161.80`
+  属同一批残留，建议一并处置（下线，或在文档里标明是旧机/备机）。
+
 ## V0.22 — 2026-10-02 — 两张架构图按 V0.21 重绘；「两条路」残留在 SDD 与 deploy/README 里一次清掉
 
 **触发**：V0.21 当天把门户/入口/站点合并到一台机器，代码与 SDD 正文跟上了，但 `docs/` 里两张图

@@ -233,18 +233,125 @@ def _cert_days(path=None) -> str:
         return "（摘要文件无法解析）"
 
 
-def _tunnel_online(port) -> bool:
-    """隧道是否在线：hub 回环上该端口可连接 ⇒ frpc 已建立。
+#: 隧道探测的四种结论。分这么细是因为**修法完全不同**：
+#: 「未连接」是租户那边 frpc 没跑；「后端无应答」是 frpc 在跑但它转发的本地端口上没有程序
+#: （应用没起 / 端口写错 / 绑到了别的地址）；「在说明文 HTTP」是应用起来了但没加载证书，
+#: 而 nginx 是以 https 反代并校验上游证书的 ⇒ 访客一律 502。
+TUNNEL_SERVING = "serving"
+TUNNEL_PLAIN_HTTP = "plain-http"
+TUNNEL_HOLLOW = "hollow"
+TUNNEL_DOWN = "down"
+
+TUNNEL_TEXT = {
+    TUNNEL_SERVING: "在线",
+    TUNNEL_PLAIN_HTTP: "在说明文 HTTP",
+    TUNNEL_HOLLOW: "隧道在、后端无应答",
+    TUNNEL_DOWN: "未连接",
+}
+
+#: 总览页给每种状态的颜色：能服务=绿，两类「连得上但用不了」=琥珀（容易和真离线混淆，
+#: 所以不用红），完全没连上=红。
+TUNNEL_COLOR = {
+    TUNNEL_SERVING: "#34d399",
+    TUNNEL_PLAIN_HTTP: "#fbbf24",
+    TUNNEL_HOLLOW: "#fbbf24",
+    TUNNEL_DOWN: "#f87171",
+}
+
+
+def _probe_http_status(sock, host_header: str, timeout: float):
+    """要一次 `/api/health`，返回状态行；对端不给任何字节就返回 None。
+
+    **任何状态码都算在服务**（包括 401/404）—— 这里要回答的是「后面有没有一个活的应用」，
+    不是「它健不健康」。跟 `mrrc_modern/launcher_net.answers()` 同一个判据：那边正是因为
+    把 401 当成失败，才让启动器在服务器明明活着的时候去开了另一个协议。
+    """
+    sock.settimeout(timeout)
+    sock.sendall((f"GET /api/health HTTP/1.0\r\nHost: {host_header}\r\n"
+                  f"User-Agent: mrrc-hub-probe\r\nConnection: close\r\n\r\n").encode("ascii"))
+    try:
+        head = sock.recv(64)
+    except OSError:
+        return None
+    if not head:
+        return None
+    return head.split(b"\r\n", 1)[0].decode("latin-1", "replace").strip() or None
+
+
+def _tunnel_state(port, label: str = "", timeout: float = 2.5):
+    """一个实例端口的 (状态, 说明)，从 hub 回环探测。
+
+    旧判据是「该端口能不能 TCP 连上」，那是个**假阳性**：frps 是在 hub 本机接受连接的，
+    只要 frpc 注册过代理，这个连接就永远成功，与隧道另一端有没有程序在服务无关。2026-10-03
+    的 bg7zhs 正是这个状态 —— frpc 控制连接活着、frps 在听 18805、hub 上实例证书也在，
+    总览于是显示「在线」，而从 hub 直连该端口**无论明文还是 TLS 都拿不到一个字节**，
+    每个访客得到 nginx 的 502（错误日志：`peer closed connection in SSL handshake
+    while SSL handshaking to upstream`）。所以判据必须问真正要问的那个问题。
+
+    不校验证书：实例证书是自签的（CN=<label>.mrrc.vlsc.net），而 bg1sb 那类老实例用的是
+    自己的 `radio.vlsc.net`。证书名对不对是**另一个**故障模式（nginx 会记校验失败），
+    这里只回答「有没有在服务」。
+    """
+    import contextlib
+    import socket
+    import ssl
+
+    host_header = f"{label}.mrrc.vlsc.net" if label else "127.0.0.1"
+    try:
+        raw = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
+    except OSError as exc:
+        return TUNNEL_DOWN, f"回环端口连不上（frpc 未注册代理）：{exc}"
+
+    tls_err = ""
+    with contextlib.closing(raw):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            tls = ctx.wrap_socket(raw, server_hostname=host_header)
+        except (ssl.SSLError, OSError) as exc:
+            tls_err = f"{type(exc).__name__}: {exc}"
+        else:
+            with contextlib.closing(tls):
+                status = _probe_http_status(tls, host_header, timeout)
+            if status:
+                return TUNNEL_SERVING, status
+            return TUNNEL_HOLLOW, "TLS 握手成了，但没有任何 HTTP 应答"
+
+    # TLS 走不通：后面是不是有个只说明文 HTTP 的应用？（v1.24.5「装完黑屏」的同一形状）
+    try:
+        plain = socket.create_connection(("127.0.0.1", int(port)), timeout=timeout)
+    except OSError:
+        return TUNNEL_HOLLOW, f"端口可连但无应答（TLS：{tls_err}）"
+    with contextlib.closing(plain):
+        status = _probe_http_status(plain, host_header, timeout)
+    if status:
+        return TUNNEL_PLAIN_HTTP, f"后端只说明文 HTTP（{status}），而 nginx 以 https 反代"
+    return TUNNEL_HOLLOW, f"端口可连、明文与 TLS 都无应答（TLS：{tls_err}）"
+
+
+def _tunnel_states(entries, timeout: float = 2.5) -> dict:
+    """并发探测全部实例 ⇒ 一个死掉的隧道不会把整页拖成串行等待。
+
+    最坏情况是每个实例都黑洞（等到超时），4 个实例串行就是 4×timeout；总览页不该为此卡住。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not entries:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(8, len(entries))) as pool:
+        futures = {pool.submit(_tunnel_state, port, label, timeout): port
+                   for label, port in entries}
+        return {port: fut.result() for fut, port in futures.items()}
+
+
+def _tunnel_online(port, label: str = "") -> bool:
+    """兼容用的布尔包装：**只有真正在服务才算在线**。
 
     总览与实例页都要问同一个问题，所以只在这里探一次 —— 两个视图里各写一个同名 `probe`
     会互相遮蔽（同一个函数作用域），后人改动时很容易改错那一个。
     """
-    import socket
-    try:
-        with socket.create_connection(("127.0.0.1", int(port)), timeout=1.5):
-            return True
-    except OSError:
-        return False
+    return _tunnel_state(port, label)[0] == TUNNEL_SERVING
 
 
 def _clublog_info() -> str:
@@ -383,11 +490,20 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     by[a["status"]] = by.get(a["status"], 0) + 1
                 cert = _cert_days()
                 cl = _clublog_info()
-                online = sum(1 for _, p in entries if _tunnel_online(p))
+                states = _tunnel_states(entries)
+                online = sum(1 for s, _ in states.values() if s == TUNNEL_SERVING)
+                # 不能只给个数字：“3 个在线”与“3 个在线但其中 1 个其实用不了”是两回事，
+                # 而后者正是支持回路里最耗时的那种误判。
+                not_serving = [(l, p) + states[p] for l, p in entries
+                               if states[p][0] != TUNNEL_SERVING]
+                bad = "".join(
+                    f"<br><small style='color:{TUNNEL_COLOR[s]}'>⚠️ <code>{html.escape(l)}</code>:{p} — "
+                    f"{html.escape(TUNNEL_TEXT[s])}（{html.escape(d)}）</small>"
+                    for l, p, s, d in not_serving)
                 body = f"""<h2>总览</h2>
 <table><tr><th>项</th><th>值</th></tr>
 <tr><td>申请</td><td>{'　'.join(f"{k}={v}" for k, v in sorted(by.items())) or '（无）'}</td></tr>
-<tr><td>注册表实例</td><td>{len(entries)} 个，其中隧道在线 <b>{online}</b> 个</td></tr>
+<tr><td>注册表实例</td><td>{len(entries)} 个，其中<b>真正在服务</b> {online} 个{bad}</td></tr>
 <tr><td>入口证书剩余</td><td>{cert}</td></tr>
 <tr><td>Club Log 呼号库</td><td>{cl}</td></tr>
 <tr><td>端口池</td><td>{registry.first}-{registry.last}，已用 {len(entries)}，空闲 {registry.last - registry.first + 1 - len(entries)}</td></tr>
@@ -417,15 +533,26 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                     + rows({"rejected", "revoked"}, lambda c: "") + "</table>"
 
             elif view == "instances":
+                states = _tunnel_states(entries)
+
                 def tunnel_cell(port):                 # 同一探测的 HTML 版本（实例页）
-                    return ("<b style='color:#34d399'>在线</b>" if _tunnel_online(port)
-                            else "<span style='color:#f87171'>未连接</span>")
+                    state, detail = states.get(port, (TUNNEL_DOWN, "未探测"))
+                    return (f"<b style='color:{TUNNEL_COLOR[state]}' "
+                            f"title='{html.escape(detail, quote=True)}'>"
+                            f"{html.escape(TUNNEL_TEXT[state])}</b>")
                 rows_ = ''.join(
                     f"<tr><td><code>{html.escape(l)}</code></td><td>{p}</td><td>{tunnel_cell(p)}</td>"
                     f"<td><a href='https://{html.escape(l)}.mrrc.vlsc.net/' target=_blank>打开入口</a></td></tr>"
                     for l, p in sorted(entries)) or "<tr><td colspan=4>（注册表为空）</td></tr>"
                 body = ("<h2>实例</h2><table><tr><th>标签</th><th>端口</th><th>隧道</th><th>入口</th></tr>"
-                        + rows_ + "</table><p><small>「在线」= hub 回环上该端口可连接 ⇒ frpc 隧道已建立。<br>"
+                        + rows_ + "</table><p><small>「在线」= 从 hub 回环向该端口完成 TLS 握手并拿到 HTTP 应答"
+                        "（<b>任何</b>状态码都算，包括 401）；鼠标悬停可看探测详情。<br>"
+                        "⚠️ 仅仅「端口可连」<b>不能</b>证明实例在服务：frps 是在 hub 本机接受连接的，"
+                        "frpc 只要注册过代理就一定连得上，所以旧判据会把「隧道在、后端空」显示成在线"
+                        "（2026-10-03 的 bg7zhs 就是这个状态，而每个访客拿到 502）。"
+                        "「隧道在、后端无应答」请查实例机：应用是否在跑、frpc 的 <code>localPort</code> 是否等于"
+                        "应用的 <code>MRRC_WEB_PORT</code>、<code>MRRC_WEB_HOST</code> 是否被改成了局域网 IP"
+                        "（那就只听那个地址，frpc 拨 127.0.0.1 必然失败）。<br>"
                         "新增后仍需：<code>sudo /usr/local/sbin/gen_hub_routes.py &amp;&amp; sudo systemctl reload nginx</code></small></p>")
 
             elif view == "audit":

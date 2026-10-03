@@ -913,7 +913,10 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 svc = _service_states()
                 net = _net_facts()
                 certs = _hub_cert_inventory()
-                rows_ = ''.join(trow((html.escape(k), html.escape(str(v))))
+                # 两列的「项/值」表在窄屏保持表格形态（class=kv），所以**不要**给 data-label；
+                # 而 trow() 收到单个 tuple 会当成「一个单元格 + 它的标签」，一行只剩 1 个 td，
+                # 而标签只在窄屏的 ::before 里出现 —— 桌面上就成了一列没有行名的数字。
+                rows_ = ''.join(trow(html.escape(k), html.escape(str(v)))
                                 for k, v in (("负载 (1/5/15 分钟)", res["load"]), ("CPU", res["cpu"]),
                                              ("内存", res["mem"]), ("磁盘", res["disk"]),
                                              ("已运行", res["uptime"]), ("Python", res["python"])))

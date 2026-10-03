@@ -865,6 +865,9 @@ class _MobileProbe(HTMLParser):
         super().__init__()
         self.tables = []          # 每层 table 是否 class=stack
         self.stack_tables = 0     # class=stack 的表有几张
+        self.shape_bad = []       # 行单元格数与表头列数不符的表
+        self._cur = None          # 当前表的各行格数（第一行即表头）
+        self._row = None
         self.stack_tds = 0        # stack 表里的 td 总数
         self.bad_tds = []         # stack 表里缺 data-label 的 td
         self.viewport = False
@@ -880,10 +883,20 @@ class _MobileProbe(HTMLParser):
             is_stack = "stack" in (a.get("class") or "").split()
             self.tables.append(is_stack)
             self.stack_tables += 1 if is_stack else 0
-        elif tag == "td" and self.tables and self.tables[-1]:
-            self.stack_tds += 1
-            if not a.get("colspan") and not a.get("data-label"):
-                self.bad_tds.append((a.get("colspan"), str(self.getpos())))
+            self._cur = []
+            self._row = None
+        elif tag == "tr" and self._cur is not None:
+            self._row = 0
+        elif tag in ("td", "th"):
+            # 两件事必须在**同一个分支**里做完：elif 链上排在前面的分支会吃掉标签，
+            # 把它们拆成两个 elif 时，后一个（stack 表的 data-label 检查）永远走不到，
+            # 于是守卫报"检查到 0 个单元格"—— 是它自己那条防空跑断言把这件事暴露出来的。
+            if self._row is not None:
+                self._row += int(a.get("colspan") or 1)
+            if tag == "td" and self.tables and self.tables[-1]:
+                self.stack_tds += 1
+                if not a.get("colspan") and not a.get("data-label"):
+                    self.bad_tds.append(str(self.getpos()))
         elif tag == "button" and a.get("aria-current") == "page":
             self.aria_current += 1
         elif tag == "span" and "pill" in (a.get("class") or ""):
@@ -892,8 +905,23 @@ class _MobileProbe(HTMLParser):
             self.inline_color += 1
 
     def handle_endtag(self, tag):
-        if tag == "table" and self.tables:
-            self.tables.pop()
+        if tag == "tr" and self._cur is not None and self._row is not None:
+            self._cur.append(self._row)
+            self._row = None
+        elif tag == "table":
+            if self.tables:
+                self.tables.pop()
+            if self._cur is not None:
+                # 第一行是表头，其余每行的格数必须与它一致。
+                # 上一版把表头列数存在 _cur[0] 却从未赋值，于是它恒为 0，
+                # 而判断写成 `if head and ...` 直接短路 —— 守卫空转，
+                # 三处变异全部变绿。是变异验证揭穿的，套件自己一直显示全绿。
+                rows = self._cur
+                if len(rows) > 1:
+                    head, body = rows[0], rows[1:]
+                    if head and any(n != head for n in body):
+                        self.shape_bad.append((head, sorted(set(body))))
+                self._cur = None
 
 
 def test_pages_are_mobile_suitable():
@@ -937,6 +965,11 @@ def test_pages_are_mobile_suitable():
                       f"{name}: 没有内联 style='color:'（状态色应在 CSS 类里，共 {pr.inline_color} 处）")
                 check(not pr.bad_tds,
                       f"{name}: stack 表里每个 td 都有 data-label（缺 {len(pr.bad_tds)} 个: {pr.bad_tds[:3]}）")
+                # 普适不变量：**每张表**的每行格数都要等于表头列数。这条才抓得住
+                # 「行构造器少吐一个 td」—— 桌面上表现为一列没有行名的数字，
+                # 而只查 stack 表的 data-label 会完全放过它（class=kv 的表不在检查范围内）。
+                check(not pr.shape_bad,
+                      f"{name}: 每张表的行格数与表头列数一致（不符: {pr.shape_bad[:3]}）")
                 total_tds += pr.stack_tds
                 if name in ("instances", "applications", "audit", "system"):
                     check(pr.aria_current == 1,

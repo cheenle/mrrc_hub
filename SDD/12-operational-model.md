@@ -113,15 +113,26 @@
   （该节未编号；本仓没有 AD-H21）与下方「排障增补」
 - 注册表 `/etc/mrrc-hub/instances.tsv` —— 三列：`<标签> <回环端口> <上游 TLS 名>`。
   加实例 = 一行 + 重跑 `gen_hub_routes.py`（自 V0.17 起由 30 s 的 root timer 自动做，见 §12.9）。
-  **行数未取证，两处记录冲突**：本节 2026-10-01 的机上读数是"仅一行 `bg1sb 18802 radio.vlsc.net`"，
-  而 `14-version-history.md` V0.21 记的是"已有两条记录已迁移，端口不变"；那两条的标签没有入档，
-  机上读数又早于搬迁 ⇒ 两边都缺证据，此处不臆造呼号。
-  **第三列是逐实例证书校验的落点**（见下方「实例证书链」）；`bg1sb` 目前仍指向上游旧证书名，
-  尚未迁到它自己的 `<标签>.mrrc.vlsc.net` —— 迁移机制已就位、未施用。
+  **2026-10-04 机上读数（新机、全量）**：`bg7zhs 18805` / `ba4eg 18807` / `bg6lh-legacy 18802` /
+  `bg8aaa 18803` / `bg1sb 18804 radio.vlsc.net`。此前那句“行数未取证、两处记录冲突”到此结束。
+  **`bg1sb` 曾经不在表里**：备份文件显示它原为 `bg1sb 18802 radio.vlsc.net`，18802 后来归了
+  `bg6lh-legacy`（附加产品，见 §7.x.1）⇒ 主产品的裸呼号入口落到 map 的 `default 0`
+  ⇒ nginx `return 404 "unknown instance"`（**与“未登记实例”是同一个 404**，现场很容易读成网络故障）。
+  2026-10-04 按“**不夺回 18802、不打断正在服务的 legacy 入口**”补回末行，端口用空闲的 18804。
+  **第三列是逐实例证书校验的落点**（见下方「实例证书链」）：`bg1sb` 写的仍是 `radio.vlsc.net`，
+  实测该实例吐的就是那张真 LE 叶证书 + 4 段完整链（公钥与实例私钥配对，**不是**自签）——
+  即“迁移到 `<标签>.mrrc.vlsc.net`”机制已就位、仍未施用（这条从“未复测/未取证”升为已取证）。
   **标签规则**：主产品用裸呼号（`bg1sb`），附加产品加产品后缀（`bg1sb-legacy`）—— 见 `07-subject-area-model.md` §7.x.1
 - `https://portal.mrrc.vlsc.net/` —— **呼号自助注册**（面向公众，另一套 vhost，
   与实例入口同证书）。运维审批台在 `/admin`。详见 §12.9。
   门户与站点、实例入口**同处一台机器**（V0.21，2026-10-02 迁至香港 `hub.vlsc.net`）；门户挂在该名字的根；
+- **双栈可达（2026-10-04 实测，取代 V0.19 时期“hub 的 v6 不可达”的结论）**：hub 机有全局 v6
+  `2403:2c81:2000:2189::a` 与 v6 默认路由；`hub.vlsc.net` / `www.vlsc.net` / `*.mrrc.vlsc.net`
+  的 **AAAA 已发布**。本机→hub 实测 **82 ms / 0% 丢包**（v4 对照 293 ms / 6.7% 丢包），
+  同一请求 v6 **0.37 s** vs v4 **1.40 s**（约 4×，v4 去程绕东京而 v6 走 CMCC/腾讯云骨干直达 HK）；
+  frps 8989 本来就是双栈（`*:8989`），`tunnel.mrrc.vlsc.net` 的 AAAA 发布后 **frpc 重连自己选了 v6**
+  （实测控制连接两端都是 v6）。待办：给 `hub.vlsc.net` 自身补一张含该名的证书（现在它落到通配证书，
+  浏览器会报名字不符）；`*.mrrc.vlsc.net` 的 v6 路径建议低 TTL 灰度后再全量（CMCC 到海外的 v6 并非一律更快）
 
 ### 证书（NFR-H030 的落地）
 
@@ -198,7 +209,8 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 现象 | 先查什么 |
 | ------ | ---------- |
 | 边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步） |
-| **边缘路径间歇性无响应**（2026-10-01，2026-10-02 定根因；该路径已随 V0.21 删除，本条存史） | 6 次请求 3 次 20 s 无响应，当时只定到 `www → hub:9988` 这一跳、猜是云厂商入方向限流。**真因**：边缘 nginx 那两处指向 hub 的 `proxy_pass` 写的是**裸主机名**（无 `resolver` ⇒ 启动时解析一次），而 hub 已加 AAAA、边缘的 `getaddrinfo` 又按 RFC6724 把 IPv6 排前 ⇒ nginx 选了 hub 的 IPv6，而**该地址当时不可达**（实测 0/4 超时，同机 v4 4/4 通；边缘自身 v6 正常，google 0.1 s）。**修法**：两处 `proxy_pass` 钉为 hub 的 IPv4 `8.160.161.80:9988` 并 reload —— 复测 `/mrrc_portal/` **8/8 200**（修前 3/6 挂死），实例入口 4/4 302。**复现判据**：`getent ahosts https://portal.mrrc.vlsc.net` 首行是 v6 就说明任何一次 reload 都会踩中。**待办**：hub 的 IPv6 入站仍不可达（阿里云安全组/IPv6 公网带宽，见 V0.19），且 hub 上 `net.ipv6.conf.eth0.accept_ra=0` ⇒ RA 派生的地址与默认路由约 2.5 h 后过期不续（要设 `accept_ra=2` 并持久化）；v6 端到端验通后可改成 upstream 双地址（v6 优先 + 连接超时 3 s 退 v4） |
+| **边缘路径间歇性无响应**（2026-10-01，2026-10-02 定根因；该路径已随 V0.21 删除，本条存史） | 6 次请求 3 次 20 s 无响应，当时只定到 `www → hub:9988` 这一跳、猜是云厂商入方向限流。**真因**：边缘 nginx 那两处指向 hub 的 `proxy_pass` 写的是**裸主机名**（无 `resolver` ⇒ 启动时解析一次），而 hub 已加 AAAA、边缘的 `getaddrinfo` 又按 RFC6724 把 IPv6 排前 ⇒ nginx 选了 hub 的 IPv6，而**该地址当时不可达**（实测 0/4 超时，同机 v4 4/4 通；边缘自身 v6 正常，google 0.1 s）。**修法**：两处 `proxy_pass` 钉为 hub 的 IPv4 `8.160.161.80:9988` 并 reload —— 复测 `/mrrc_portal/` **8/8 200**（修前 3/6 挂死），实例入口 4/4 302。**复现判据**：`getent ahosts https://portal.mrrc.vlsc.net` 首行是 v6 就说明任何一次 reload 都会踩中。**待办**：hub 的 IPv6 入站仍不可达（阿里云安全组/IPv6 公网带宽，见 V0.19），且 hub 上 `net.ipv6.conf.eth0.accept_ra=0` ⇒ RA 派生的地址与默认路由约 2.5 h 后过期不续（要设 `accept_ra=2` 并持久化）；v6 端到端验通后可改成 upstream 双地址（v6 优先 + 连接超时 3 s 退 v4）。**2026-10-04 补正**：搬去香港那台 hub 的 v6 **可达且 AAAA 已发布**（本机实测 82 ms / 0% 丢包，v4 对照 293 ms / 6.7%；同一请求 0.37 s vs 1.40 s），本条"hub 的 IPv6 入站仍不可达"与旧机那句 `accept_ra` 待办**均随搬迁作废**（新机 sysctl 未复测） |
+| hub 日志被 `proxy [<名>] already exists` 刷屏 | **先去查“这个名字有几个客户端”，不要去改 frps**。三步取证：① `sudo grep -a 'client login info' /var/log/frps.log \| tail` 给出各 run id 的**来源 IP / hostname / os / frpc 版本**（同一台机器会占好几个 run id）；② `sudo ss -tn \| grep :8989` 看当前控制连接与地址族；③ 到那台实例机上数进程（Windows：`Get-Process frpc`，看各自命令行、启动时间与父进程是否还在）。**2026-10-04 实例**：一台 Windows 机（hostname `MRRC`）积累了 **6 个 frpc**（命令行逐字相同、5 个为孤儿），1 个赢得注册、其余每 30 s 重试 —— 一天 7143 行 `ba4eg`。那是**客户端缺陷**（回收旧 frpc 的代码依赖 Win11 已移除的 `wmic` 且失败静默，修法见 `mrrc_modern/SDD/14` V2.69），hub 侧只能止血（杀掉多余进程）与取证。**同名噪音频次本身也是判据**：`bg6lh-legacy` 那 362 行查实是本机重连窗口的重叠（新旧连接争注册），属正常抖动，不要当故障查 |
 | 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
 | 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
 | `curl -sI .../login` 得到 405 | **不是故障**。`-I` 发 HEAD，而登录页只接受 GET。用 `curl -s -o /dev/null -w '%{http_code}'` 拿状态码 |

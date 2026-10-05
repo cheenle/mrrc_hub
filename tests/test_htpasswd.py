@@ -43,7 +43,8 @@ def test_cross_check_openssl():
     if not shutil.which("openssl"):
         print("  提示: 无 openssl，跳过交叉验证"); return
     for _ in range(20):
-        pw = secrets.token_urlsafe(12)
+        # 前缀字母：token_urlsafe 可能以 '-' 开头，而 openssl 会把它当成选项
+        pw = "P" + secrets.token_urlsafe(12)
         salt = "".join(secrets.choice(ht.ITOA64) for _ in range(8))
         ref = subprocess.run(["openssl", "passwd", "-apr1", "-salt", salt, pw],
                              capture_output=True, text=True, check=True).stdout.strip()

@@ -103,6 +103,33 @@ if [[ ! -s /etc/frp/frps.token ]]; then
 fi
 chmod 600 /etc/frp/frps.token
 
+# Dashboard panel credentials for the portal's tunnel metrics (read-only).
+# Loopback-only; the portal service account reads a 0640 copy, never frps' own files.
+install -d -m 0755 /etc/mrrc-hub
+if [[ ! -s /etc/mrrc-hub/frps-web.credentials ]]; then
+    printf 'portal:%s\n' "$(openssl rand -hex 24)" >/etc/mrrc-hub/frps-web.credentials
+    chmod 640 /etc/mrrc-hub/frps-web.credentials
+    if id -u mrrcportal >/dev/null 2>&1; then
+        chown root:mrrcportal /etc/mrrc-hub/frps-web.credentials
+    else
+        echo "⚠️ user mrrcportal does not exist: leaving panel credentials root:root;" >&2
+        echo "   the portal will honestly report '凭据不可读' until the account exists" >&2
+    fi
+fi
+FRPS_WEB_USER="$(cut -d: -f1 /etc/mrrc-hub/frps-web.credentials)"
+FRPS_WEB_PW_QUOTED="\"$(cut -d: -f2- /etc/mrrc-hub/frps-web.credentials)\""
+
+# An empty htpasswd file (never overwritten): the admin console has no accounts
+# until one is added, while the machine token still works.
+if [[ ! -e /etc/mrrc-hub/portal-users ]]; then
+    install -m 640 /dev/null /etc/mrrc-hub/portal-users
+    if id -u mrrcportal >/dev/null 2>&1; then
+        chown root:mrrcportal /etc/mrrc-hub/portal-users
+    fi
+    echo "==> created empty /etc/mrrc-hub/portal-users; add an account with:"
+    echo "    printf '%s:%s\\n' <user> \"\$(openssl passwd -apr1)\" | sudo tee -a /etc/mrrc-hub/portal-users"
+fi
+
 log "frps.toml"
 cat >/etc/frp/frps.toml <<EOF
 # Managed by mrrc_hub/deploy/bootstrap-hub.sh — edits are overwritten on re-run.
@@ -128,6 +155,13 @@ allowPorts = [{ start = 18800, end = 18999 }]
 
 log.to = "/var/log/frps.log"
 log.level = "info"
+
+# Read-only dashboard API on loopback: the portal samples per-proxy
+# trafficIn/Out + curConns from it (tunnel bandwidth). Never exposed by nginx.
+webServer.addr = "127.0.0.1"
+webServer.port = 7100
+webServer.user = "${FRPS_WEB_USER}"
+webServer.password = ${FRPS_WEB_PW_QUOTED}
 EOF
 chmod 600 /etc/frp/frps.toml
 
@@ -141,6 +175,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+# Hot config reload (frp >= 0.52): adding the dashboard must not drop live tunnels.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536

@@ -239,6 +239,31 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 两者层次不同：前者是"谁能接入隧道"，后者是"这台实例是不是它声称的那台"。
 详见 `../SDD/12-operational-model.md` §12.8 「实例证书链」与「实例开通链」。
 
+## 后台管理台账号与 frps 面板（V0.28）
+
+部署新版 portal 前先看这份检查单（代码在 `portal/`，行为细节见 `../portal/README.md`）：
+
+1. **账号文件**（`/etc/mrrc-hub/portal-users`，htpasswd `$apr1$`）：
+
+   ```bash
+   printf '%s:%s\n' <用户名> "$(openssl passwd -apr1)" | sudo tee -a /etc/mrrc-hub/portal-users
+   sudo chown root:mrrcportal /etc/mrrc-hub/portal-users && sudo chmod 640 /etc/mrrc-hub/portal-users
+   ```
+
+   文件为空 = 没人能登管理台（令牌机器路径仍可用）。`bootstrap-hub.sh` 只创建占位，不覆盖。
+2. **frps 面板**：`frps.toml` 的 `webServer` 段只绑 `127.0.0.1:7100`，凭据
+   `/etc/mrrc-hub/frps-web.credentials`（0640 root:mrrcportal，bootstrap 自动生成）。
+   改完用 **`systemctl reload frps`**（`ExecReload` = SIGHUP，frp ≥0.52 热重载，隧道不断）；
+   若实测该版本对 SIGHUP 不生效，再退化到维护窗口内 restart。
+3. **核验面板字段**：`curl -u "$(cut -d: -f1- /etc/mrrc-hub/frps-web.credentials)" http://127.0.0.1:7100/api/proxy/tcp`
+   —— 确认真实字段名（本文档按 0.71 的 `trafficIn/Out`、`todayTrafficIn/Out`、`curConns` 假定）。
+4. **来源 IP 透传**：portal vhost 必须设 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+   （与 `X-Real-IP`）。**缺了它登录锁定会退化成 127.0.0.1 全局桶**——与 §12.8 的实例侧同款教训。
+5. **重启 portal**：`sudo systemctl restart mrrc-portal`；随后逐项复验：登录/登出、无 CSRF 动作被拒、
+   隧道视图出数、停掉面板时页面显示原因而不是 0。
+
+> frps 那个单共享 token 仍然存在（见上）；本面板只是**只读统计**，不是第二套认证。
+
 ## 两级入口：主路走 hub，退化路走海外 www（迂回方案）
 
 境内地域的 80/443 在没有备案时不可用，而**明文 HTTP 到未备案域名会被途中改写**（实测见 R-H13）。

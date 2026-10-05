@@ -22,8 +22,10 @@
 > **as-built（2026-10-01）**：`POST /apply`（规范化→查重→核验，应答里交付**申请令牌**）、
 > `POST /status`（申请方凭该令牌查自己那一条）、`POST /verify`、`POST /grant`、
 > `POST /enroll`、`POST /revoke`，加一个 `/admin` 审批台。
-> 运维动作两种传令方式：请求头 `X-Portal-Token`（curl/脚本）或表单同名字段（浏览器）——
-> **两者都不进 URL**，因为 URL 会进访问日志与浏览器历史（AD-H07）。
+> 运维动作两种传令方式：脚本/curl 用请求头 `X-Portal-Token`；浏览器用**用户名/密码会话
+> （`mrrc_portal_session` Cookie，HttpOnly/SameSite=Lax/Secure）+ 表单 CSRF 字段**（表单不再
+> 接受令牌字段）。两者都不进 URL，因为 URL 会进访问日志与浏览器历史（AD-H07）。
+> 账号文件 `/etc/mrrc-hub/portal-users`（htpasswd `$apr1$`），一人一账号，审计记 `actor`。
 
 ## 10.2 Ticket / Lease 服务
 

@@ -243,9 +243,13 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 呼号库（权威） | `/var/lib/mrrc-hub/portal/clublog_users.json` —— **Club Log** 全库（273,047 条），与站内留言版 `www.vlsc.net/feedback` **同源**；hub 每天 04:30 从 www 拉取（`mrrc-portal-sync-clublog.sh`，晚于 www 的 03:00 刷新） |
 | 呼号库（自建） | `/etc/mrrc-hub/callsigns.txt`（一行一个）—— 用于权威库暂未收录的新执照 |
 | 核验链 | `ClubLogVerifier → CallsignListVerifier → ManualVerifier`（能给出**确定结论**的依据先问，人工始终兜底） |
-| 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较 |
+| 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较；**只走请求头**（机器路径） |
+| 运维账号 | `/etc/mrrc-hub/portal-users`（htpasswd `$apr1$`，`0640 root:mrrcportal`）；加人：`printf '%s:%s\n' <user> "$(openssl passwd -apr1)" | sudo tee -a …`。只认 apr1，未知前缀 fail closed；用户不存在时跑假哈希防时序枚举 |
+| 会话与 CSRF | 登录后 `mrrc_portal_session`（HttpOnly/SameSite=Lax；公网 Host 带 Secure，回环不带）；空闲 8h/绝对 24h；状态变更要表单 CSRF；进程重启会话全失效 |
+| 登录防爆破 | 固定阈值：用户名 5 次/5 分钟、来源 IP 10 次/5 分钟，各锁 5 分钟（接受“按用户名可被恶意触发”的代价）；`X-Forwarded-For`（仅回环对端才信任）缺失时退化为 127.0.0.1 全局桶 |
+| 隧道性能 | frps `webServer` 只绑 127.0.0.1:7100（Basic 认证，凭据 `/etc/mrrc-hub/frps-web.credentials` 0640）；portal 后台线程每 30s 采 `trafficIn/Out` 差分算带宽 + TLS 握手计时算延时，每实例内存环形历史 120 样本（≈1h，重启即清）；新增「隧道」视图 |
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
-| 测试 | `python3 tests/test_portal.py` |
+| 测试 | `python3 tests/test_portal.py`（27 组）；另有 `test_portal_auth.py`（6）、`test_portal_metrics.py`（8）、`test_htpasswd.py`（4） |
 | 入口 | `https://portal.mrrc.vlsc.net/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
 | **主机** | **与 hub 同一台机器**：香港 VPS `hub.vlsc.net`（203.25.119.168），门户挂在该名字的**根**（见 §12.8 主机表）。V0.20 把它迁到阿里云 `47.80.243.9` 的那次拆分只存续了几个小时，**已被 V0.21 取代**；那台机器不再承载门户（其后续处置**未取证**） |
 | 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |

@@ -2,6 +2,50 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.28 — 2026-10-05 — 后台管理台：一人一账号的登录，与隧道性能可观测面
+
+**触发**：`/admin` 从上线起只有一个共享运维令牌（`X-Portal-Token`）——多运维无法归因
+（“谁批的/谁撤的”只能写 token），而令牌从 `sudo cat` 里拷来拷去也不是人用的。同时 V0.24 的
+可观测面在隧道层明确写着“frps 的每代理统计不可得”，于是「隧道带宽/延时」这条最常用的排障
+事实只能 SSH 上去手工拼。
+
+**已做**：
+
+- **账号与会话**（新模块 `portal/htpasswd.py`、`portal/sessions.py`）：htpasswd `$apr1$`
+  账号文件（`/etc/mrrc-hub/portal-users`，`0640 root:mrrcportal`，一人一账号）；纯 stdlib
+  实现 apr1 校验（Python 3.13 已移除 `crypt` 模块），常数时间比较 + 用户不存在时假哈希；
+  登录成功发 `mrrc_portal_session`（HttpOnly/SameSite=Lax，公网 Host 带 Secure、回环不带），
+  空闲 8h/绝对 24h，状态变更要表单 CSRF；导航改为 GET `?view=`，新增登出。
+- **防爆破**：固定阈值——用户名 5 次/5 分钟、来源 IP 10 次/5 分钟，各锁 5 分钟；成功登录清零。
+  明确接受“按用户名锁可被恶意触发”的代价（规格决策 7）。
+- **机器路径不动**：`X-Portal-Token` 只走请求头（表单字段移除）；审计新增 `actor` 字段与
+  `login_ok/login_failed/login_locked` 事件（登录事件带来源 IP，仅管理台可见）。
+- **隧道性能**（新模块 `portal/metrics.py`）：frps 开 `webServer`（只绑 127.0.0.1:7100，
+  Basic 认证，凭据 0640 root:mrrcportal；`ExecReload` 走 SIGHUP 热重载，隧道不断）；portal
+  后台线程每 30s 采 `trafficIn/Out` 差分算上下行带宽 + 复用四态探测做 TLS 握手计时算延时，
+  每实例内存环形历史 120 样本（≈1h）。新增「隧道」视图（延时当前/均值/峰值、带宽最近/均值、
+  今日流量、连接数、采样新鲜度）；系统页③加面板状态/全代理合计/hub 网卡；总览页附摘要。
+- **诚实降级**：面板不可用/凭据不可读/代理不存在/计数器重置/采样停滞，全部给可读原因，
+  不用 0 冒充（延续 V0.24 的姿态）。
+
+**边界**：
+
+- **未部署**：改动只在仓库里，hub 上跑的仍是旧版；部署需要：建账号文件、frps.toml 加面板段
+  并 `systemctl reload frps`、核验 nginx 是否透传 `X-Forwarded-For`/`X-Real-IP`（缺则 IP 锁定
+  退化为全局桶）、重启 `mrrc-portal.service`。**部署时用 `curl` 复核 frp 0.71 dashboard
+  的真实字段名**（现有解析器按假设写，字段缺失会如实标注而不是显示错数）。
+- **会话在内存**：portal 重启即全部登出；不支持改密即时踢人（每次登录读账号文件，改密/删人
+  对新登录生效）。
+- **apr1 取舍**：MD5 系哈希抗 GPU 暴力弱于 bcrypt——账号少、密码强、有固定阈值锁定与
+  nginx `limit_req` 兜底；该取舍记录在规格的决策记录里。
+- **指标不落盘**：历史只存内存、重启即清；不做告警与图表。
+
+**测试** 27 → **45 组**（新增 `test_htpasswd.py` 4、`test_portal_auth.py` 6、
+`test_portal_metrics.py` 8；`test_portal.py` 27）。apr1 与 `openssl passwd -apr1` 交叉验证
+（固定向量 + 随机 20 组）；登录/锁定/会话过期/登出/CSRF/令牌路径不回归；采样器差分/回绕/
+缺失/降级（假时钟 + 假面板）；隧道视图端到端拼接。规格：
+`docs/superpowers/specs/2026-10-05-portal-admin-auth-tunnel-metrics-design.md`。
+
 ## V0.27 — 2026-10-04 — 注册表全量取证、主产品入口 `bg1sb` 补回；hub 日志被同名代理重试刷屏（根因在客户端）
 
 **触发①**：§12.8 长期写着“注册表行数未取证、两处记录冲突”，而这次排查发现**主产品的裸呼号入口

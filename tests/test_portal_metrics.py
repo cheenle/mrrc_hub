@@ -207,6 +207,36 @@ def test_tunnel_view_renders_end_to_end():
             httpd.shutdown()
 
 
+def test_probe_timed_wraps_state_and_ms():
+    """app._probe_timed：拒绝连接也有四态结论；延时要么数值要么 None（不编造）。"""
+    from portal import app as app_mod
+    state, detail, ms = app_mod._probe_timed(1, "unused", timeout=0.05)
+    check(state in ("down", "hollow", "plain-http", "serving"), "异常/拒绝连接也有四态结论")
+    check(ms is None or ms >= 0, "延时要么是数值要么是 None")
+    check(isinstance(detail, str) and detail, "探测说明是可读文本")
+
+
+def test_main_dry_run_reports_accounts_and_panel():
+    import contextlib
+    import io
+
+    from portal import app as app_mod
+    buf = io.StringIO()
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "callsigns.txt").write_text("", encoding="utf-8")
+        (tmp / "portal-users").write_text("ops:$apr1$00000000$0000000000000000000000\n", encoding="utf-8")
+        with contextlib.redirect_stdout(buf):
+            ret = app_mod.main(["--dry-run", "--users-file", str(tmp / "portal-users"),
+                                "--store", str(tmp / "portal.json"),
+                                "--registry", str(tmp / "instances.tsv"),
+                                "--callsign-db", str(tmp / "callsigns.txt")])
+        out = buf.getvalue()
+    check(ret == 0, "dry-run 正常退出")
+    check("账号文件" in out and "1 个账号" in out, "dry-run 报告账号数")
+    check("frps 面板" in out and "每 30s 一轮" in out, "dry-run 报告面板与采样间隔")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

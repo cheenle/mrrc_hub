@@ -33,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from portal import callsign as cs          # noqa: E402
 from portal import htpasswd as hp          # noqa: E402
+from portal import metrics as metrics_mod   # noqa: E402
 from portal import registry as reg          # noqa: E402
 from portal.sessions import LoginGuard, SessionStore  # noqa: E402
 from portal.store import Store             # noqa: E402
@@ -45,6 +46,9 @@ DEFAULT_REGISTRY = os.environ.get("MRRC_PORTAL_REGISTRY", "/etc/mrrc-hub/instanc
 DEFAULT_CALLSIGN_DB = os.environ.get("MRRC_PORTAL_CALLSIGN_DB", "/etc/mrrc-hub/callsigns.txt")
 DEFAULT_TOKEN_FILE = os.environ.get("MRRC_PORTAL_TOKEN_FILE", "/etc/mrrc-hub/portal.token")
 DEFAULT_USERS_FILE = os.environ.get("MRRC_PORTAL_USERS", "/etc/mrrc-hub/portal-users")
+DEFAULT_FRPS_API = os.environ.get("MRRC_PORTAL_FRPS_API", "http://127.0.0.1:7100")
+DEFAULT_FRPS_CREDENTIALS = os.environ.get("MRRC_PORTAL_FRPS_CREDENTIALS",
+                                          "/etc/mrrc-hub/frps-web.credentials")
 
 #: 后台会话 Cookie。名字独立于实例的 `mrrc_auth`：通配子域下命名空间公用，
 #: 同名会互相覆盖或让实例读到 Hub 的凭据（约束 hub-cookie-name-not-instance-auth）。
@@ -747,6 +751,21 @@ def _tunnel_state(port, label: str = "", timeout: float = 2.5):
     """
     rep = _probe(port, label, "", timeout)
     return rep["state"], rep["detail"]
+
+
+def _probe_timed(port, label: str = "", timeout: float = 2.5) -> tuple:
+    """采样器用的探测：复用四态判据，顺带把端到端耗时量出来。
+
+    延时只在握手真正完成（serving）时给值 —— 连不上的等待时间不是网络延时，
+    把它当延时展示是编数据（诚实降级原则）。
+    """
+    start = time.monotonic()
+    try:
+        state, detail = _tunnel_state(port, label, timeout)
+    except Exception as exc:                          # noqa: BLE001 — 采集器不许把服务带崩
+        return TUNNEL_DOWN, f"探测异常：{exc}", None
+    elapsed = (time.monotonic() - start) * 1000.0
+    return state, detail, (elapsed if state == TUNNEL_SERVING else None)
 
 
 def _tunnel_states(entries, timeout: float = 2.5) -> dict:
@@ -1470,6 +1489,14 @@ def main(argv=None) -> int:
                     help="会话 Cookie 的 Secure：auto=回环 Host 不带、其余带")
     ap.add_argument("--session-idle-hours", type=float, default=8)
     ap.add_argument("--session-max-hours", type=float, default=24)
+    ap.add_argument("--frps-api-url", default=DEFAULT_FRPS_API,
+                    help="frps 面板（webServer，只绑回环）的地址")
+    ap.add_argument("--frps-credentials", default=DEFAULT_FRPS_CREDENTIALS,
+                    help="面板凭据文件（user:password，0640 root:mrrcportal）")
+    ap.add_argument("--metrics-interval", type=float, default=30.0,
+                    help="隧道指标采样间隔秒；0 = 关闭采集器")
+    ap.add_argument("--metrics-history", type=int, default=120,
+                    help="每实例保留的样本数（默认 30s × 120 ≈ 1 小时）")
     ap.add_argument("--base-path", default=os.environ.get("MRRC_PORTAL_BASE", ""),
                     help="挂载前缀，如 /mrrc_portal（默认空 = 挂在根）")
     ap.add_argument("--dry-run", action="store_true", help="只加载配置并自检，不监听")
@@ -1485,13 +1512,23 @@ def main(argv=None) -> int:
         print(f"token={'已配置' if token else '未配置（运维动作会被拒绝）'}")
         print(f"账号文件={args.users_file}（"
               + (f"{len(parsed)} 个账号" if parsed is not None else f"不可读：{users_err}") + "）")
+        print(f"frps 面板={args.frps_api_url} 凭据={args.frps_credentials}"
+              f"{'（采集器关闭）' if args.metrics_interval <= 0 else f'（每 {args.metrics_interval:.0f}s 一轮）'}")
         print(f"注册表现有条目: {len(portal.registry.entries())} | 占用端口: {sorted(portal.registry.used_ports())[:5]}")
         return 0
     base = ("/" + args.base_path.strip("/")) if args.base_path.strip("/") else ""
+    sampler = None
+    if args.metrics_interval > 0:
+        sampler = metrics_mod.Sampler(
+            entries=lambda: portal.registry.entries(),
+            probe=lambda port, label: _probe_timed(port, label),
+            panel=metrics_mod.FrpsPanel(args.frps_api_url, args.frps_credentials),
+            interval=args.metrics_interval, history=args.metrics_history)
+        sampler.start()
     httpd = ThreadingHTTPServer((args.host, args.port), make_handler(
         portal, token, base, users=users,
         sessions=SessionStore(args.session_idle_hours * 3600, args.session_max_hours * 3600),
-        guard=LoginGuard(), cookie_secure=args.cookie_secure))
+        guard=LoginGuard(), cookie_secure=args.cookie_secure, sampler=sampler))
     print(f"Portal 监听 http://{args.host}:{args.port}{base or '/'} （注册表 {args.registry}）", flush=True)
     try:
         httpd.serve_forever()

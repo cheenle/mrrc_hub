@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import http.cookiejar
+import re
 import shutil
 import socket
 import ssl
@@ -34,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from portal import callsign as cs            # noqa: E402
+from portal import htpasswd as ht            # noqa: E402
 from portal import registry as reg           # noqa: E402
 from portal.app import (TUNNEL_DOWN, TUNNEL_HOLLOW, TUNNEL_PLAIN_HTTP,  # noqa: E402
                         TUNNEL_SERVING, Portal, _tunnel_online, _tunnel_state,
@@ -56,6 +59,23 @@ def stored(store, callsign):
     if application is None:
         raise AssertionError(f"store 里没有 {callsign}")
     return application
+
+
+def _signed_in_opener(base, user, password):
+    """以用户名/密码登录管理台，返回 (带 Cookie 的 opener, jar)。"""
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    data = urllib.parse.urlencode({"user": user, "password": password}).encode()
+    opener.open(base + "/admin/login", data=data, timeout=10).read()
+    return opener, jar
+
+
+def _csrf_from(page):
+    m = (re.search(r"name=csrf value='([^']+)'", page)
+         or re.search(r'name=csrf value="([^"]+)"', page))
+    if not m:
+        raise AssertionError("管理台表单里找不到 csrf 隐藏字段")
+    return m.group(1)
 
 
 def raises(exc, fn, *a, **kw):
@@ -183,9 +203,19 @@ def test_enroll_requires_secret_and_matching_name():
             check(cn in text or True, "（名字在 SAN 里，由被测代码自行解析）")
             return text
         try:
+            def post_op(path, fields):
+                """运维动作的机器路径：令牌只走请求头（表单字段已不再接受）。"""
+                req = urllib.request.Request(
+                    base + path, data=urllib.parse.urlencode(fields).encode(),
+                    headers={"X-Portal-Token": "tok"})
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        return r.status, r.read().decode()
+                except urllib.error.HTTPError as e:
+                    return e.code, e.read().decode()
             post("/apply", {"callsign": "bg6lh"})
-            post("/verify", {"callsign": "BG6LH", "token": "tok", "evidence": "人工"})
-            st, body = post("/grant", {"callsign": "BG6LH", "token": "tok"})
+            post_op("/verify", {"callsign": "BG6LH", "evidence": "人工"})
+            st, body = post_op("/grant", {"callsign": "BG6LH"})
             check(st == 200 and "enroll_secret" not in body, "分配返回 200")
             secret = stored(portal.store, "BG6LH").enroll_secret
             check(bool(secret), "分配后生成了登记口令")
@@ -203,47 +233,61 @@ def test_enroll_requires_secret_and_matching_name():
             httpd.shutdown()
 
 
-def test_admin_ui_flow_and_no_csrf_surface():
-    """运维审批页：令牌换页面；动作必须带令牌字段（无 cookie 可借用 ⇒ 免 CSRF）。"""
+def test_admin_ui_flow_with_sessions_and_csrf():
+    """运维审批台：用户名/密码登录 + 会话 Cookie + 表单 CSRF；令牌请求头仍是机器路径。"""
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
+        users_path = tmp / "portal-users"
+        users_path.write_text("ops:" + ht.apr1("pw-123456789", "saltward") + "\n", encoding="utf-8")
         portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
                         CallsignListVerifier(tmp / "callsigns.txt"))
         from http.server import ThreadingHTTPServer
-        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok", base=""))
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
+            portal, token="tok", base="", users=ht.UsersFile(users_path)))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        opener, _ = _signed_in_opener(base, "ops", "pw-123456789")
+        def get(path):
+            with opener.open(base + path, timeout=5) as r:
+                return r.status, r.read().decode()
         def post(path, fields):
             data = urllib.parse.urlencode(fields).encode()
             try:
-                with urllib.request.urlopen(base + path, data=data, timeout=5) as r:
+                with opener.open(base + path, data=data, timeout=5) as r:
                     return r.status, r.read().decode()
             except urllib.error.HTTPError as e:
                 return e.code, e.read().decode()
         try:
             # 申请一个库外呼号 → 待核验
             post("/apply", {"callsign": "BG1ZZZ"})
-            # 未带令牌进不了审批台
-            check(post("/admin", {"token": "wrong"})[0] == 403, "错令牌进不了审批台")
-            status, page = post("/admin", {"token": "tok"})
-            check(status == 200 and "后台管理" in page, "正确令牌进得去")
+            status, page = get("/admin")
+            check(status == 200 and "后台管理" in page, "登录后进得去")
             check("总览" in page and "注册表实例" in page, "默认进入总览视图")
-            # 五个视图各自可渲染（导航同样走 POST + 令牌字段，不改用 cookie）
+            # 七个视图各自可渲染（导航走 GET `?view=`）
             for view, needle in (("applications", "申请（全部状态）"), ("instances", "实例"),
-                                 ("system", "hub 主机"), ("audit", "审计（最近"),
-                                 ("clublog", "呼号库")):
-                st, vp = post("/admin", {"token": "tok", "view": view})
+                                 ("tunnel", "隧道"), ("system", "hub 主机"),
+                                 ("audit", "审计（最近"), ("clublog", "呼号库")):
+                st, vp = get(f"/admin?view={view}")
                 check(st == 200 and needle in vp, f"{view} 视图可渲染")
-            st, ap = post("/admin", {"token": "tok", "view": "applications"})
+            st, ap = get("/admin?view=applications")
             check("BG1ZZZ" in ap and "核验通过" in ap, "待核验申请出现在申请视图")
-            check('name=token value=\'tok\'' in page or 'name=token value="tok"' in page, "动作表单自带令牌字段")
-            # 动作不带令牌（模拟被借用会话/CSRF）→ 拒绝
-            check(post("/verify", {"callsign": "BG1ZZZ", "evidence": "x"})[0] == 403, "无令牌的动作被拒（免 CSRF）")
-            # 带令牌 → 成功并重渲染审批台
-            status, page2 = post("/verify", {"callsign": "BG1ZZZ", "token": "tok", "evidence": "人工核验"})
-            check(status == 200 and "已核验" in page2, "带令牌核验成功并回到审批台")
+            csrf = _csrf_from(page)
+            check(bool(csrf), "动作表单自带 csrf 隐藏字段")
+            # 有会话但不带 CSRF（模拟被借用的浏览器/CSRF）→ 拒绝
+            check(post("/verify", {"callsign": "BG1ZZZ", "evidence": "x"})[0] == 403,
+                  "无 CSRF 的动作被拒")
+            # 带 CSRF → 成功并重渲染审批台
+            status, page2 = post("/verify", {"callsign": "BG1ZZZ", "csrf": csrf, "evidence": "人工核验"})
+            check(status == 200 and "已核验" in page2, "带 CSRF 核验成功并回到审批台")
             check(stored(portal.store, "BG1ZZZ").status == "verified", "状态真的变了")
+            # 机器路径照旧：令牌请求头（表单字段不再接受）
+            req = urllib.request.Request(
+                base + "/grant",
+                data=urllib.parse.urlencode({"callsign": "BG1ZZZ"}).encode(),
+                headers={"X-Portal-Token": "tok"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                check(r.status == 200, "令牌请求头仍可用")
         finally:
             httpd.shutdown()
 
@@ -796,7 +840,7 @@ def test_hub_cert_inventory_lists_enrolled_instances():
 def test_admin_views_render_the_probe_facts_end_to_end():
     """管理台真的把探测事实渲染出来了吗 —— 用活体桩后端走一遍 HTTP。
 
-    既有的 `test_admin_ui_flow_and_no_csrf_surface` 是用**空注册表**渲染实例页的，
+    既有的 `test_admin_ui_flow_with_sessions_and_csrf` 是用**空注册表**渲染实例页的，
     所以「应用状态行 / 构建代号 / 证书名字比对」这几列从来没被真正渲染过；
     helper 各自返回对的值，并不等于页面把它们拼对了。
     """
@@ -812,16 +856,19 @@ def test_admin_views_render_the_probe_facts_end_to_end():
         reg_path = tmp / "instances.tsv"
         reg_path.write_text(f"probe\t{port}\tprobe.mrrc.vlsc.net\n", encoding="utf-8")
         (tmp / "callsigns.txt").write_text("NOBODY\n", encoding="utf-8")
+        users_path = tmp / "portal-users"
+        users_path.write_text("ops:" + ht.apr1("pw-123456789", "saltward") + "\n", encoding="utf-8")
         portal = Portal(Store(tmp / "portal.json"), reg.Registry(reg_path),
                         CallsignListVerifier(tmp / "callsigns.txt"))
         from http.server import ThreadingHTTPServer
-        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
+            portal, token="tok", users=ht.UsersFile(users_path)))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        opener, _ = _signed_in_opener(base, "ops", "pw-123456789")
 
         def view(name):
-            data = urllib.parse.urlencode({"token": "tok", "view": name}).encode()
-            with urllib.request.urlopen(base + "/admin", data=data, timeout=30) as r:
+            with opener.open(base + f"/admin?view={name}", timeout=30) as r:
                 return r.status, r.read().decode()
 
         try:
@@ -850,9 +897,9 @@ def test_admin_views_render_the_probe_facts_end_to_end():
                     ("本页采集不到的", "如实写明采集边界")):
                 check(needle in page, f"系统页渲染出{why}（{needle!r}）")
 
-            # 导航里必须有新视图的按钮，否则运维进不去
+            # 导航里必须有新视图的链接，否则运维进不去
             _, nav_page = view("overview")
-            check("name=view value='system'" in nav_page, "导航里有「系统」按钮")
+            check("href='?view=system'" in nav_page, "导航里有「系统」链接")
         finally:
             stop()
             httpd.shutdown()
@@ -897,7 +944,7 @@ class _MobileProbe(HTMLParser):
                 self.stack_tds += 1
                 if not a.get("colspan") and not a.get("data-label"):
                     self.bad_tds.append(str(self.getpos()))
-        elif tag == "button" and a.get("aria-current") == "page":
+        elif tag in ("button", "a") and a.get("aria-current") == "page":
             self.aria_current += 1
         elif tag == "span" and "pill" in (a.get("class") or ""):
             self.pill += 1
@@ -935,27 +982,26 @@ def test_pages_are_mobile_suitable():
         tmp = Path(td)
         (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
         (tmp / "instances.tsv").write_text("bg1sb\t18802\n", encoding="utf-8")
+        users_path = tmp / "portal-users"
+        users_path.write_text("ops:" + ht.apr1("pw-123456789", "saltward") + "\n", encoding="utf-8")
         portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
                         CallsignListVerifier(tmp / "callsigns.txt"))
         portal.apply("bg1sb")                      # 让申请视图与审计视图有内容可渲染
         from http.server import ThreadingHTTPServer
-        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(portal, token="tok"))
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
+            portal, token="tok", users=ht.UsersFile(users_path)))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        opener, _ = _signed_in_opener(base, "ops", "pw-123456789")
 
         def get(path):
-            with urllib.request.urlopen(base + path, timeout=30) as r:
-                return r.read().decode()
-
-        def post(view):
-            data = urllib.parse.urlencode({"token": "tok", "view": view}).encode()
-            with urllib.request.urlopen(base + "/admin", data=data, timeout=60) as r:
+            with opener.open(base + path, timeout=30) as r:
                 return r.read().decode()
 
         try:
             pages = {"公开注册页": get("/")}
-            for v in ("overview", "applications", "instances", "system", "audit", "clublog"):
-                pages[v] = post(v)
+            for v in ("overview", "applications", "instances", "tunnel", "system", "audit", "clublog"):
+                pages[v] = get("/admin?view=" + v)
 
             total_tds = 0
             for name, page in pages.items():
@@ -971,12 +1017,12 @@ def test_pages_are_mobile_suitable():
                 check(not pr.shape_bad,
                       f"{name}: 每张表的行格数与表头列数一致（不符: {pr.shape_bad[:3]}）")
                 total_tds += pr.stack_tds
-                if name in ("instances", "applications", "audit", "system"):
+                if name in ("instances", "applications", "tunnel", "audit", "system"):
                     check(pr.aria_current == 1,
                           f"{name}: 导航恰有一项标了 aria-current=page（得到 {pr.aria_current}）")
                 # 宽表必须挂着 class=stack：丢了它，那些 td 就退出 data-label 检查范围，
                 # 守卫会静默放行，手机上退回难看的挤压布局。
-                need = {"instances": 1, "applications": 1, "audit": 1, "system": 2,
+                need = {"instances": 1, "applications": 1, "tunnel": 0, "audit": 1, "system": 2,
                         "overview": 0, "clublog": 0, "公开注册页": 1}
                 check(pr.stack_tables >= need[name],
                       f"{name}: 至少 {need[name]} 张宽表挂了 class=stack（得到 {pr.stack_tables}）")

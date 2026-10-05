@@ -104,6 +104,145 @@ def test_audit_actor_and_login_events():
         check(all("actor" in e for e in events), "所有条目都有 actor 字段（旧文件缺省为空）")
 
 
+USERS_TEXT = "ops:" + ht.apr1("str0ng-pass", "saltward") + "\n"
+
+
+def _auth_env(tmp: Path, base="", cookie_secure="auto"):
+    """起一个带账号文件的 Portal：返回 (base_url, portal, httpd)。"""
+    (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
+    users_path = tmp / "portal-users"
+    users_path.write_text(USERS_TEXT, encoding="utf-8")
+    portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                    CallsignListVerifier(tmp / "callsigns.txt"))
+    from http.server import ThreadingHTTPServer
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
+        portal, token="tok", base=base, users=ht.UsersFile(users_path),
+        sessions=sess.SessionStore(), guard=sess.LoginGuard(), cookie_secure=cookie_secure))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{httpd.server_address[1]}", portal, httpd
+
+
+def _opener(no_follow=False):
+    jar = http.cookiejar.CookieJar()
+    if no_follow:
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *args, **kwargs):
+                return None
+        return (urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), _NoRedirect()),
+                jar)
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar)), jar
+
+
+def _get(opener, url):
+    try:
+        with opener.open(url, timeout=10) as r:
+            return r.status, r.read().decode(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(), dict(e.headers)
+
+
+def _post(opener, url, fields):
+    data = urllib.parse.urlencode(fields).encode()
+    try:
+        with opener.open(url, data=data, timeout=10) as r:
+            return r.status, r.read().decode(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(), dict(e.headers)
+
+
+def _csrf_from(page: str) -> str:
+    m = (re.search(r"name=csrf value='([^']+)'", page)
+         or re.search(r'name=csrf value="([^"]+)"', page))
+    if not m:
+        raise AssertionError("管理台表单里找不到 csrf 隐藏字段")
+    return m.group(1)
+
+
+def test_login_flow_and_csrf():
+    with tempfile.TemporaryDirectory() as td:
+        base, portal, httpd = _auth_env(Path(td))
+        try:
+            op, jar = _opener()
+            st, page, _ = _get(op, base + "/admin")
+            check(st == 200 and "用户名" in page and "密码" in page, "未登录看到登录页")
+            st, page, _ = _post(op, base + "/admin/login", {"user": "ops", "password": "wrong"})
+            check(st == 401 and "不正确" in page, "错密码 401 且文案不区分用户是否存在")
+            st, page, _ = _post(op, base + "/admin/login", {"user": "ghost", "password": "wrong"})
+            check(st == 401 and "不正确" in page, "不存在的用户同文案")
+            st, page, _ = _post(op, base + "/admin/login", {"user": "ops", "password": "str0ng-pass"})
+            check(st == 200 and "后台管理" in page, "正确密码登录后跟到管理台")
+            # Cookie 属性直接从原始 Set-Cookie 头断言：http.cookiejar 不保留 HttpOnly。
+            op_nf, _ = _opener(no_follow=True)
+            st, _, hdr = _post(op_nf, base + "/admin/login",
+                               {"user": "ops", "password": "str0ng-pass"})
+            set_cookie = hdr.get("Set-Cookie", "")
+            check(st == 303 and "HttpOnly" in set_cookie, "Cookie 带 HttpOnly")
+            check("SameSite=Lax" in set_cookie, "Cookie 带 SameSite=Lax")
+            check("Secure" not in set_cookie, "回环 Host（auto 策略）不带 Secure，便于本机 SSH 隧道登录")
+            st, page, _ = _get(op, base + "/admin?view=system")
+            check(st == 200 and "后台管理" in page and "hub 主机" in page, "会话可切换视图")
+            portal.store.apply("BG1SB")
+            st, _, _ = _post(op, base + "/verify", {"callsign": "BG1SB", "evidence": "人工"})
+            check(st == 403, "有会话但没有 CSRF 的动作被拒")
+            csrf = _csrf_from(page)
+            st, page2, _ = _post(op, base + "/verify",
+                                 {"callsign": "BG1SB", "evidence": "人工核验", "csrf": csrf})
+            check(st == 200 and "已核验" in page2, "会话+CSRF 动作成功并回到管理台")
+            verified = portal.store.get("BG1SB")
+            check(verified is not None and verified.status == "verified", "状态真的变了")
+            check(portal.store.audit()[-1]["actor"] == "ops", "动作审计记下操作者")
+            st, _, _ = _post(op, base + "/admin/logout", {})
+            check(st == 403, "登出也要 CSRF")
+            st, page3, _ = _post(op, base + "/admin/logout", {"csrf": csrf})
+            check(st == 200 and "用户名" in page3, "登出后回到登录页")
+            st, page4, _ = _get(op, base + "/admin")
+            check(st == 200 and "用户名" in page4, "旧 Cookie 已失效（需要重新登录）")
+        finally:
+            httpd.shutdown()
+
+
+def test_cookie_secure_modes_and_host_rule():
+    from portal.app import _host_is_loopback
+    for host, expect, why in (("127.0.0.1:8890", True, "IPv4 回环"),
+                              ("localhost:8890", True, "localhost"),
+                              ("[::1]:8890", True, "IPv6 回环"),
+                              ("portal.mrrc.vlsc.net", False, "公网域名"),
+                              ("", False, "缺 Host") ):
+        check(_host_is_loopback(host) is expect, f"Host 判定：{why}")
+    with tempfile.TemporaryDirectory() as td:
+        base, _, httpd = _auth_env(Path(td), cookie_secure="on")
+        try:
+            op, _ = _opener(no_follow=True)
+            st, _, hdr = _post(op, base + "/admin/login", {"user": "ops", "password": "str0ng-pass"})
+            check(st == 303 and "Secure" in hdr.get("Set-Cookie", ""),
+                  "cookie_secure=on 时带 Secure（公网形态）")
+        finally:
+            httpd.shutdown()
+
+
+def test_token_header_still_works_and_lockout():
+    with tempfile.TemporaryDirectory() as td:
+        base, portal, httpd = _auth_env(Path(td))
+        try:
+            op, _ = _opener()
+            portal.store.apply("BG1SB")
+            portal.store.mark_verified("BG1SB", "x")
+            req = urllib.request.Request(
+                base + "/grant",
+                data=urllib.parse.urlencode({"callsign": "BG1SB"}).encode(),
+                headers={"X-Portal-Token": "tok"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                check(r.status == 200, "令牌请求头路径不回归")
+            check(portal.store.audit()[-1]["actor"] == "token", "令牌动作 actor=token")
+            for _ in range(5):
+                _post(op, base + "/admin/login", {"user": "ops", "password": "nope"})
+            st, page, hdr = _post(op, base + "/admin/login", {"user": "ops", "password": "str0ng-pass"})
+            check(st == 429, "5 次失败后即使密码正确也被锁")
+            check("Retry-After" in hdr, "锁定响应带 Retry-After")
+        finally:
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

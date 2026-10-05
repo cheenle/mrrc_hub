@@ -26,12 +26,15 @@ import re
 import subprocess
 import sys
 import time
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from portal import callsign as cs          # noqa: E402
+from portal import htpasswd as hp          # noqa: E402
 from portal import registry as reg          # noqa: E402
+from portal.sessions import LoginGuard, SessionStore  # noqa: E402
 from portal.store import Store             # noqa: E402
 from portal.store import VERIFIED as STORE_VERIFIED  # noqa: E402
 from portal.verify import (CallsignListVerifier, ChainVerifier, ClubLogVerifier,  # noqa: E402
@@ -41,6 +44,25 @@ DEFAULT_STORE = os.environ.get("MRRC_PORTAL_STORE", "/etc/mrrc-hub/portal.json")
 DEFAULT_REGISTRY = os.environ.get("MRRC_PORTAL_REGISTRY", "/etc/mrrc-hub/instances.tsv")
 DEFAULT_CALLSIGN_DB = os.environ.get("MRRC_PORTAL_CALLSIGN_DB", "/etc/mrrc-hub/callsigns.txt")
 DEFAULT_TOKEN_FILE = os.environ.get("MRRC_PORTAL_TOKEN_FILE", "/etc/mrrc-hub/portal.token")
+DEFAULT_USERS_FILE = os.environ.get("MRRC_PORTAL_USERS", "/etc/mrrc-hub/portal-users")
+
+#: 后台会话 Cookie。名字独立于实例的 `mrrc_auth`：通配子域下命名空间公用，
+#: 同名会互相覆盖或让实例读到 Hub 的凭据（约束 hub-cookie-name-not-instance-auth）。
+COOKIE_NAME = "mrrc_portal_session"
+
+
+def _host_is_loopback(host_header: str) -> bool:
+    """Cookie 的 Secure 策略用：只有本机名不带 Secure，其余一律带。
+
+    这样公网经 nginx 访问必然带 Secure（不依赖 nginx 是否记得 X-Forwarded-Proto），
+    而本机 SSH 隧道直连 8890 仍可登录。
+    """
+    host = (host_header or "").strip().lower()
+    if host.startswith("["):                      # [::1]:8890 → ::1
+        host = host[1:].split("]")[0]
+    else:
+        host = host.split(":")[0]
+    return host in ("127.0.0.1", "localhost", "::1")
 
 #: frps 令牌的服务账号可读副本（部署时 `install -m 640 -o root -g <服务账号>` 一份出来）。
 #: 端点**不**直接读 /etc/frp/frps.token：那是 root 的文件，服务账号读不到，也不该读到。
@@ -96,7 +118,10 @@ h3{color:var(--tx);font-size:.95rem;margin:1.5rem 0 .3rem}
 .nav{display:flex;flex-wrap:wrap;gap:.4rem;margin:.7rem 0 1.1rem}
 .nav form{margin:0}
 .nav button{min-height:44px;padding:.5rem 1rem;font-size:.9rem}
-.nav button[aria-current=page]{background:var(--tx);border-color:var(--tx);color:#000}
+.nav a{display:inline-flex;align-items:center;min-height:44px;padding:.5rem 1rem;font-size:.9rem;
+color:var(--tx2);text-decoration:none;border:1px solid var(--bd);border-radius:8px}
+.nav a[aria-current=page]{background:var(--tx);border-color:var(--tx);color:#000}
+.who{display:flex;justify-content:flex-end;margin:-.4rem 0 .8rem}
 td form{display:inline-block;margin:.15rem .25rem .15rem 0}
 td button{min-height:36px;padding:.35rem .7rem;font-size:.8125rem}
 th{color:var(--txm);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;background:rgba(255,255,255,.02);}
@@ -770,15 +795,25 @@ def cert_names(pem_path) -> set:
     return names
 
 
-def make_handler(portal: Portal, token: str, base: str = ""):
+def make_handler(portal: Portal, token: str, base: str = "", *,
+                 users: hp.UsersFile | None = None,
+                 sessions: SessionStore | None = None,
+                 guard: LoginGuard | None = None,
+                 sampler=None,
+                 cookie_secure: str = "auto"):
     """base 是挂载前缀（如 `/mrrc_portal`），空串表示挂在根。
 
     两边都容忍：入口收到 `{base}/apply` 或 `/apply` 都能处理（边缘可以保留前缀，
     也可以剥掉前缀）。页面里的链接用**相对形式**（`action="apply"`），因此同一份代码
     挂在根（`https://portal.../`）与挂在前缀（`https://www.vlsc.net/mrrc_portal/`）
     下都指向正确位置 —— 不必为每个挂载点各配一份 base。
+
+    认证装配（默认值让旧调用点不受影响）：`users` 是账号文件；`sessions`/`guard`
+    是内存态会话与登录锁定；`sampler` 是隧道指标采集器（None = 视图显示未启用）。
     """
     base = ("/" + base.strip("/")) if base and base.strip("/") else ""
+    session_store: SessionStore = sessions if sessions is not None else SessionStore()
+    login_guard: LoginGuard = guard if guard is not None else LoginGuard()
     class Handler(BaseHTTPRequestHandler):
         server_version = "MRRC-Portal/1.0"
 
@@ -810,52 +845,114 @@ def make_handler(portal: Portal, token: str, base: str = ""):
             from urllib.parse import parse_qs
             return {k: v[0] for k, v in parse_qs(raw).items()}
 
-        def _send(self, code: int, payload: dict | str, ctype="application/json; charset=utf-8"):
+        def _send(self, code: int, payload: dict | str, ctype="application/json; charset=utf-8",
+                  headers: dict | None = None):
             body = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, indent=2)
             data = body.encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(data)
 
-        def _operator_ok(self, body: dict | None = None) -> bool:
-            """令牌可来自请求头（curl/脚本）或表单字段（浏览器）。
+        # ---- 认证：会话 Cookie + CSRF（浏览器），令牌请求头（机器）----
+        def _query(self) -> dict:
+            from urllib.parse import parse_qs, urlsplit
+            return {k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()}
 
-            表单字段是刻意加的：运维在浏览器里点按钮时无法自定义请求头。
-            令牌走 **请求体** 而不是 URL —— URL 会进访问日志与浏览器历史。
-            """
+        def _session(self):
+            """→ (sid, Session) 或 (None, None)。"""
+            jar = SimpleCookie()
+            jar.load(self.headers.get("Cookie") or "")
+            morsel = jar.get(COOKIE_NAME)
+            if not morsel:
+                return None, None
+            s = session_store.get(morsel.value)
+            return (morsel.value, s) if s else (None, None)
+
+        def _cookie_secure(self) -> bool:
+            if cookie_secure == "on":
+                return True
+            if cookie_secure == "off":
+                return False
+            return not _host_is_loopback(self.headers.get("Host") or "")
+
+        def _cookie_header(self, sid: str, max_age: float) -> str:
+            parts = [f"{COOKIE_NAME}={sid}", f"Path={base or '/'}", "HttpOnly", "SameSite=Lax",
+                     f"Max-Age={max_age:.0f}"]
+            if self._cookie_secure():
+                parts.append("Secure")
+            return "; ".join(parts)
+
+        def _client_ip(self) -> str:
+            """回环对端才信任代理头；否则用 socket 对端。nginx 未透传时会退化为 127.0.0.1
+            全局桶 —— 这是已记录的退化，部署检查单里要求核对（SDD §12.9）。"""
+            peer = self.client_address[0] if self.client_address else ""
+            if peer in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                xff = (self.headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
+                return xff or (self.headers.get("X-Real-IP") or "").strip() or peer
+            return peer
+
+        def _csrf_ok(self, body: dict, s) -> bool:
+            return bool(s) and hmac.compare_digest(str(body.get("csrf") or ""), s.csrf)
+
+        def _action_actor(self, body: dict) -> tuple[bool, str]:
+            """机器路径（X-Portal-Token 请求头）或浏览器路径（会话+CSRF）：→ (通过, actor)。"""
+            if self._operator_ok(body):
+                return True, "token"
+            _, s = self._session()
+            if s and self._csrf_ok(body, s):
+                return True, s.user
+            return False, ""
+
+        def _login_page(self, error: str = "", status: int = 200, retry_after: int = 0):
+            note = ("<p><small>账号文件：<code>/etc/mrrc-hub/portal-users</code>（htpasswd，"
+                    "$apr1$；用 <code>openssl passwd -apr1</code> 生成）。脚本/curl 仍可用 "
+                    "<code>X-Portal-Token</code> 请求头调用运维动作。</small></p>")
+            if retry_after:
+                note = (f"<p class=msg>失败次数过多，请 {retry_after} 秒后再试。</p>" + note)
+            elif error:
+                note = f"<p class=msg>{html.escape(error)}</p>" + note
+            body = ("<h1>运维审批</h1>"
+                    "<form method=post action=admin/login>"
+                    "<input name=user placeholder=用户名 autocomplete=username autofocus required>"
+                    "<input type=password name=password placeholder=密码 autocomplete=current-password required>"
+                    "<button>登录</button></form>" + note)
+            headers = {"Retry-After": str(retry_after)} if retry_after else None
+            return self._send(status, _page("MRRC Portal — 运维登录", body, noindex=True),
+                              ctype="text/html; charset=utf-8", headers=headers)
+
+        def _operator_ok(self, body: dict | None = None) -> bool:
+            """令牌**只认请求头**：浏览器路径已由会话+CSRF 取代（表单字段不再接受）。"""
             if not token:
                 return False
             supplied = (self.headers.get("X-Portal-Token") or "").strip()
-            if not supplied and body:
-                supplied = str(body.get("token") or "").strip()
             return hmac.compare_digest(supplied, token)
 
         # ---- operator console ----
-        def _admin(self, view: str, token_value: str, msg: str = "") -> str:
-            """后台管理台：五个视图，全部服务端渲染。
+        def _admin(self, view: str, msg: str = "") -> str:
+            """后台管理台：全部服务端渲染。
 
-            安全姿态（延续全过程的不变量）：
-              * **不用 cookie、不做重定向** —— 导航与动作都靠表单里的隐藏令牌字段。
-                没有会话可被借用，CSRF 因此没有着力点。
-              * 令牌只出现在响应体里，不进 URL、不进 Location、不进访问日志。
+            安全姿态（变化的与不变的要分清）：
+              * 浏览器路径靠**会话 Cookie（HttpOnly/SameSite=Lax/Secure）+ 表单 CSRF 字段**；
+                机器路径（脚本/curl）仍用 `X-Portal-Token` 请求头，**表单不再接受令牌字段**。
+              * 令牌/会话值不进 URL、不进 Location、不进访问日志；导航只是 GET `?view=`（视图名不是秘密）。
               * **需要 root 的操作不由本服务执行**：Web 服务解析外网输入，给它
                 nginx reload / 拉库的权限是自找麻烦。这里只把命令打出来让运维执行。
             """
-            token_attr = html.escape(token_value)
+            _, session = self._session()
+            csrf_attr = html.escape(session.csrf if session else "")
             def nav(label, target):
                 cur = " aria-current=page" if target == view else ""
-                return (f"<form method=post>"
-                        f"<input type=hidden name=token value='{token_attr}'>"
-                        f"<input type=hidden name=view value='{target}'>"
-                        f"<button{cur}>{html.escape(label)}</button></form>")
+                return f"<a class=navlink href='?view={target}'{cur}>{html.escape(label)}</a>"
             def act(route, callsign, label, extra=""):
                 return (f"<form method=post action={route} style='display:inline'>"
                         f"<input type=hidden name=callsign value='{html.escape(callsign)}'>"
-                        f"<input type=hidden name=token value='{token_attr}'>"
-                        f"<input type=hidden name=view value='{view}'>{extra}"
+                        f"<input type=hidden name=csrf value='{csrf_attr}'>"
+                        f"<input type=hidden name=view value='{html.escape(view)}'>{extra}"
                         f"<button>{html.escape(label)}</button></form>")
 
             apps = portal.store._load()["applications"]
@@ -1027,11 +1124,18 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                 entries_a = list(reversed(portal.store.audit()))[:60]
                 rows_ = ''.join(trow(
                     ("时间", time.strftime('%m-%d %H:%M', time.localtime(e['at']))),
-                    ("呼号", f"<code>{html.escape(e['callsign'])}</code>"),
+                    ("呼号", f"<code>{html.escape(e['callsign'])}</code>" if e['callsign'] else "—"),
                     ("事件", html.escape(e['event'])),
+                    ("操作者", f"<code>{html.escape(e.get('actor') or '—')}</code>"),
                     ("细节", html.escape((e.get('detail') or '')[:90]))) for e in entries_a)
-                body = ("<h2>审计（最近 60 条，追加式）</h2><table class=stack><tr><th>时间</th><th>呼号</th><th>事件</th><th>细节</th></tr>"
-                        + (rows_ or "<tr><td colspan=4>（无）</td></tr>") + "</table>")
+                body = ("<h2>审计（最近 60 条，追加式）</h2><table class=stack><tr><th>时间</th><th>呼号</th><th>事件</th>"
+                        "<th>操作者</th><th>细节</th></tr>"
+                        + (rows_ or "<tr><td colspan=5>（无）</td></tr>") + "</table>")
+
+            elif view == "tunnel":
+                # 真渲染在隧道指标任务里接入；先明确报“未启用”而不是掉进别的分支。
+                body = ("<h2>隧道</h2><p class=msg>采集器未启用（--metrics-interval 0 或 dry-run）。"
+                        "延时与带宽需要后台采样线程。</p>")
 
             else:  # clublog
                 cl = _clublog_info()
@@ -1045,21 +1149,20 @@ def make_handler(portal: Portal, token: str, base: str = ""):
             return _page("MRRC Portal — 后台管理",
                          "<h1>呼号自助 — 后台管理</h1>"
                          + (f'<p class=msg>{html.escape(msg)}</p>' if msg else '')
-                         + f"<nav class=nav>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('系统','system')}{nav('审计','audit')}{nav('呼号库','clublog')}</nav>"
+                         + f"<nav class=nav>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('隧道','tunnel')}{nav('系统','system')}{nav('审计','audit')}{nav('呼号库','clublog')}</nav>"
+                         + (f"<div class=who><form method=post action=admin/logout style='display:inline'>"
+                            f"<input type=hidden name=csrf value='{csrf_attr}'>"
+                            f"<button>登出（{html.escape(session.user)}）</button></form></div>" if session else "")
                          + body, noindex=True)
 
         # ---- routes ----
         def do_GET(self):                        # noqa: N802
             if self._route() == "/admin":
-                return self._send(200, _page(
-                    "MRRC Portal — 运维登录",
-                    "<h1>运维审批</h1>"
-                    "<form method=post action=admin>"
-                    "<input type=password name=token placeholder=\"运维令牌（sudo cat /etc/mrrc-hub/portal.token）\" autofocus>"
-                    "<button>进入</button>"
-                    "</form>"
-                    "<p><small>令牌只随表单提交，不进 URL ✓ 本页与审批页均 <code>noindex</code> ✓</small></p>",
-                    noindex=True), ctype="text/html; charset=utf-8")
+                _, session = self._session()
+                if session is None:
+                    return self._login_page()
+                return self._send(200, self._admin(self._query().get("view") or "overview"),
+                                  ctype="text/html; charset=utf-8")
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})
             # 这是租户在**自己手机上**看的那张表，所以同样要能在窄屏堆叠。
@@ -1093,6 +1196,41 @@ def make_handler(portal: Portal, token: str, base: str = ""):
             except Exception as exc:             # noqa: BLE001
                 return self._send(400, {"error": f"请求体无法解析: {exc}"})
             try:
+                if route == "/admin/login":
+                    user = str(body.get("user") or "").strip()
+                    password = str(body.get("password") or "")
+                    ip = self._client_ip()
+                    remaining = login_guard.locked(user, ip)
+                    if remaining:
+                        portal.store.record_login("login_locked", user, ip)
+                        return self._login_page("", status=429, retry_after=remaining)
+                    ok, reason = (users.verify(user, password) if users
+                                  else (False, "unreadable: 账号文件未配置"))
+                    if reason.startswith("unreadable"):
+                        # 部署问题不计入锁定：重试再多也修不好，锁管理员只会阻碍修复。
+                        portal.store.record_login("login_failed", user, ip)
+                        return self._login_page("账号文件不可读或未配置（部署问题，不是密码问题）。", status=503)
+                    if not ok:
+                        login_guard.fail(user, ip)
+                        portal.store.record_login("login_failed", user, ip)
+                        return self._login_page("用户名或密码不正确。", status=401)
+                    login_guard.success(user, ip)
+                    sid = session_store.create(user)
+                    portal.store.record_login("login_ok", user, ip)
+                    return self._send(303, "", ctype="text/plain; charset=utf-8",
+                                      headers={"Location": (base or "") + "/admin",
+                                               "Set-Cookie": self._cookie_header(
+                                                   sid, session_store.absolute_seconds)})
+
+                if route == "/admin/logout":
+                    sid, s = self._session()
+                    if not s or not self._csrf_ok(body, s):
+                        return self._send(403, {"error": "登出需要会话与 CSRF 令牌"})
+                    session_store.destroy(sid)
+                    return self._send(303, "", ctype="text/plain; charset=utf-8",
+                                      headers={"Location": (base or "") + "/admin",
+                                               "Set-Cookie": self._cookie_header("", 0)})
+
                 if route == "/apply":
                     return self._send(200, portal.apply(body.get("callsign", ""),
                                                         body.get("contact", ""), body.get("product", "")))
@@ -1171,33 +1309,29 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                         "names": sorted(names),
                         "next_step": "sudo /usr/local/sbin/gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx",
                     })
-                if route == "/admin":
-                    if not self._operator_ok(body):
-                        return self._send(403, {"error": "令牌不正确"})
-                    return self._send(200, self._admin(body.get("view") or "overview", body.get("token", "").strip()),
-                                      ctype="text/html; charset=utf-8")
                 if route not in ("/verify", "/reject", "/grant", "/revoke"):
                     return self._send(404, {"error": "not found"})
-                if not self._operator_ok(body):
-                    return self._send(403, {"error": "运维动作需要 X-Portal-Token"})
+                ok, actor = self._action_actor(body)
+                if not ok:
+                    return self._send(403, {"error": "运维动作需要会话+CSRF 令牌，或 X-Portal-Token 请求头"})
                 who = cs.normalize(body.get("callsign", ""))
-                from_page = bool(body.get("token"))
                 def done(msg):
-                    if from_page:
-                        return self._send(200, self._admin(body.get("view") or "overview", body.get("token", "").strip(), msg),
+                    # 浏览器路径（会话+CSRF）重渲染管理台；机器路径（令牌头）只回 JSON。
+                    if actor != "token":
+                        return self._send(200, self._admin(str(body.get("view") or "overview"), msg),
                                           ctype="text/html; charset=utf-8")
                     return None
                 if route == "/verify":
-                    result = portal.store.mark_verified(who, body.get("evidence", "人工核验通过"))
+                    result = portal.store.mark_verified(who, body.get("evidence", "人工核验通过"), actor=actor)
                     rendered = done("已核验")
                     return rendered or self._send(200, result if isinstance(result, dict) else {"status": result.status})
                 if route == "/reject":
-                    result = portal.store.reject(who, body.get("reason", ""))
+                    result = portal.store.reject(who, body.get("reason", ""), actor=actor)
                     rendered = done("已拒绝")
                     return rendered or self._send(200, result if isinstance(result, dict) else {"status": result.status})
                 if route == "/grant":
-                    return self._send(200, portal.grant(who))
-                result = portal.revoke(who, body.get("reason", ""))
+                    return self._send(200, portal.grant(who, actor=actor))
+                result = portal.revoke(who, body.get("reason", ""), actor=actor)
                 return done("已撤销") or self._send(200, result)
             except cs.InvalidCallsign as exc:
                 return self._send(400, {"error": str(exc)})
@@ -1223,21 +1357,34 @@ def main(argv=None) -> int:
     ap.add_argument("--clublog", default=DEFAULT_CLUBLOG,
                     help="Club Log 呼号库 JSON（与站内留言版同源；由 hub 定时从 www 拉取）")
     ap.add_argument("--token-file", default=DEFAULT_TOKEN_FILE)
+    ap.add_argument("--users-file", default=DEFAULT_USERS_FILE,
+                    help="htpasswd 账号文件（$apr1$，一行一个 `用户名:哈希`）")
+    ap.add_argument("--cookie-secure", choices=("auto", "on", "off"), default="auto",
+                    help="会话 Cookie 的 Secure：auto=回环 Host 不带、其余带")
+    ap.add_argument("--session-idle-hours", type=float, default=8)
+    ap.add_argument("--session-max-hours", type=float, default=24)
     ap.add_argument("--base-path", default=os.environ.get("MRRC_PORTAL_BASE", ""),
                     help="挂载前缀，如 /mrrc_portal（默认空 = 挂在根）")
     ap.add_argument("--dry-run", action="store_true", help="只加载配置并自检，不监听")
     args = ap.parse_args(argv)
 
     token = Path(args.token_file).read_text(encoding="utf-8").strip() if Path(args.token_file).exists() else ""
+    users = hp.UsersFile(args.users_file)
     portal = Portal(Store(args.store), reg.Registry(args.registry),
                     build_verifier(args.callsign_db, args.clublog))
     if args.dry_run:
+        parsed, users_err = users.read()
         print(f"store={args.store} registry={args.registry} callsign_db={args.callsign_db}")
         print(f"token={'已配置' if token else '未配置（运维动作会被拒绝）'}")
+        print(f"账号文件={args.users_file}（"
+              + (f"{len(parsed)} 个账号" if parsed is not None else f"不可读：{users_err}") + "）")
         print(f"注册表现有条目: {len(portal.registry.entries())} | 占用端口: {sorted(portal.registry.used_ports())[:5]}")
         return 0
     base = ("/" + args.base_path.strip("/")) if args.base_path.strip("/") else ""
-    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(portal, token, base))
+    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(
+        portal, token, base, users=users,
+        sessions=SessionStore(args.session_idle_hours * 3600, args.session_max_hours * 3600),
+        guard=LoginGuard(), cookie_secure=args.cookie_secure))
     print(f"Portal 监听 http://{args.host}:{args.port}{base or '/'} （注册表 {args.registry}）", flush=True)
     try:
         httpd.serve_forever()

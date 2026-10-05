@@ -263,6 +263,39 @@ def test_redirect_target_follows_the_request_prefix():
                 st, _, hdr = _post(op, base + path, {"user": "ops", "password": "str0ng-pass"})
                 check(st == 303 and hdr.get("Location") == expect,
                       f"{path} 的 Location 应为 {expect}（得到 {hdr.get('Location')!r}）")
+            op, _ = _opener(no_follow=True)
+            st, page, _ = _get(op, base + "/mrrc_portal/admin")
+            check(st == 200 and "action='/mrrc_portal/admin/login'" in page,
+                  "前缀形态的登录表单动作带前缀")
+        finally:
+            httpd.shutdown()
+
+
+def test_admin_urls_are_absolute_and_paths_normalize():
+    """登录失败重渲染后表单不能再被相对拼接；/admin/ 与 /admin/login 也不能 404。
+
+    现场事故（2026-10-05）：密码错一次后浏览器地址停在 /admin/login，
+    裸相对 action="admin/login" 被拼成 /admin/admin/login → 404。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        base, _, httpd = _auth_env(Path(td))
+        try:
+            op, _ = _opener(no_follow=True)
+            st, page, _ = _get(op, base + "/admin")
+            check(st == 200 and "action='/admin/login'" in page,
+                  "登录表单用绝对 action='/admin/login'")
+            st, page, _ = _post(op, base + "/admin/login", {"user": "ops", "password": "bad"})
+            check(st == 401 and "action='/admin/login'" in page,
+                  "失败重渲染的表单仍是绝对路径（不会再拼成 /admin/admin/login）")
+            st, page, _ = _get(op, base + "/admin/")
+            check(st == 200 and "用户名" in page, "/admin/（尾斜杠）也是登录页")
+            st, page, _ = _get(op, base + "/admin/login")
+            check(st == 200 and "用户名" in page, "直连 /admin/login 也是登录页")
+            op2, _ = _opener(no_follow=True)
+            _post(op2, base + "/admin/login", {"user": "ops", "password": "str0ng-pass"})
+            st, _, hdr = _get(op2, base + "/admin/login")
+            check(st == 303 and hdr.get("Location") == "/admin",
+                  "已登录直连 /admin/login → 303 /admin")
         finally:
             httpd.shutdown()
 

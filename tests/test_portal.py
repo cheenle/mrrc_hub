@@ -907,7 +907,7 @@ def test_admin_views_render_the_probe_facts_end_to_end():
 
             # 导航里必须有新视图的链接，否则运维进不去
             _, nav_page = view("overview")
-            check("href='?view=system'" in nav_page, "导航里有「系统」链接")
+            check("/admin?view=system" in nav_page, "导航里有「系统」链接")
         finally:
             stop()
             httpd.shutdown()

@@ -873,10 +873,16 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             sys.stderr.write("portal: " + format % args + "\n")
 
         def _route(self) -> str:
-            """去掉挂载前缀后的路径；带前缀与不带前缀两种形式都接受。"""
+            """去掉挂载前缀后的路径；带前缀与不带前缀两种形式都接受。
+
+            末尾斜杠归一化：`/admin/` 与 `/admin` 是同一个路由（否则表单动作
+            相对当前地址再拼一次就会变成 `/admin/admin/...`）。
+            """
             path = self.path.split("?")[0]
             if base and (path == base or path.startswith(base + "/")):
                 path = path[len(base):] or "/"
+            if len(path) > 1 and path.endswith("/"):
+                path = path.rstrip("/")
             return path
 
         # ---- helpers ----
@@ -959,18 +965,20 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 return True, s.user
             return False, ""
 
-        def _console_url(self) -> str:
-            """浏览器可见的管理台路径：按请求实际路径推导前缀（挂根或挂前缀都对）。
+        def _admin_root(self) -> str:
+            """请求路径里 `/admin` 之前的前缀（`''` 或 `/mrrc_portal`）——浏览器可见的那一段。
 
-            不用配置里的 base：nginx 把本服务挂在哪一段路径上，只有请求路径知道。
-            （hub 上出现过 MRRC_PORTAL_BASE 与 nginx 实际挂载不一致的事故：
-            重定向去了租户页、会话 Cookie 的 Path 也对不上。）
+            管理台内部的链接与表单全部用它拼**绝对路径**：登录失败后页面是在
+            `/admin/login` 上重渲染的，当时表单用的是裸相对 `action=admin/login`，
+            浏览器把它拼成了 `/admin/admin/login`（2026-10-05 现场事故）。
             """
             path = self.path.split("?")[0]
-            for suffix in ("/admin/login", "/admin/logout", "/admin"):
-                if path.endswith(suffix):
-                    return path[: -len(suffix)] + "/admin"
-            return "admin"
+            idx = path.find("/admin")
+            return path[:idx] if idx > 0 else ""
+
+        def _console_url(self) -> str:
+            """浏览器可见的管理台路径（挂根 `/admin`，挂前缀 `/mrrc_portal/admin`）。"""
+            return self._admin_root() + "/admin"
 
         def _login_page(self, error: str = "", status: int = 200, retry_after: int = 0):
             note = ("<p><small>账号文件：<code>/etc/mrrc-hub/portal-users</code>（htpasswd，"
@@ -981,7 +989,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             elif error:
                 note = f"<p class=msg>{html.escape(error)}</p>" + note
             body = ("<h1>运维审批</h1>"
-                    "<form method=post action=admin/login>"
+                    f"<form method=post action='{self._admin_root()}/admin/login'>"
                     "<input name=user placeholder=用户名 autocomplete=username autofocus required>"
                     "<input type=password name=password placeholder=密码 autocomplete=current-password required>"
                     "<button>登录</button></form>" + note)
@@ -1009,11 +1017,12 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             """
             _, session = self._session()
             csrf_attr = html.escape(session.csrf if session else "")
+            root = self._admin_root()
             def nav(label, target):
                 cur = " aria-current=page" if target == view else ""
-                return f"<a class=navlink href='?view={target}'{cur}>{html.escape(label)}</a>"
+                return f"<a class=navlink href='{root}/admin?view={target}'{cur}>{html.escape(label)}</a>"
             def act(route, callsign, label, extra=""):
-                return (f"<form method=post action={route} style='display:inline'>"
+                return (f"<form method=post action='{root}{route}' style='display:inline'>"
                         f"<input type=hidden name=callsign value='{html.escape(callsign)}'>"
                         f"<input type=hidden name=csrf value='{csrf_attr}'>"
                         f"<input type=hidden name=view value='{html.escape(view)}'>{extra}"
@@ -1289,17 +1298,22 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                          "<h1>呼号自助 — 后台管理</h1>"
                          + (f'<p class=msg>{html.escape(msg)}</p>' if msg else '')
                          + f"<nav class=nav>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('隧道','tunnel')}{nav('系统','system')}{nav('审计','audit')}{nav('呼号库','clublog')}</nav>"
-                         + (f"<div class=who><form method=post action=admin/logout style='display:inline'>"
+                         + (f"<div class=who><form method=post action='{root}/admin/logout' style='display:inline'>"
                             f"<input type=hidden name=csrf value='{csrf_attr}'>"
                             f"<button>登出（{html.escape(session.user)}）</button></form></div>" if session else "")
                          + body, noindex=True)
 
         # ---- routes ----
         def do_GET(self):                        # noqa: N802
-            if self._route() == "/admin":
+            route = self._route()
+            if route in ("/admin", "/admin/login"):
                 _, session = self._session()
                 if session is None:
                     return self._login_page()
+                if route == "/admin/login":
+                    # 直连 /admin/login 时把已登录者送回控制台（保持单一 URL）
+                    return self._send(303, "", ctype="text/plain; charset=utf-8",
+                                      headers={"Location": self._console_url()})
                 return self._send(200, self._admin(self._query().get("view") or "overview"),
                                   ctype="text/html; charset=utf-8")
             if self._route() != "/":

@@ -20,6 +20,13 @@ import urllib.request
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
+
+
+class Panel(Protocol):
+    """采集器只依赖这一个方法：便于测试注入替身（不必继承具体实现）。"""
+
+    def fetch(self) -> tuple[list | None, str]: ...
 
 
 @dataclass
@@ -79,7 +86,7 @@ class FrpsPanel:
 class Sampler:
     """后台采样线程：面板取数（差分算速率）+ 隧道探测计时（复用 app 的探测函数）。"""
 
-    def __init__(self, entries, probe, panel: FrpsPanel, *, interval: float = 30.0,
+    def __init__(self, entries, probe, panel: Panel, *, interval: float = 30.0,
                  history: int = 120, clock=time.time, nic_path: str = "/proc/net/dev"):
         self._entries = entries              # () -> [(label, port)]
         self._probe = probe                  # (port, label) -> (state, detail, latency_ms|None)

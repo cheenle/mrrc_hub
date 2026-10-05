@@ -146,6 +146,67 @@ def test_nic_rates_from_fake_proc():
     check(abs(nic["tx_bps"] - (3000 * 8 / 10)) < 1e-6, "网卡出速率（lo 不计）")
 
 
+def test_tunnel_view_renders_end_to_end():
+    """假采样器 → 登录后的管理台真的把延时/带宽拼对了吗（延续 V0.24 的拼接教训）。"""
+    import http.cookiejar
+    import threading
+    import urllib.parse
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from portal import htpasswd as ht
+    from portal import registry as reg
+    from portal import sessions as sess
+    from portal.app import Portal, make_handler
+    from portal.store import Store
+    from portal.verify import CallsignListVerifier
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "callsigns.txt").write_text("NOBODY\n", encoding="utf-8")
+        (tmp / "instances.tsv").write_text("bg1sb\t18802\n", encoding="utf-8")
+        (tmp / "portal-users").write_text(
+            "ops:" + ht.apr1("pw-123456789", "saltward") + "\n", encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        clock = FakeClock()
+        panel = FakePanel([([proxy("bg1sb", 1000, 2000, 4, 2_000_000, 7_000_000)], ""),
+                           ([proxy("bg1sb", 4000, 11000, 5, 2_400_000, 7_600_000)], "")])
+        s = mt.Sampler(lambda: [("bg1sb", 18802)],
+                       lambda port, label: ("serving", "握手成功", 23.4),
+                       panel, interval=30.0, history=10, clock=clock, nic_path="/nonexistent")
+        s.tick()
+        clock.now += 30
+        s.tick()
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
+            portal, token="tok", users=ht.UsersFile(tmp / "portal-users"),
+            sessions=sess.SessionStore(), guard=sess.LoginGuard(), sampler=s))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        try:
+            opener.open(base + "/admin/login",
+                        data=urllib.parse.urlencode({"user": "ops", "password": "pw-123456789"}).encode(),
+                        timeout=10)
+            with opener.open(base + "/admin?view=tunnel", timeout=10) as r:
+                page = r.read().decode()
+            # Δin=3000B·8/30s=800 bps，Δout=9000B·8/30s=2400 bps
+            for needle, why in (("隧道", "视图标题"), ("bg1sb", "实例标签"),
+                                ("23 ms", "延时数值"), ("在线", "隧道四态文案"),
+                                ("800 bps", "上行差分速率"), ("2.4 kbps", "下行差分速率"),
+                                ("2.3 MiB", "今日下行流量"), ("5", "当前连接数")):
+                check(needle in page, f"隧道视图渲染出{why}（{needle!r}）")
+            with opener.open(base + "/admin?view=system", timeout=10) as r:
+                sys_page = r.read().decode()
+            check("frps 面板" in sys_page and "全代理合计速率" in sys_page, "系统页有面板聚合行")
+            with opener.open(base + "/admin?view=overview", timeout=10) as r:
+                ov = r.read().decode()
+            check("延时均值" in ov and "出带宽" in ov, "总览页有隧道摘要")
+        finally:
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

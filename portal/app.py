@@ -345,6 +345,38 @@ TUNNEL_PILL = {
 }
 
 
+def _fmt_bps(value) -> str:
+    if value is None:
+        return "—"
+    if value < 1000:
+        return f"{value:.0f} bps"
+    if value < 1_000_000:
+        return f"{value / 1000:.1f} kbps"
+    return f"{value / 1_000_000:.2f} Mbps"
+
+
+def _fmt_bytes(value) -> str:
+    if value is None:
+        return "—"
+    if value < 1024:
+        return f"{value} B"
+    if value < 1024 ** 2:
+        return f"{value / 1024:.1f} KiB"
+    if value < 1024 ** 3:
+        return f"{value / 1024 ** 2:.1f} MiB"
+    return f"{value / 1024 ** 3:.2f} GiB"
+
+
+def _ago(seconds) -> str:
+    if seconds is None:
+        return "—"
+    if seconds < 90:
+        return f"{seconds:.0f}s 前"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f}m 前"
+    return f"{seconds / 3600:.1f}h 前"
+
+
 # ── 可观测面：系统 → 服务 → 隧道 → 实例 → 实例里的应用 ──────────────
 # 设计约束：本服务以非特权用户 mrrcportal 运行（NoNewPrivileges、不能 sudo）。
 # 2026-10-03 在 hub 上逐项实测的可达面：
@@ -976,10 +1008,22 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     f"<br><small><span class='pill {TUNNEL_PILL[s]}'>{html.escape(TUNNEL_TEXT[s])}</span> "
                     f"<code>{html.escape(l)}</code>:{p} — {html.escape(d)}</small>"
                     for l, p, s, d in not_serving)
+                tunnel_summary = ""
+                if sampler is not None:
+                    snap = sampler.snapshot()
+                    lats = [i["last"].latency_ms for i in snap["labels"].values()
+                            if i["last"].latency_ms is not None]
+                    outs = [i["last"].out_bps for i in snap["labels"].values()
+                            if i["last"].out_bps is not None]
+                    if lats and outs:
+                        tunnel_summary = (f"<br><small>延时均值 {sum(lats) / len(lats):.0f} ms；"
+                                          f"出带宽 {_fmt_bps(sum(outs))}（<a href='?view=tunnel'>隧道视图</a>）</small>")
+                    elif snap["panel_error"]:
+                        tunnel_summary = f"<br><small>{html.escape(snap['panel_error'])}</small>"
                 body = f"""<h2>总览</h2>
 <table class=kv><tr><th>项</th><th>值</th></tr>
 <tr><td>申请</td><td>{'　'.join(f"{k}={v}" for k, v in sorted(by.items())) or '（无）'}</td></tr>
-<tr><td>注册表实例</td><td>{len(entries)} 个，其中<b>真正在服务</b> {online} 个{bad}</td></tr>
+<tr><td>注册表实例</td><td>{len(entries)} 个，其中<b>真正在服务</b> {online} 个{bad}{tunnel_summary}</td></tr>
 <tr><td>入口证书剩余</td><td>{cert}</td></tr>
 <tr><td>Club Log 呼号库</td><td>{cl}</td></tr>
 <tr><td>端口池</td><td>{registry.first}-{registry.last}，已用 {len(entries)}，空闲 {registry.last - registry.first + 1 - len(entries)}</td></tr>
@@ -1040,6 +1084,30 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     ("到期", html.escape(na)),
                     ("剩余", "—" if dy is None else f"{dy} 天"))
                     for n, su, na, dy in certs) or "<tr><td colspan=4>（无）</td></tr>"
+                # ③ 的附加行：frps 面板（隧道速率来自它，拿不到就如实标注原因）
+                if sampler is None:
+                    tunnel_rows = "<tr><td>frps 面板</td><td>采集器未启用</td></tr>"
+                else:
+                    snap = sampler.snapshot()
+                    panel_line = ("可用" if not snap["panel_error"]
+                                  else f"<b>{html.escape(snap['panel_error'])}</b>")
+                    if snap["panel_age"] is not None:
+                        panel_line += f"（{_ago(snap['panel_age'])}）"
+                    agg_in = agg_out = 0.0
+                    have_agg = False
+                    for item in snap["labels"].values():
+                        if item["last"].in_bps is not None and item["last"].out_bps is not None:
+                            agg_in += item["last"].in_bps
+                            agg_out += item["last"].out_bps
+                            have_agg = True
+                    agg_line = (f"↓ {_fmt_bps(agg_out)} / ↑ {_fmt_bps(agg_in)}"
+                                if have_agg else "（本轮不可算）")
+                    nic = snap["nic"] or {}
+                    nic_line = (f"↓ {_fmt_bps(nic.get('rx_bps'))} / ↑ {_fmt_bps(nic.get('tx_bps'))}"
+                                if "rx_bps" in nic else html.escape(nic.get("note", "—")))
+                    tunnel_rows = (f"<tr><td>frps 面板</td><td>{panel_line}</td></tr>"
+                                   f"<tr><td>全代理合计速率</td><td>{agg_line}</td></tr>"
+                                   f"<tr><td>hub 网卡</td><td>{nic_line}</td></tr>")
                 body = (
                     "<h2>系统</h2>"
                     "<h3>① hub 主机</h3><table class=kv><tr><th>项</th><th>值</th></tr>" + rows_ + "</table>"
@@ -1057,15 +1125,16 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     f"{'：' + ', '.join(str(x) for x in listening) if listening else ''}</td></tr>"
                     f"<tr><td>注册了但没在听</td><td>{', '.join(str(x) for x in missing) or '（无）'}</td></tr>"
                     f"<tr><td>在听但注册表里没有</td><td>{', '.join(str(x) for x in stray) or '（无）'}</td></tr>"
-                    "</table>"
+                    + tunnel_rows
+                    + "</table>"
                     + (f"<p><small>⚠️ {html.escape(net['note'])}</small></p>" if net["note"] else "")
                     + "<h3>④ hub 侧已登记的实例证书</h3>"
                     "<table class=stack><tr><th>文件</th><th>主体</th><th>到期</th><th>剩余</th></tr>" + cert_rows + "</table>"
                     "<p><small>注册表里有一行只代表<b>预留</b>；没有证书就说明该实例从未走完批准→登记，"
                     "它的入口只能 502。<br>"
                     "本页采集不到的：<code>/var/log/nginx/*.log</code>（mrrcportal 不可读 ⇒ 无每实例的 nginx 错误计数）、"
-                    "frps 的每代理统计（未配 <code>logFile</code>、未开 <code>webServer</code> 面板）、"
-                    "以及实例内部状态（电台/录音/会话都在令牌之后）。</small></p>")
+                    "实例内部状态（电台/录音/会话都在令牌之后）；frps 面板未启用或凭据不可读时，隧道速率会如实标注原因而不是显示 0。"
+                    "</small></p>")
 
             elif view == "instances":
                 reports = _instance_reports(registry.entries_full())
@@ -1133,9 +1202,47 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                         + (rows_ or "<tr><td colspan=5>（无）</td></tr>") + "</table>")
 
             elif view == "tunnel":
-                # 真渲染在隧道指标任务里接入；先明确报“未启用”而不是掉进别的分支。
-                body = ("<h2>隧道</h2><p class=msg>采集器未启用（--metrics-interval 0 或 dry-run）。"
-                        "延时与带宽需要后台采样线程。</p>")
+                if sampler is None:
+                    body = ("<h2>隧道</h2><p class=msg>采集器未启用（--metrics-interval 0 或 dry-run）。"
+                            "延时与带宽需要后台采样线程。</p>")
+                else:
+                    snap = sampler.snapshot()
+                    rows_ = []
+                    for label, port in sorted(entries):
+                        item = snap["labels"].get(label)
+                        if item is None:
+                            rows_.append(trow(("标签", f"<code>{html.escape(label)}</code>"),
+                                              ("隧道", "<small>首轮采样中…</small>"),
+                                              ("延时", "—"), ("带宽（↓/↑）", "—"),
+                                              ("今日流量（↓/↑）", "—"), ("连接数", "—"), ("采样", "—")))
+                            continue
+                        last = item["last"]
+                        state = last.tunnel_state
+                        pill = (f"<span class='pill {TUNNEL_PILL[state]}'>"
+                                f"{html.escape(TUNNEL_TEXT[state])}</span>") if state in TUNNEL_PILL else "—"
+                        if last.latency_ms is not None:
+                            lat = (f"{last.latency_ms:.0f} ms<br><small>均值 {item['latency_mean']:.0f} · "
+                                   f"峰值 {item['latency_peak']:.0f}</small>")
+                        else:
+                            lat = f"<small>—（{html.escape(last.tunnel_detail or '无应答')}）</small>"
+                        bw = (f"↓ {_fmt_bps(last.out_bps)}<br>↑ {_fmt_bps(last.in_bps)}<br>"
+                              f"<small>均值 ↓ {_fmt_bps(item['out_mean'])} / ↑ {_fmt_bps(item['in_mean'])}</small>")
+                        traffic = f"↓ {_fmt_bytes(last.today_out)}<br>↑ {_fmt_bytes(last.today_in)}"
+                        conns = "—" if last.cur_conns is None else str(last.cur_conns)
+                        fresh = _ago(item["stale_s"])
+                        if last.note:
+                            fresh += f"<br><small>{html.escape(last.note)}</small>"
+                        rows_.append(trow(("标签", f"<code>{html.escape(label)}</code>"),
+                                          ("隧道", pill), ("延时", lat), ("带宽（↓/↑）", bw),
+                                          ("今日流量（↓/↑）", traffic), ("连接数", conns), ("采样", fresh)))
+                    body = ("<h2>隧道</h2><table class=stack><tr><th>标签</th><th>隧道</th><th>延时</th>"
+                            "<th>带宽（↓/↑）</th><th>今日流量（↓/↑）</th><th>连接数</th><th>采样</th></tr>"
+                            + ("".join(rows_) or "<tr><td colspan=7>（注册表为空）</td></tr>") + "</table>"
+                            + (f"<p class=msg>⚠️ {html.escape(snap['panel_error'])}</p>"
+                               if snap["panel_error"] else "")
+                            + "<p><small>带宽来自 frps 面板的累计字节差分（30 s 一轮）；历史只存内存、重启即清。"
+                            "延时是 hub 回环经隧道到实例应用的完整 TLS 握手耗时（只在握手成功时给出）。"
+                            "拿不到的一律如实标注，不用 0 冒充。</small></p>")
 
             else:  # clublog
                 cl = _clublog_info()

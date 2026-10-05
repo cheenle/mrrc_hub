@@ -78,6 +78,14 @@ def _csrf_from(page):
     return m.group(1)
 
 
+class _StubSampler:
+    """只服务渲染层的替身：采样/差分逻辑在 test_portal_metrics.py 里覆盖。"""
+
+    def snapshot(self):
+        return {"labels": {}, "panel_error": "", "panel_age": None,
+                "nic": {"note": "测试"}, "interval": 30.0}
+
+
 def raises(exc, fn, *a, **kw):
     try:
         fn(*a, **kw)
@@ -989,7 +997,7 @@ def test_pages_are_mobile_suitable():
         portal.apply("bg1sb")                      # 让申请视图与审计视图有内容可渲染
         from http.server import ThreadingHTTPServer
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
-            portal, token="tok", users=ht.UsersFile(users_path)))
+            portal, token="tok", users=ht.UsersFile(users_path), sampler=_StubSampler()))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         opener, _ = _signed_in_opener(base, "ops", "pw-123456789")
@@ -1022,7 +1030,7 @@ def test_pages_are_mobile_suitable():
                           f"{name}: 导航恰有一项标了 aria-current=page（得到 {pr.aria_current}）")
                 # 宽表必须挂着 class=stack：丢了它，那些 td 就退出 data-label 检查范围，
                 # 守卫会静默放行，手机上退回难看的挤压布局。
-                need = {"instances": 1, "applications": 1, "tunnel": 0, "audit": 1, "system": 2,
+                need = {"instances": 1, "applications": 1, "tunnel": 1, "audit": 1, "system": 2,
                         "overview": 0, "clublog": 0, "公开注册页": 1}
                 check(pr.stack_tables >= need[name],
                       f"{name}: 至少 {need[name]} 张宽表挂了 class=stack（得到 {pr.stack_tables}）")

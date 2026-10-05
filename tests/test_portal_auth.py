@@ -87,6 +87,23 @@ def test_login_guard():
     check(guard.locked("alice", "10.0.0.1") == 0, "成功登录清空失败记录")
 
 
+def test_audit_actor_and_login_events():
+    with tempfile.TemporaryDirectory() as td:
+        store = Store(Path(td) / "portal.json")
+        store.apply("BG1SB")
+        store.mark_verified("BG1SB", "材料", actor="alice")
+        store.grant("BG1SB", "bg1sb", 18802, actor="alice")
+        store.record_login("login_ok", "alice", "203.0.113.7")
+        events = store.audit()
+        by_event = {e["event"]: e for e in events}
+        check(by_event["verified"].get("actor") == "alice", "核验记下操作者")
+        check(by_event["granted"].get("actor") == "alice", "授予记下操作者")
+        login = by_event["login_ok"]
+        check(login.get("actor") == "alice" and login["callsign"] == "", "登录事件 actor=用户名、无呼号")
+        check("203.0.113.7" in login["detail"], "登录事件带来源 IP")
+        check(all("actor" in e for e in events), "所有条目都有 actor 字段（旧文件缺省为空）")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

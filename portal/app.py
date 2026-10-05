@@ -219,7 +219,7 @@ class Portal:
                 # 它读不了别人的申请、也改不了任何状态（见 store.Application.request_token）。
                 "request_token": app.request_token}
 
-    def grant(self, raw_callsign: str) -> dict:
+    def grant(self, raw_callsign: str, actor: str = "") -> dict:
         normalized = cs.normalize(raw_callsign)
         app = self.store.get(normalized)
         if not app:
@@ -247,7 +247,7 @@ class Portal:
             port = self.registry.free_port()
             self.registry.add(label, port)
         try:
-            granted = self.store.grant(normalized, label, port)
+            granted = self.store.grant(normalized, label, port, actor=actor)
         except Exception:
             if label not in known:                        # 失败即回滚，只回滚这次新增的
                 self.registry.remove(label)
@@ -264,13 +264,13 @@ class Portal:
                 ),
                 "status": granted.status}
 
-    def revoke(self, raw_callsign: str, reason: str) -> dict:
+    def revoke(self, raw_callsign: str, reason: str, actor: str = "") -> dict:
         normalized = cs.normalize(raw_callsign)
         app = self.store.get(normalized)
         if not app:
             raise KeyError(normalized)
         removed = self.registry.remove(app.label) if app.label else False
-        self.store.revoke(normalized, reason)
+        self.store.revoke(normalized, reason, actor=actor)
         return {"callsign": normalized, "label": app.label, "entry_removed": removed, "status": "revoked"}
 
 
@@ -389,8 +389,13 @@ def _host_resources() -> dict:
     rc, text = _run(["df", "-Pk", "/"], timeout=3)
     fields = text.splitlines()[1].split() if rc == 0 and len(text.splitlines()) > 1 else []
     if len(fields) >= 5 and fields[1].isdigit() and fields[3].isdigit():
-        out["disk"] = (f"/ 可用 {int(fields[3]) // 1024} MB / 共 {int(fields[1]) // 1024} MB"
-                       f"（已用 {fields[4]}）")
+        try:
+            # isdigit() 对 '²' 这类 Unicode 数字也为真，而 int() 会抛 ValueError ——
+            # 所以真正的护栏是这里的 except，不是上面那个判断。
+            out["disk"] = (f"/ 可用 {int(fields[3]) // 1024} MB / 共 {int(fields[1]) // 1024} MB"
+                           f"（已用 {fields[4]}）")
+        except (ValueError, IndexError) as exc:
+            out["disk"] = f"df 行无法解析：{exc}（{text[:60]}）"
     else:
         out["disk"] = f"df 没有给出可解析的行（rc={rc}）：{text[:60]}"
     return out
@@ -990,7 +995,7 @@ def make_handler(portal: Portal, token: str, base: str = ""):
                         return "<small>—<br>（握手没成，拿不到证书）</small>"
                     ok = c.get("name_ok")
                     mark = ("<span class='pill ok'>名字相符</span>" if ok else
-                            "<span class='pill bad'>名字不符 ⇒ nginx 必 502</span>" if ok is False else "")
+                            "<span class='pill bad'>名字不符 ⇒ nginx 必 502</span>" if ok is not None else "")
                     issuer = "自签" if c.get("issuer") == c.get("subject") else (c.get("issuer") or "")[:44]
                     days = _days_left(c.get("not_after", ""))
                     return (f"<small><code>{html.escape(c.get('subject', ''))}</code><br>"

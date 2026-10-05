@@ -157,7 +157,8 @@ log.to = "/var/log/frps.log"
 log.level = "info"
 
 # Read-only dashboard API on loopback: the portal samples per-proxy
-# trafficIn/Out + curConns from it (tunnel bandwidth). Never exposed by nginx.
+# todayTrafficIn/Out + curConns from it (0.71 has no cumulative counters; the
+# sampler diffs the today counters). Never exposed by nginx.
 webServer.addr = "127.0.0.1"
 webServer.port = 7100
 webServer.user = "${FRPS_WEB_USER}"
@@ -175,8 +176,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
-# Hot config reload (frp >= 0.52): adding the dashboard must not drop live tunnels.
-ExecReload=/bin/kill -HUP $MAINPID
+# frp 0.71 does NOT hot-reload: SIGHUP makes it exit cleanly, and systemd reads that
+# as a successful reload — it never restarts it (measured on the hub 2026-10-05,
+# which left all tunnels down until a manual start). Config changes need a restart;
+# frpc reconnects on its own (4 tunnels were back within ~7s).
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536

@@ -21,29 +21,37 @@
 - **机器路径不动**：`X-Portal-Token` 只走请求头（表单字段移除）；审计新增 `actor` 字段与
   `login_ok/login_failed/login_locked` 事件（登录事件带来源 IP，仅管理台可见）。
 - **隧道性能**（新模块 `portal/metrics.py`）：frps 开 `webServer`（只绑 127.0.0.1:7100，
-  Basic 认证，凭据 0640 root:mrrcportal；`ExecReload` 走 SIGHUP 热重载，隧道不断）；portal
-  后台线程每 30s 采 `trafficIn/Out` 差分算上下行带宽 + 复用四态探测做 TLS 握手计时算延时，
-  每实例内存环形历史 120 样本（≈1h）。新增「隧道」视图（延时当前/均值/峰值、带宽最近/均值、
-  今日流量、连接数、采样新鲜度）；系统页③加面板状态/全代理合计/hub 网卡；总览页附摘要。
+  Basic 认证，凭据 0640 root:mrrcportal）；portal 后台线程每 30s 采代理流量差分算上下行带宽
+  - 复用四态探测做 TLS 握手计时算延时，每实例内存环形历史 120 样本（≈1h）。新增「隧道」视图
+  （延时当前/均值/峰值、带宽最近/均值、今日流量、连接数、采样新鲜度）；系统页③加面板状态/
+  全代理合计/hub 网卡；总览页附摘要。
 - **诚实降级**：面板不可用/凭据不可读/代理不存在/计数器重置/采样停滞，全部给可读原因，
   不用 0 冒充（延续 V0.24 的姿态）。
 
 **边界**：
 
-- **未部署**：改动只在仓库里，hub 上跑的仍是旧版；部署需要：建账号文件、frps.toml 加面板段
-  并 `systemctl reload frps`、核验 nginx 是否透传 `X-Forwarded-For`/`X-Real-IP`（缺则 IP 锁定
-  退化为全局桶）、重启 `mrrc-portal.service`。**部署时用 `curl` 复核 frp 0.71 dashboard
-  的真实字段名**（现有解析器按假设写，字段缺失会如实标注而不是显示错数）。
+- **已部署（2026-10-05，hub `203.25.119.168`）**：账号文件 `/etc/mrrc-hub/portal-users` 已有
+  首个账号；frps 面板已开（凭据 0640 root:mrrcportal）；portal unit 里过期的
+  `MRRC_PORTAL_BASE=/mrrc_portal` 已移除。公网复验：4 个实例全部出带宽/延时/今日流量，
+  审计出现 `login_ok`（`actor=cheenle`），租户页无回归。代码侧同时把登录/登出重定向改为
+  **按请求路径推导**：unit 里那个变量曾让登录跳去租户页（nginx 把门户挂在根，
+  `/mrrc_portal/*` 只是 301）、会话 Cookie 的 Path 也对不上。
+- **部署中推翻的两个假设**：① frp 0.71 **不热重载** —— SIGHUP 让它**干净退出**，而 systemd
+  把“干净退出”当成 reload 成功、不会自动拉起（实测 ~7 秒空窗后手工 start；已从
+  `bootstrap-hub.sh` 与部署文档移除 `ExecReload` 写法）。② 0.71 面板**没有累计
+  `trafficIn/Out`**，只有 `todayTrafficIn/Out` + `curConns`（采样器改按今日累计差分，跨日/
+  重启由回绕检测兜底）。
 - **会话在内存**：portal 重启即全部登出；不支持改密即时踢人（每次登录读账号文件，改密/删人
   对新登录生效）。
 - **apr1 取舍**：MD5 系哈希抗 GPU 暴力弱于 bcrypt——账号少、密码强、有固定阈值锁定与
   nginx `limit_req` 兜底；该取舍记录在规格的决策记录里。
 - **指标不落盘**：历史只存内存、重启即清；不做告警与图表。
 
-**测试** 27 → **45 组**（新增 `test_htpasswd.py` 4、`test_portal_auth.py` 6、
-`test_portal_metrics.py` 8；`test_portal.py` 27）。apr1 与 `openssl passwd -apr1` 交叉验证
+**测试** 27 → **48 组**（新增 `test_htpasswd.py` 4、`test_portal_auth.py` 7、
+`test_portal_metrics.py` 10；`test_portal.py` 27）。apr1 与 `openssl passwd -apr1` 交叉验证
 （固定向量 + 随机 20 组）；登录/锁定/会话过期/登出/CSRF/令牌路径不回归；采样器差分/回绕/
-缺失/降级（假时钟 + 假面板）；隧道视图端到端拼接。规格：
+缺失/降级（假时钟 + 假面板）；面板两种应答形态（0.71 的 `{proxies:[…]}` 与旧版裸列表）；
+重定向跟随请求前缀（挂根/挂前缀）；隧道视图端到端拼接。规格：
 `docs/superpowers/specs/2026-10-05-portal-admin-auth-tunnel-metrics-design.md`。
 
 ## V0.27 — 2026-10-04 — 注册表全量取证、主产品入口 `bg1sb` 补回；hub 日志被同名代理重试刷屏（根因在客户端）

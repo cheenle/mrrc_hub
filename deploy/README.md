@@ -253,14 +253,19 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
    文件为空 = 没人能登管理台（令牌机器路径仍可用）。`bootstrap-hub.sh` 只创建占位，不覆盖。
 2. **frps 面板**：`frps.toml` 的 `webServer` 段只绑 `127.0.0.1:7100`，凭据
    `/etc/mrrc-hub/frps-web.credentials`（0640 root:mrrcportal，bootstrap 自动生成）。
-   改完用 **`systemctl reload frps`**（`ExecReload` = SIGHUP，frp ≥0.52 热重载，隧道不断）；
-   若实测该版本对 SIGHUP 不生效，再退化到维护窗口内 restart。
+   **改完必须 `systemctl restart frps`**：frp 0.71 **不热重载** —— SIGHUP 会让它
+   干净退出，而 systemd 把"干净退出"当成 reload 成功、**不会**自动拉起
+   （2026-10-05 实测踩中，随后移除了那个 ExecReload drop-in）。重启让隧道瞬断、
+   frpc 自动重连（实测 4 条隧道 ~7 秒全部回来）。
 3. **核验面板字段**：`curl -u "$(cut -d: -f1- /etc/mrrc-hub/frps-web.credentials)" http://127.0.0.1:7100/api/proxy/tcp`
-   —— 确认真实字段名（本文档按 0.71 的 `trafficIn/Out`、`todayTrafficIn/Out`、`curConns` 假定）。
+   —— 0.71 实测应答是 `{"proxies": [...], ...}`，每条代理只有 `todayTrafficIn/Out`、
+   `curConns` 与 `lastStartTime/CloseTime`，**没有累计 `trafficIn/Out`**（采样器因此用今日累计差分）。
 4. **来源 IP 透传**：portal vhost 必须设 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
    （与 `X-Real-IP`）。**缺了它登录锁定会退化成 127.0.0.1 全局桶**——与 §12.8 的实例侧同款教训。
 5. **重启 portal**：`sudo systemctl restart mrrc-portal`；随后逐项复验：登录/登出、无 CSRF 动作被拒、
    隧道视图出数、停掉面板时页面显示原因而不是 0。
+6. **portal unit 不得设 `MRRC_PORTAL_BASE`**（现网 nginx 把门户挂在根，`/mrrc_portal/*` 只是 301；
+   unit 里那个过期变量曾让登录跳去租户页、会话 Cookie 的 Path 也对不上。2026-10-05 已移除）。
 
 > frps 那个单共享 token 仍然存在（见上）；本面板只是**只读统计**，不是第二套认证。
 

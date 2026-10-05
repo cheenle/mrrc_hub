@@ -959,6 +959,19 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 return True, s.user
             return False, ""
 
+        def _console_url(self) -> str:
+            """浏览器可见的管理台路径：按请求实际路径推导前缀（挂根或挂前缀都对）。
+
+            不用配置里的 base：nginx 把本服务挂在哪一段路径上，只有请求路径知道。
+            （hub 上出现过 MRRC_PORTAL_BASE 与 nginx 实际挂载不一致的事故：
+            重定向去了租户页、会话 Cookie 的 Path 也对不上。）
+            """
+            path = self.path.split("?")[0]
+            for suffix in ("/admin/login", "/admin/logout", "/admin"):
+                if path.endswith(suffix):
+                    return path[: -len(suffix)] + "/admin"
+            return "admin"
+
         def _login_page(self, error: str = "", status: int = 200, retry_after: int = 0):
             note = ("<p><small>账号文件：<code>/etc/mrrc-hub/portal-users</code>（htpasswd，"
                     "$apr1$；用 <code>openssl passwd -apr1</code> 生成）。脚本/curl 仍可用 "
@@ -1344,17 +1357,17 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     sid = session_store.create(user)
                     portal.store.record_login("login_ok", user, ip)
                     return self._send(303, "", ctype="text/plain; charset=utf-8",
-                                      headers={"Location": (base or "") + "/admin",
+                                      headers={"Location": self._console_url(),
                                                "Set-Cookie": self._cookie_header(
                                                    sid, session_store.absolute_seconds)})
 
                 if route == "/admin/logout":
                     sid, s = self._session()
-                    if not s or not self._csrf_ok(body, s):
+                    if not sid or not s or not self._csrf_ok(body, s):
                         return self._send(403, {"error": "登出需要会话与 CSRF 令牌"})
                     session_store.destroy(sid)
                     return self._send(303, "", ctype="text/plain; charset=utf-8",
-                                      headers={"Location": (base or "") + "/admin",
+                                      headers={"Location": self._console_url(),
                                                "Set-Cookie": self._cookie_header("", 0)})
 
                 if route == "/apply":

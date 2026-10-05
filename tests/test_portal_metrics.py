@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -235,6 +236,57 @@ def test_main_dry_run_reports_accounts_and_panel():
     check(ret == 0, "dry-run 正常退出")
     check("账号文件" in out and "1 个账号" in out, "dry-run 报告账号数")
     check("frps 面板" in out and "每 30s 一轮" in out, "dry-run 报告面板与采样间隔")
+
+
+def test_frps_panel_accepts_both_shapes():
+    """frp 0.71 的面板是 {"proxies":[…]}（2026-10-05 hub 实测）；旧版是裸列表。"""
+    class _FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return self._payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    with tempfile.TemporaryDirectory() as td:
+        cred = Path(td) / "c"
+        cred.write_text("u:p\n", encoding="utf-8")
+        payload = json.dumps({"proxies": [{"name": "a", "curConns": 1}]}).encode()
+        panel = mt.FrpsPanel("http://127.0.0.1:7100", cred,
+                             opener=lambda req, timeout: _FakeResponse(payload))
+        data, err = panel.fetch()
+        check(err == "" and data == [{"name": "a", "curConns": 1}], "接受 0.71 的 {proxies:[…]} 形态")
+        payload2 = json.dumps([{"name": "b"}]).encode()
+        panel2 = mt.FrpsPanel("http://127.0.0.1:7100", cred,
+                              opener=lambda req, timeout: _FakeResponse(payload2))
+        data2, err2 = panel2.fetch()
+        check(err2 == "" and data2 == [{"name": "b"}], "仍接受旧版裸列表")
+
+
+def test_rates_from_today_fields_when_cumulative_missing():
+    """0.71 没有累计 trafficIn/Out，只有今日累计 ⇒ 差分改用今日值。"""
+    def proxy_today(name, tin_today, tout_today):
+        return {"name": name, "todayTrafficIn": tin_today,
+                "todayTrafficOut": tout_today, "curConns": 1}
+
+    clock = FakeClock()
+    panel = FakePanel([([proxy_today("a", 500, 800)], ""),
+                       ([proxy_today("a", 900, 1500)], "")])
+    s = mt.Sampler(lambda: [("a", 18802)], lambda port, label: ("serving", "", 3.0),
+                   panel, interval=30.0, history=10, clock=clock, nic_path="/nonexistent")
+    s.tick()
+    check("首轮" in s.snapshot()["labels"]["a"]["last"].note, "今日值首轮也只有说明")
+    clock.now += 30
+    s.tick()
+    last = s.snapshot()["labels"]["a"]["last"]
+    check(abs(last.in_bps - (400 * 8 / 30)) < 1e-6, "今日累计差分 → 上行速率")
+    check(abs(last.out_bps - (700 * 8 / 30)) < 1e-6, "今日累计差分 → 下行速率")
+    check(last.today_in == 900 and last.today_out == 1500, "今日累计照常展示")
 
 
 def main():

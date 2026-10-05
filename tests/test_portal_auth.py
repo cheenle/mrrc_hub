@@ -243,6 +243,30 @@ def test_token_header_still_works_and_lockout():
             httpd.shutdown()
 
 
+def test_redirect_target_follows_the_request_prefix():
+    """Location 按请求路径推导：挂根 → /admin；挂前缀 → /mrrc_portal/admin。"""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        users_path = tmp / "portal-users"
+        users_path.write_text(USERS_TEXT, encoding="utf-8")
+        portal = Portal(Store(tmp / "portal.json"), reg.Registry(tmp / "instances.tsv"),
+                        CallsignListVerifier(tmp / "callsigns.txt"))
+        from http.server import ThreadingHTTPServer
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
+            portal, token="tok", base="/mrrc_portal", users=ht.UsersFile(users_path)))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            for path, expect in (("/admin/login", "/admin"),
+                                 ("/mrrc_portal/admin/login", "/mrrc_portal/admin")):
+                op, _ = _opener(no_follow=True)
+                st, _, hdr = _post(op, base + path, {"user": "ops", "password": "str0ng-pass"})
+                check(st == 303 and hdr.get("Location") == expect,
+                      f"{path} 的 Location 应为 {expect}（得到 {hdr.get('Location')!r}）")
+        finally:
+            httpd.shutdown()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

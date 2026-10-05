@@ -47,7 +47,7 @@ class FrpsPanel:
     """回环面板的最小客户端。凭据每轮重读，轮换不必重启 portal。"""
 
     def __init__(self, url: str = "http://127.0.0.1:7100",
-                 credentials_path="/etc/mrrc-hub/frps-web.credentials",
+                 credentials_path: str | Path = "/etc/mrrc-hub/frps-web.credentials",
                  timeout: float = 3.0, opener=urllib.request.urlopen):
         self.url = url.rstrip("/")
         self.credentials_path = Path(credentials_path)
@@ -78,16 +78,18 @@ class FrpsPanel:
             return None, f"面板不可用：HTTP {exc.code}"
         except Exception as exc:                       # noqa: BLE001 — 采集器不许把服务带崩
             return None, f"面板不可用：{exc}"
-        if not isinstance(data, list):
-            return None, "面板应答不是代理列表（字段名可能随版本变化）"
-        return data, ""
+        if isinstance(data, dict) and isinstance(data.get("proxies"), list):
+            return data["proxies"], ""      # frp 0.71 dashboard 形态：{"proxies": [...]}
+        if isinstance(data, list):
+            return data, ""                 # 旧版形态：裸列表
+        return None, "面板应答既不是代理列表也不是 {proxies:[…]}（版本差异）"
 
 
 class Sampler:
     """后台采样线程：面板取数（差分算速率）+ 隧道探测计时（复用 app 的探测函数）。"""
 
     def __init__(self, entries, probe, panel: Panel, *, interval: float = 30.0,
-                 history: int = 120, clock=time.time, nic_path: str = "/proc/net/dev"):
+                 history: int = 120, clock=time.time, nic_path: str | Path = "/proc/net/dev"):
         self._entries = entries              # () -> [(label, port)]
         self._probe = probe                  # (port, label) -> (state, detail, latency_ms|None)
         self._panel = panel
@@ -121,22 +123,28 @@ class Sampler:
             if p is None:
                 sample.note = "frps 里没有这个代理（租户隧道未连）"
             else:
-                tin, tout = p.get("trafficIn"), p.get("trafficOut")
+                # frp 0.71 的面板没有累计 trafficIn/Out，只有 todayTrafficIn/Out
+                # （2026-10-05 在 hub 上用 curl 实测）。差分就用今日累计，跨日/重启
+                # 造成的回绕由下面的检测处理。
+                tin, tout, base = p.get("trafficIn"), p.get("trafficOut"), "traffic"
+                if not (isinstance(tin, int) and isinstance(tout, int)):
+                    tin, tout = p.get("todayTrafficIn"), p.get("todayTrafficOut")
+                    base = "today"
                 if isinstance(tin, int) and isinstance(tout, int):
                     prev = self._prev.get(label)
-                    if prev is None:
+                    if prev is None or prev[3] != base:
                         sample.note = "首轮采样（速率自下一轮起可算）"
                     else:
-                        prev_at, prev_in, prev_out = prev
+                        prev_at, prev_in, prev_out, _ = prev
                         dt = now - prev_at
                         if dt > 0 and tin >= prev_in and tout >= prev_out:
                             sample.in_bps = (tin - prev_in) * 8 / dt
                             sample.out_bps = (tout - prev_out) * 8 / dt
                         else:
-                            sample.note = "计数器回绕/重置，本轮速率不可算"
-                    self._prev[label] = (now, tin, tout)
+                            sample.note = "计数器回绕/重置（跨日或 frps 重启），本轮速率不可算"
+                    self._prev[label] = (now, tin, tout, base)
                 else:
-                    sample.note = "面板未给出该字段（版本差异）"
+                    sample.note = "面板未给出 traffic 或 todayTraffic 字段（版本差异）"
                 if isinstance(p.get("curConns"), int):
                     sample.cur_conns = p["curConns"]
                 if isinstance(p.get("todayTrafficIn"), int):

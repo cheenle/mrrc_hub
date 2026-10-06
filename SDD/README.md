@@ -41,10 +41,10 @@
 | Attribute | Value |
 | ----------- | ------- |
 | Document ID | SDD-MRRC-HUB-2026-001 |
-| SDD Version | V0.28 |
-| Baseline Date | 2026-10-04 |
-| Status | **阶段 1 通路已在真实公网跑通**（实例入口 → 隧道 → 实例；早期记录的 `bg1sb.mrrc.vlsc.net:9988` 现已无端口，见 V0.21）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL：**hub 侧已实现**（日志不记 query）；**实例侧在 mrrc_modern feat/hub 已改纯 Cookie 传递（C2），未合并 main**，Stable v1.21.0 仍拼 `?token=`（11 §11.3 对账注）；**呼号注册已上线公网自助**（`https://portal.mrrc.vlsc.net`，见 §12.9）；**实例证书链已闭环并在真实租户机上验证**（签发 → 登记 200 → 信任包 → 入口可达）。剩余：隧道层 PTT 半开释放（MVP，I-H6 open）、Operator 租约、设备 mTLS、安装包分发。**ICP 备案不再是剩余项**：V0.21 起入口已在 443、无明文跳转口（R-H13 消退，见 13 §13.2） |
-| Instance baseline | `mrrc_modern` v1.21.0 Stable（`4f385dd`）—— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
+| SDD Version | V0.29 |
+| Baseline Date | 2026-10-06 |
+| Status | **阶段 1 通路已在真实公网跑通**（实例入口 → 隧道 → 实例；早期记录的 `bg1sb.mrrc.vlsc.net:9988` 现已无端口，见 V0.21）。通配真证书（DNS-01）就位并每日续期；令牌不进 URL：**hub 侧已实现**（日志不记 query）；**实例侧已随之发布**（2026-10-06 `feat/hub` 并入 `main`，当前 Stable **v1.25.4**；令牌按 AD-024 走 Cookie / `Authorization: Bearer`，`?token=` 仅兼容并告警 —— 11 §11.3 对账注）；**呼号注册已上线公网自助**（`https://portal.mrrc.vlsc.net`，见 §12.9）；**实例证书链已闭环并在真实租户机上验证**（签发 → 登记 200 → 信任包 → 入口可达）。剩余：隧道层 PTT 半开释放（MVP，I-H6 open）、Operator 租约、设备 mTLS、安装包分发。**ICP 备案不再是剩余项**：V0.21 起入口已在 443、无明文跳转口（R-H13 消退，见 13 §13.2） |
+| Instance baseline | `mrrc_modern` **v1.25.4**（Stable，2026-10-06 发布；C1–C6 已随打包版发布） —— 5 个 WS 端点、`/listen` 角色、PTT 8 层 + Layer 0 |
 | 客户侧前提 | 实例仅需出站 TCP **8989**（隧道口）；无公网 IP、无端口映射、无 UPnP（SC-H1）。**用户侧只需能出站 443**（入口、门户、站点都在 443）—— 见 NFR-H001 / R-H12 |
 | 入口规划 | **一条路**：`https://<呼号>.mrrc.vlsc.net/`（443 + 通配真证书，与站点、门户同机同端口，V0.21）。隧道控制 `tunnel.mrrc.vlsc.net:8989` 是唯一保留的独立端口；早期的「9988 主路 + 边缘退化路」两级方案已删除 |
 | 租户标识 | **无线电呼号**（AD-H15）：`<呼号>.mrrc.vlsc.net`；注册实例与注册用户都必须提供真实呼号并核验；大小写不敏感（内部小写、路径规范大写） |
@@ -84,13 +84,13 @@ MRRC Fleet Agent（客户内网）
 | 实例出站隧道 | **已跑通（阶段 1，frp 通道）** | 客户侧零入站；macOS/Linux/Windows 均为常驻服务、自恢复；目标态为内置 Fleet Agent（AD-H01、AD-H04） |
 | 通配子域接入 | **已跑通（阶段 1）** | 一条通配 vhost + 注册表映射（AD-H02）；`*.mrrc.vlsc.net` 真 Let's Encrypt 证书已签发并每日自动续期 |
 | 实例证书一机一证 | **已闭环（阶段 1）** | 自签 + 信任包钉住；`make_instance_cert.sh` → `POST /enroll`（一次性口令 + 名字必须等于本入口名）→ `gen_hub_routes.py` 并入信任包；nginx 校验始终保持开启（NFR-H031） |
-| 实例目录 / 在线状态 | 待实现 | Registry + 心跳 TTL；离线识别 ≤45 s（NFR-H002）。现状只有**静态**注册表，无在线状态 |
+| 实例目录 / 在线状态 | **部分** | 目录仍是**静态**注册表（`/etc/mrrc-hub/instances.tsv`）；Registry + 心跳 TTL、离线识别 ≤45 s（NFR-H002）未做。**但"在线"已可判**：V0.23 起 portal 从回环探测拿 HTTP 应答，四种结论（serving / plain-http / hollow / down），见 §12.9、V0.28 |
 | 透明 HTTP/WS 代理 | **已跑通** | 覆盖全部 5 个 WS 端点，升级/长连接/关闭语义与直连一致 |
 | 呼号注册与核验（UC-H10） | **已上线公网** | `https://portal.mrrc.vlsc.net/` 自助申请 + `/admin` 审批台（**用户名/密码一人一账号 + 会话/CSRF**，机器路径仍用运维令牌）；核验走 Club Log 全库（与站内留言版同源），未命中转人工。见 §12.9、V0.28 |
 | 隧道性能可观测 | **已上线（2026-10-05）** | frps 回环面板 + portal 30s 采样 + 「隧道」视图（延时/带宽/今日流量/连接数）；见 §12.9、V0.28 |
 | 实例证书链（一机一证） | **已施用并跑通（2026-10-01 真实租户机实测）** | `make_instance_cert.sh` 签自签证书 → 钉进 `trust-bundle.pem` → nginx 按 `$mrrc_tls_name` 逐实例校验。现网 `bg1sb` 仍用旧证书名 `radio.vlsc.net` |
 | 实例安装器 | **脚本就位，分发未做** | `deploy/install_instance_tunnel.{sh,ps1}`：自取 frpc 并校验 SHA-256、与 frps 版本 pin 死、三平台常驻。仍是仓内脚本，无公开发布的安装包下载 |
-| 实例侧 Hub 前置能力 | **已进打包版** | mrrc_modern v1.22.0：路径前缀 / 令牌不进 URL / 会话遥测 / PTT 活性闸门 |
+| 实例侧 Hub 前置能力 | **已进打包版并已发布** | mrrc_modern 当前 Stable **v1.25.4**（`feat/hub` 已于 2026-10-06 并入 `main`）：路径前缀 / 令牌不进 URL（AD-024）/ 会话遥测 / PTT 活性闸门 |
 | Hub 托管鉴权 | 阶段 2 | 一次性 launch code + 角色上下文签名（AD-H04，受 AD-H07 制约）。**注意与上面的呼号注册是两件事** |
 | Operator 租约 | 待实现 | 单写多读；冲突默认排队（AD-H05）。现由实例侧仲裁谁在发射 |
 | Listener 受限角色 | **已实现** | **可调频/换模式，禁发射** —— 实例侧服务端强制（AD-H08），非"只读" |

@@ -9,8 +9,9 @@ arguments:
 
 # SDD Guardian — engineering lifecycle for mrrc_hub
 
-This repository is governed by `SDD/` (IBM TeamSD, 15 chapters, currently **V0.1**,
-status: 架构评审稿已冻结 / implementation not started). The SDD is the canonical
+This repository is governed by `SDD/` (IBM TeamSD, 15 chapters, currently **V0.29**,
+status: 阶段 1 已在公网生产运行 —— 通配入口 + 隧道 + 一机一证 + 自助门户；未决项见
+`SDD/README.md` 的 Status 行). The SDD is the canonical
 design record for the **cloud hub only** — radio control and media stay owned by
 `mrrc_modern/SDD/`. `${KIMI_SKILL_DIR}/harness/` is the machine-readable backing:
 `constraints.json` (enforcement rules), `index.json` (knowledge routing into every

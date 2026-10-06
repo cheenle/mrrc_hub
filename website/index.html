@@ -282,13 +282,12 @@
                 </tr>
                 <tr>
                   <td>会话凭据不进 URL</td>
-                  <td><span class="hub-badge live">Hub 侧已实现</span></td>
+                  <td><span class="hub-badge live">已实现</span></td>
                   <td>
                     Hub 侧：nginx 日志不记查询串、hub 不经手拼串。<b
-                      >实例侧已在 mrrc_modern feat/hub 改为纯 Cookie 传递（未合并
-                      main）</b
-                    >；<b>Stable 渠道 v1.21.0 仍把令牌拼进查询串</b
-                    >（mrrc_modern C2 未合并，见其 SDD 11 §11.3 对账注）——
+                      >实例侧已随之发布</b
+                    >（mrrc_modern <b>v1.25.4</b>：令牌走 Cookie / Bearer，
+                    旧的「查询串拼串」形式仅作兼容保留并告警 —— 其决定 AD-024）——
                     同源 WS 本可只靠 Cookie
                   </td>
                 </tr>

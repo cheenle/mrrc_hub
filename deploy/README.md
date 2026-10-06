@@ -414,7 +414,7 @@ www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续�
 | `gen_hub_routes.py` | hub（**root**） | 按注册表生成通配 vhost 路由 + 把 `instance-certs/` 并成一册信任包；**原子替换，`nginx -t` 过了才 reload**，校验不通过就回滚且**不回退到关闭校验** |
 | `mrrc-hub-cert.sh` | hub（root） | 通配证书（DNS-01）签发与续期 —— **由 `issue_wildcard_cert.sh` 改名而来** |
 
-## 装机后才暴露的三个缺陷（2026-10-01，VM 实测；v1.23.1 待带）
+## 装机后才暴露的三个缺陷（2026-10-01，VM 实测；三项均已修）
 
 在干净的 Win11 VM 上**装线上包并真跑接入脚本**才发现的，三个都不是"没写对"，而是"写完没在那个环境下跑过"：
 
@@ -422,7 +422,7 @@ www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续�
 | --- | --- | --- | --- |
 | 1 | `openssl req` 报 `Can't open "…/MRRC Modern/etc/ssl/openssl.cnf"` ⇒ 签不出证书 | msys2 的 `openssl.exe` 按**编译前缀**找默认配置，租户机上没有该前缀 | **已修** ✓：随包带 `openssl.cnf` + 脚本显式 `-config`，缺文件即报错（不再回退） |
 | 2 | shell 侧在 stock macOS 上同样签不出 | 用了 `-addext` —— OpenSSL 3 有、**LibreSSL 没有**（`/usr/bin/openssl` 就是 LibreSSL） | **已修** ✓：改用 `-config` 形式（两边都认） |
-| 3 | 脚本在签名一步抛异常中断，日志只有 `+++…+++` | PowerShell 5.1 在 `$ErrorActionPreference="Stop"` 下把**原生程序写 stderr**（openssl 进度点）当成 terminating error | **已定位** ✗ 未修：把原生调用包起来（局部降级为 Continue + 用 `$LASTEXITCODE` 判成败） |
+| 3 | 脚本在签名一步抛异常中断，日志只有 `+++…+++` | PowerShell 5.1 在 `$ErrorActionPreference="Stop"` 下把**原生程序写 stderr**（openssl 进度点）当成 terminating error | **已修** ✓：`install_instance_tunnel.ps1` 用 `$ErrorActionPreference = "Continue"`，并对每一处关键原生调用显式查 `$LASTEXITCODE`（`Fail` 退出） |
 
 **给自己的判据教训**（第 1 条）：我当时的"自足性证明"证的是"**带 `-config`** 能签" ✓，而脚本**没传 `-config`** ✗ ⇒ 判据比结论窄一点，就差出一次事故。
 **验证方式教训**：`build.ps1` 与租户脚本都必须**在装上之后**跑一次；`fleet/` 不在热修覆盖面内 ⇒ 这类缺陷**只能重打包**，热修救不了。

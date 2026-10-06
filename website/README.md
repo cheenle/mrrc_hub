@@ -67,7 +67,7 @@ SHA-256 完全一致）。**不要在这里改它。**
 | Portal 自助入口与核验流程 | `SDD/12 §12.9`、`portal/README.md`；现网 `https://portal.mrrc.vlsc.net/` |
 | 实例证书链（一机一证、信任包、逐实例校验） | `SDD/12 §12.8`「实例证书链」；现网 `/etc/mrrc-hub/trust-bundle.pem` + 注册表第三列 |
 | 实例安装器（自取 frpc、校验哈希、三平台常驻） | `deploy/install_instance_tunnel.{sh,ps1}` 头部注释；`SDD/12 §12.8`「实例开通链」 |
-| 实例侧版本与能力 | `mrrc_modern/CHANGELOG.md`（当前权威：v1.22.0）+ 其 `SDD/` |
+| 实例侧版本与能力 | `mrrc_modern/CHANGELOG.md`（当前权威：v1.25.4）+ 其 `SDD/` |
 
 Portal 自助页（`portal/app.py` 内置的三个页面）与本站同设计令牌（黑底 / 青 accent /
 同款表格与按钮观感），样式**内联**、不外链 CSS —— Portal 保持零第三方依赖，

@@ -19,10 +19,13 @@
 > 上表是**目标态契约**。实际在跑的 Portal 只实现了其中“接入申请 + 呼号核验 + 分配”一段，
 > 且路径不同 —— 见 `12-operational-model.md` §12.9。**不要拿上表的路径去调现网**。
 >
-> **as-built（2026-10-01）**：`POST /apply`（规范化→查重→核验）、`POST /verify`、
-> `POST /grant`、`POST /revoke`，加一个 `/admin` 审批台。
-> 运维动作两种传令方式：请求头 `X-Portal-Token`（curl/脚本）或表单同名字段（浏览器）——
-> **两者都不进 URL**，因为 URL 会进访问日志与浏览器历史（AD-H07）。
+> **as-built（2026-10-01）**：`POST /apply`（规范化→查重→核验，应答里交付**申请令牌**）、
+> `POST /status`（申请方凭该令牌查自己那一条）、`POST /verify`、`POST /grant`、
+> `POST /enroll`、`POST /revoke`，加一个 `/admin` 审批台。
+> 运维动作两种传令方式：脚本/curl 用请求头 `X-Portal-Token`；浏览器用**用户名/密码会话
+> （`mrrc_portal_session` Cookie，HttpOnly/SameSite=Lax/Secure）+ 表单 CSRF 字段**（表单不再
+> 接受令牌字段）。两者都不进 URL，因为 URL 会进访问日志与浏览器历史（AD-H07）。
+> 账号文件 `/etc/mrrc-hub/portal-users`（htpasswd `$apr1$`），一人一账号，审计记 `actor`。
 
 ## 10.2 Ticket / Lease 服务
 
@@ -71,10 +74,10 @@
 ## 10.8 实况指认（as-built，2026-09-30）
 
 **已上线的服务面**：隧道网关（frps 0.71.0，控制口 8989，代理端口显式绑回环）、
-入口 nginx（呼号通配 vhost + 海外边缘路径反代两条入口，Let's Encrypt 真证书）、
+入口 nginx（**一条**呼号通配 vhost，443，Let's Encrypt 真证书；海外边缘路径反代已随 V0.21 删除）、
 注册表与路由生成（`/etc/mrrc-hub/instances.tsv` ＋ `gen_hub_routes.py`）、
 证书服务（DNS-01，自建 hook，每日 8:00 cron 自动续期）。
 
 **尚未实现**：实例清单服务、Operator 租约、配额与计费 —— 属阶段 2/3。
-租户管理 Portal **已实现并上线公网入口**（2026-10-01，`portal.mrrc.vlsc.net:8899`，见 §12.9）。
+租户管理 Portal **已实现并上线公网入口**（2026-10-01，`https://portal.mrrc.vlsc.net`，见 §12.9）。
 本节与 §12.8 分工：本节只列"服务面有没有"，运维细节在 §12.8。

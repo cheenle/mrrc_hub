@@ -1,0 +1,14 @@
+# 实例证书签名用的最小 openssl 配置。
+# 为什么要随包带一份：msys2 的 openssl.exe 会按**编译前缀**去找 etc/ssl/openssl.cnf，
+# 租户机器上没有那个前缀 ⇒ 不传 -config 时 req 直接失败（"Can't open …openssl.cnf"）。
+# 所以脚本显式 -config 指向本目录这一份，签名不再依赖任何系统/前缀状态。
+[req]
+distinguished_name = dn
+x509_extensions    = v3
+prompt             = no
+[dn]
+CN = placeholder.example
+[v3]
+basicConstraints = critical,CA:FALSE
+keyUsage         = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth

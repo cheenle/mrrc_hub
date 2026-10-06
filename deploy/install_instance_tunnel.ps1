@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   在 Windows 实例上安装 Cloud Hub 隧道（与 install_instance_tunnel.sh 对等）。
 
@@ -22,13 +22,27 @@ param(
     [int]$LocalPort = 8888,
     [string]$HubHost = "tunnel.mrrc.vlsc.net",
     [int]$ControlPort = 8989,
-    [string]$FleetDir = $PSScriptRoot,                       # frpc.exe / openssl.exe 所在（安装包内置）
+    [string]$FleetDir = "",                                 # frpc.exe / openssl.exe 所在（安装包内置）
     [string]$DataDir = (Join-Path $env:LOCALAPPDATA "MRRC\fleet"),
     [string]$CertDir = (Join-Path $env:APPDATA "MRRC-Modern\certs"),
     [switch]$Force
 )
 
-$ErrorActionPreference = "Stop"
+# 这里是 Continue 而不是 Stop，有一条实测理由：PowerShell 5.1 在 Stop 下会把**原生程序写 stderr**
+# （openssl 的进度点 `+++…`、icacls 的正常输出）当成 terminating error，签名那一步会因此中断 ——
+# 在干净 VM 上装包真跑时实测到。本脚本对每一处关键调用都显式查 $LASTEXITCODE 并用 Fail 退出，
+# 所以 Continue 不会放过失败，只是不让 stderr 输出冒充失败。
+$ErrorActionPreference = "Continue"
+
+# Where this script lives. NOT as a param default: $PSScriptRoot is not reliably set while the
+# param block is being bound - invoked from within another PowerShell it comes back empty, and the
+# next Join-Path fails with 'parameter Path is an empty string' pointing at an innocent line.
+# (Measured: cmd /c "powershell -File …" works, & powershell -File … does not.)
+if (-not $FleetDir) {
+    $FleetDir = $PSScriptRoot
+    if (-not $FleetDir) { $FleetDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
+    if (-not $FleetDir) { $FleetDir = (Get-Location).Path }
+}
 $taskName = "MRRC Fleet Tunnel ($Name)"
 $conf = Join-Path $DataDir "frpc-$Name.toml"
 $fqdn = "$($Name.ToLower()).mrrc.vlsc.net"
@@ -49,6 +63,8 @@ if (-not (Test-Path $frpc)) {
 
 # ---- 证书：内置 openssl 签自签证书（hub 按 $fqdn 校验；私钥不外传）----
 $openssl = Join-Path $FleetDir "openssl.exe"
+$cnf  = Join-Path $FleetDir "openssl.cnf"                       # 随包带：签名不再依赖系统或编译前缀的默认配置
+if (-not (Test-Path $cnf)) { Fail "missing openssl.cnf next to this script: $cnf" }
 if (-not (Test-Path $openssl)) {
     $onPath = (Get-Command openssl.exe -ErrorAction SilentlyContinue).Source
     if ($onPath) { $openssl = $onPath; Write-Host "use openssl from PATH: $openssl" }
@@ -68,7 +84,8 @@ if ($needCert) {
         -subj "/CN=$fqdn" -addext "subjectAltName=DNS:$fqdn" `
         -addext "basicConstraints=critical,CA:FALSE" `
         -addext "keyUsage=critical,digitalSignature,keyEncipherment" `
-        -addext "extendedKeyUsage=serverAuth" 2>$null
+        -addext "extendedKeyUsage=serverAuth" `
+        -config $cnf 2>$null
     if ($LASTEXITCODE -ne 0) { Fail "openssl failed to sign the certificate" }
     Write-Host "signed a self-signed certificate for $fqdn (3650 days)"
 }
@@ -77,7 +94,11 @@ icacls $key /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
 
 # ---- 登记：把公钥交给 hub（私钥永不外传）----
 if ($env:MRRC_ENROLL_SECRET) {
-    $enrollUrl = if ($env:MRRC_ENROLL_URL) { $env:MRRC_ENROLL_URL } else { "https://portal.mrrc.vlsc.net:8899/enroll" }
+# 门户只有一个地址（V0.21：门户、实例入口与站点合并到同一台机器的 443）。
+# 早先这里有"主路 :8899 + 海外 443 边缘兜底"两条路；合并后第二条不再存在。
+# MRRC_ENROLL_URL 仍可覆盖（自建 hub 的场景）。
+    $enrollUrl = "https://portal.mrrc.vlsc.net/enroll"
+    if ($env:MRRC_ENROLL_URL) { $enrollUrl = $env:MRRC_ENROLL_URL }
     Write-Host "enrolling the certificate at $enrollUrl"
     try {
         $r = Invoke-RestMethod -Method Post -Uri $enrollUrl -TimeoutSec 30 -Body @{
@@ -86,7 +107,7 @@ if ($env:MRRC_ENROLL_SECRET) {
             cert     = (Get-Content $crt -Raw)
         }
         Write-Host "enrolled for: $($r.names -join ', ')"
-        Write-Host "on the hub, as root: $($r.next_step)"
+        Write-Host "the hub applies this automatically; if that hub lacks the watcher, hand this to the operator: $($r.next_step)"
     } catch {
         Write-Warning "enrollment failed: $($_.Exception.Message)"
         Write-Warning "the certificate is on disk; re-run this script once the hub is reachable (idempotent)"
@@ -100,6 +121,68 @@ if ($env:MRRC_ENROLL_SECRET) {
 [Environment]::SetEnvironmentVariable("MRRC_SSL_KEY", $key, "User")
 [Environment]::SetEnvironmentVariable("MRRC_REMOTE_SESSION_TX_HEARTBEAT_S", "5", "User")
 Write-Host "set MRRC_SSL_CERT / MRRC_SSL_KEY / MRRC_REMOTE_SESSION_TX_HEARTBEAT_S=5 (user scope)"
+
+# Also write them into the launcher's own config file. The launcher merges os.environ with
+# %LOCALAPPDATA%\MRRC-Modern\mrrc_modern.env, so a value written there is honoured no matter how
+# the app is started - from the Start menu, from a shortcut, or after a reboot. User-scope
+# variables alone are not enough: a process started by Explorer keeps the environment block
+# Explorer had when it started, which is why the app went on serving its own localhost
+# certificate and the hub refused the handshake.
+$appCfg = Join-Path $env:LOCALAPPDATA "MRRC-Modern\mrrc_modern.env"
+$cfgKeys = [ordered]@{
+    MRRC_SSL_CERT = $crt
+    MRRC_SSL_KEY  = $key
+    MRRC_WEB_PORT = "$LocalPort"
+    MRRC_REMOTE_SESSION_TX_HEARTBEAT_S = "5"
+}
+New-Item -ItemType Directory -Path (Split-Path $appCfg) -Force | Out-Null
+$existing = @{}
+if (Test-Path $appCfg) {
+    foreach ($line in Get-Content $appCfg) {
+        $l = $line.Trim()
+        if ($l -and -not $l.StartsWith("#") -and $l.Contains("=")) {
+            $kv = $l.Split("=", 2); $existing[$kv[0].Trim()] = $kv[1].Trim()
+        }
+    }
+}
+foreach ($k in $cfgKeys.Keys) { $existing[$k] = $cfgKeys[$k] }
+$out = New-Object System.Collections.Generic.List[string]
+$out.Add("# MRRC Modern configuration - certificate/port lines maintained by the hub onboarding script")
+foreach ($k in ($existing.Keys | Sort-Object)) { $out.Add($k + "=" + $existing[$k]) }
+Set-Content -Path $appCfg -Value $out -Encoding utf8
+Write-Host "wrote the certificate into the app config too: $appCfg"
+
+# 让应用用上新环境。写用户级环境变量**不会**改变已在运行的应用的环境块（从开始菜单启动的进程
+# 继承的是 Explorer 启动时的环境）：实测它因此继续用自己那张 localhost 证书，hub 侧报
+# "upstream SSL certificate verify error: (18:self-signed certificate)"，入口永远 502。
+$running = Get-Process -Name "MRRC-Modern-Launcher", "MRRC-Modern-Server", "scope_pipe" -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "restarting the app so it picks up the certificate in its environment"
+    foreach ($n in @("MRRC-Modern-Server", "scope_pipe", "MRRC-Modern-Launcher")) {
+        Get-Process -Name $n -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); Start-Sleep -Milliseconds 500 }
+    }
+    Start-Sleep -Seconds 2
+    $launcher = Join-Path (Split-Path -Parent $FleetDir) "MRRC-Modern-Launcher.exe"
+    if (Test-Path $launcher) {
+        # 用带新环境的本进程去启动它，新进程就继承了证书路径（这正是从开始菜单启动做不到的）
+        Start-Process -FilePath $launcher -WorkingDirectory (Split-Path -Parent $FleetDir) -WindowStyle Normal
+        Write-Host "  app restarted (launcher) - it will now serve the instance certificate"
+    } else {
+        Write-Host "  could not find the launcher next to the fleet dir; start the app by hand so it reads the new variables"
+    }
+} else {
+    # 应用没在运行 —— 不能只说一句"请自己启动"：租户从开始菜单启动会继承 Explorer 的旧环境块，
+    # 于是又用回它自己那张 localhost 证书（实测正是这条路径把人卡在 502）。
+    # 就用本进程（已带新环境）把它拉起来。
+    Write-Host "the app is not running; starting it now with the new environment"
+    $launcher = Join-Path (Split-Path -Parent $FleetDir) "MRRC-Modern-Launcher.exe"
+    if (Test-Path $launcher) {
+        Start-Process -FilePath $launcher -WorkingDirectory (Split-Path -Parent $FleetDir)
+        Write-Host "  started the launcher; it will serve the instance certificate"
+    } else {
+        Write-Host "  launcher not found next to the fleet dir - start the app by hand"
+    }
+}
 
 # ---- frpc 配置 ----
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
@@ -119,7 +202,10 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = $LocalPort
 remotePort = $Port
-"@ | Set-Content -Path $conf -Encoding utf8
+"@ | Set-Content -Path $conf -Encoding ascii
+# ASCII, not utf8: PowerShell 5.1's utf8 writes a BOM, and frpc's TOML parser rejects the file
+# outright ("invalid character at start of key") - the tunnel then never starts and the entry
+# answers 502 with no other error anywhere. The config is pure ASCII, so ascii is also correct.
 icacls $conf /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null      # token 在文件里 ⇒ 收紧 ACL
 
 # ---- 常驻：计划任务（登录时启动；失败自动重启）----
@@ -128,15 +214,22 @@ $action = New-ScheduledTaskAction -Execute $frpc -Argument "-c `"$conf`"" -Worki
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
+# A local account must not be written as WORKGROUP\user - that fails with HRESULT 0x80070534
+# (the account cannot be resolved). COMPUTERNAME\user is correct on workgroup and domain machines.
+# Keep these comments ABOVE the statement: inside a backtick continuation they break parameter
+# binding and UserId arrives empty, which is how this was diagnosed.
+$principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$env:USERNAME" -LogonType Interactive
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
+# 升级应用时安装器会关掉 frpc（它住在应用目录里），而任务是登录时启动 ⇒ 不会自己回来。
+# 这里在注册后总是重新启动一次：租户重跑同一条命令即可恢复隧道（脚本本来承诺幂等）。
+Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 4
 
 Write-Host ""
-Write-Host "==> $Name -> https://$fqdn`:9988 (local 127.0.0.1:$LocalPort)"
+Write-Host "==> $Name -> https://$fqdn` (local 127.0.0.1:$LocalPort)"
 Write-Host "check:"
 Write-Host "  Get-Content '$DataDir\frpc-$Name.log' -Tail 5     # want: login to server success / start proxy success"
 Write-Host "  Get-ScheduledTask '$taskName' | Get-ScheduledTaskInfo"
-Write-Host "  curl.exe -sk https://$fqdn`:9988/api/health        # 401 once the radio server is up"
+Write-Host "  curl.exe -sk https://$fqdn`/api/health        # 401 once the radio server is up"
 Write-Host "  (To remove:  Stop-ScheduledTask '$taskName'; Unregister-ScheduledTask -TaskName '$taskName' -Confirm:`$false)"

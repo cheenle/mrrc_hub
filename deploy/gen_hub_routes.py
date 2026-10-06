@@ -124,7 +124,9 @@ def load_tls_names(path: Path) -> tuple[dict[str, str], list[str]]:
         if len(parts) >= 3:
             names[label] = parts[2]
         else:
-            names[label] = DEFAULT_TLS_NAME
+            own = f"{label}.mrrc.vlsc.net"   # 不写这一列 = 新式自签租户：证书签给它自己的入口名
+            names[label] = own
+            notes.append(f"{path}:{lineno}: {label} 未写 tls_name ⇒ 按自己的入口名 {own} 校验")
             notes.append(f"{path}:{lineno}: {label} 未写 tls_name，按 {DEFAULT_TLS_NAME} 校验"
                          f"（新实例应写自己的入口名，如 {label}.mrrc.vlsc.net）")
     return names, notes
@@ -143,7 +145,7 @@ def render(mapping: dict[str, int], tls_names: dict[str, str] | None = None) -> 
     lines.append("map $mrrc_instance $mrrc_tls_name {")
     lines.append(f"    default {DEFAULT_TLS_NAME};")
     for name in sorted(mapping):
-        lines.append(f"    {name} {tls_names.get(name, DEFAULT_TLS_NAME)};")
+        lines.append(f"    {name} {tls_names.get(name, name + '.mrrc.vlsc.net')};")
     lines.append("}")
     lines.append("")
     return "\n".join(lines)

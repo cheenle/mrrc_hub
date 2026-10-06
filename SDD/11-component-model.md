@@ -22,7 +22,7 @@
 
 | 已实现的组件 | 对应目标态 | 实现在哪 |
 | ------- | -------- | -------- |
-| 呼号注册 Portal | Portal（极简子集） | `portal/`（零第三方依赖，标准库 HTTP）；systemd `mrrc-portal.service`；仅四端点 `apply/verify/grant/revoke` + `/admin` 审批台 |
+| 呼号注册 Portal | Portal（极简子集） | `portal/`（零第三方依赖，标准库 HTTP；`htpasswd.py` 账号校验、`sessions.py` 会话/登录锁定、`metrics.py` 隧道采样）；systemd `mrrc-portal.service`；`apply/status/verify/grant/enroll/revoke` 端点 + `/admin` 审批台（用户名/密码登录，七视图，含**隧道性能视图**） |
 | 遥号核验 | IAM 的核验部分 | Club Log 全库（27 万条，与站内留言版同源，每日同步）+ 自建呼号库 + 人工兜底 |
 | 注册表（静态） | Registry（在线状态版） | `/etc/mrrc-hub/instances.tsv` + `gen_hub_routes.py` 生成 nginx map。**无在线状态、无 Redis、无心跳** |
 | 实例证书签发 | Device CA（极简子集） | `deploy/make_instance_cert.sh` + `/etc/mrrc-hub/trust-bundle.pem`。**无轮换、无 CRL** |

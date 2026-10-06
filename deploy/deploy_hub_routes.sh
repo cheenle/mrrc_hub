@@ -5,7 +5,7 @@
 #
 # Replaces the per-instance vhost with a single wildcard server block:
 #
-#   <name>.mrrc.vlsc.net:9988  →  https://127.0.0.1:<port>  (that instance's tunnel)
+#   <name>.mrrc.vlsc.net  →  https://127.0.0.1:<port>  (that instance's tunnel)
 #
 # The only per-instance fact left is the loopback port its tunnel claims, kept in
 # /etc/mrrc-hub/instances.tsv. Adding instance #2..#200 is a line in that file plus
@@ -37,7 +37,7 @@ if [[ ! -s "$REGISTRY" ]]; then
 #
 # The port must sit inside frps' allowPorts range (see /etc/frp/frps.toml); the
 # instance's frpc claims the same number as its remotePort. Names must be single
-# DNS labels: test1 means https://test1.mrrc.vlsc.net:9988.
+# DNS labels: test1 means https://test1.mrrc.vlsc.net.
 #
 # After editing: sudo gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx
 test1		18800
@@ -57,19 +57,12 @@ cat >"$VHOST" <<EOF
 #
 # TLS is the hub's wildcard certificate (currently self-signed: a trusted one
 # needs DNS-01, i.e. DNS provider credentials — see deploy/README.md).
+# 一个 vhost 服务所有实例，且与其余服务同在 443（V0.21）。早先这里还有一个明文 8899 的
+# 301 跳转 vhost 与 9988 的 TLS vhost：容器合并到同一台机器后，多出来的端口只会分散
+# 排查面，且明文口在大陆地域本来就被途中改写（R-H13）。唯一保留的独立端口是隧道 8989。
 server {
-    listen 8899;
-    listen [::]:8899;
-    server_name ~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net\$;
-
-    # Plain HTTP is not a usable path in the mainland region anyway (R-H13), so
-    # this port only points at the TLS one.
-    location / { return 301 https://\$host:9988\$request_uri; }
-}
-
-server {
-    listen 9988 ssl;
-    listen [::]:9988 ssl;
+    listen 443 ssl;
+    listen [::]:443 ssl;
     http2 on;
     server_name ~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net\$;
 
@@ -94,7 +87,11 @@ server {
         proxy_ssl_verify_depth 2;
         proxy_ssl_name ${UPSTREAM_SSL_NAME};
         proxy_ssl_server_name on;
-        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        # The trust bundle, not the system CAs alone: an instance presents its own self-signed
+        # certificate, which is pinned here (the generator merges those on top of the system
+        # set). Verifying against the system store only rejects every instance with error 18
+        # and turns the entry into a 502 that looks like a dead tunnel.
+        proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem;
         proxy_ssl_session_reuse on;
 
         proxy_set_header Host \$host;
@@ -118,5 +115,5 @@ systemctl reload nginx
 echo "==> wildcard routing live"
 echo
 echo "verify:"
-echo "  curl -sk  https://test1.mrrc.vlsc.net:9988/api/health   # 401 (tunnel + instance)"
-echo "  curl -sk  https://nope.mrrc.vlsc.net:9988/             # 404 (unknown instance)"
+echo "  curl -sk  https://test1.mrrc.vlsc.net/api/health   # 401 (tunnel + instance)"
+echo "  curl -sk  https://nope.mrrc.vlsc.net/             # 404 (unknown instance)"

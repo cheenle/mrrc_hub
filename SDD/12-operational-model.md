@@ -87,11 +87,12 @@
 | PTT 未释放 | **安全事件**：区分 EOF 型 / 半开型（第 15 章 §15.4），核对心跳参数与 `MRRC_PTT_MAX_TX_SECONDS` |
 | 升级后行为没变 | 核对清单版本、包 SHA、实例实际运行版本（沿用 `upgrade_core.py` 的 `state.json` 可证明性） |
 
-## 12.8 实况记录（as-built，2026-09-30）
+## 12.8 实况记录（as-built，2026-10-02 / V0.21）
 
 > 机器/进程/文件/端口/cron 一级的物理视图见
-> [`../docs/physical-architecture-2026-10-01.svg`](../docs/physical-architecture-2026-10-01.svg)
+> [`../docs/physical-architecture-2026-10-02.svg`](../docs/physical-architecture-2026-10-02.svg)
 > （同目录 PNG 为渲染件）；本节与其一致，冲突时以现场为准并回改两处。
+> 图按 V0.21 记录重绘；**新主机上的逐项现场读数尚未全部复测**，本节标 2026-10-01 的数字仍是旧机读数。
 
 本节记录**实际部署的事实**，与前面各节的"设计意图"区分；两者不一致时以本节为准并回改设计。
 
@@ -99,26 +100,39 @@
 
 | 角色 | 位置 | 说明 |
 | ------ | ------ | ------ |
-| Hub | 阿里云乌兰察布 `8.160.161.80`（Ubuntu 26.04） | nginx（`mrrc-hub` 通配 vhost + `mrrc-portal` / `mrrc-portal-edge`，均在 8899/9988 TLS）、frps 0.71.0（控制口 8989，`proxyBindAddr=127.0.0.1`）、Let's Encrypt 证书与每日 cron、`mrrc-portal.service`（呼号注册，仅回环 8890）、`/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 逐实例公钥） |
-| Edge | 海外 `www.vlsc.net`（193.111.30.163） | 443 路径代理 `/mrrc_modern/<呼号大写>/` → hub 9988；上游校验用**系统 CA** |
+| Hub（含站点与门户） | 香港 VPS `hub.vlsc.net`（203.25.119.168，Ubuntu 26.04） | nginx（`mrrc-instances` 通配 vhost 承载实例入口 **443**；`mrrc-portal-mrrc` 把门户挂在 `portal.mrrc.vlsc.net` 的**根**；`vlsc.net` 承载站点与下载）、frps 0.71.0（控制口 8989，`proxyBindAddr=127.0.0.1`）、`mrrc-portal.service`（呼号注册，仅回环 8890）、`/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 逐实例公钥）。**一台机器同时承担原先 Hub 与 Edge 两个角色**（V0.21） |
+| ~~Edge~~ | —（已取消） | 海外边缘 `/mrrc_modern/<呼号大写>/` 反代**随 V0.21 删除**，职责由上面那台机器的 443 直接承担 |
 | Instance | 实例归属人自己的机器（macOS / Linux / Windows） | 常驻隧道（launchd / systemd / 计划任务）；MRRC 服务是否常驻取决于是打包版还是源码运行（见下） |
 
 ### 入口（当前）
 
-- `https://<呼号>.mrrc.vlsc.net:9988/` —— 直连 hub 的**主入口**，真证书，浏览器零警告
-- `https://<呼号>.mrrc.vlsc.net:8899/` —— **同一个 vhost、同一张证书的第二个 TLS 入口**。
-  它原本是明文 301 口，因 R-H13（未备案域名在大陆地域的明文会被途中改写）**已升级为 TLS**。
-  两个端口的 `server` 块是同一个，不是两条不同路径。
-- `https://www.vlsc.net/mrrc_modern/<呼号大写>/` —— 海外边缘，真证书（境内无备案的迂回入口）。
-  **路径大小写敏感、规范形式是大写呼号**，小写会被 301 到规范形式。
-  ⚠️ **该路径 2026-10-01 实测存在间歇性失败** —— 见下方「排障增补」
-- 注册表 `/etc/mrrc-hub/instances.tsv` —— 三列：`<标签> <回环端口> <上游 TLS 名>`。现网当前仅一行：
-  `bg1sb 18802 radio.vlsc.net`。加实例 = 一行 + 重跑 `gen_hub_routes.py`。
-  **第三列是逐实例证书校验的落点**（见下方「实例证书链」）；`bg1sb` 目前仍指向上游旧证书名，
-  尚未迁到它自己的 `<标签>.mrrc.vlsc.net` —— 迁移机制已就位、未施用。
+- `https://<呼号>.mrrc.vlsc.net/` —— **唯一的入口**：443、通配真证书、浏览器零警告。
+  标签即裸呼号（`bg1sb`），不再带产品后缀；`:9988` 与 `:8899` 两个监听已取消（V0.21）。
+- 已取消：原先的 `:8899`「第二 TLS 入口」与 `www.vlsc.net/mrrc_modern/<呼号大写>/` 海外边缘反代
+  —— 两者的取消原因与教训见 `08-architecture-decisions.md` 卷首的 **V0.21** 一节
+  （该节未编号；本仓没有 AD-H21）与下方「排障增补」
+- 注册表 `/etc/mrrc-hub/instances.tsv` —— 三列：`<标签> <回环端口> <上游 TLS 名>`。
+  加实例 = 一行 + 重跑 `gen_hub_routes.py`（自 V0.17 起由 30 s 的 root timer 自动做，见 §12.9）。
+  **2026-10-04 机上读数（新机、全量）**：`bg7zhs 18805` / `ba4eg 18807` / `bg6lh-legacy 18802` /
+  `bg8aaa 18803` / `bg1sb 18804 radio.vlsc.net`。此前那句“行数未取证、两处记录冲突”到此结束。
+  **`bg1sb` 曾经不在表里**：备份文件显示它原为 `bg1sb 18802 radio.vlsc.net`，18802 后来归了
+  `bg6lh-legacy`（附加产品，见 §7.x.1）⇒ 主产品的裸呼号入口落到 map 的 `default 0`
+  ⇒ nginx `return 404 "unknown instance"`（**与“未登记实例”是同一个 404**，现场很容易读成网络故障）。
+  2026-10-04 按“**不夺回 18802、不打断正在服务的 legacy 入口**”补回末行，端口用空闲的 18804。
+  **第三列是逐实例证书校验的落点**（见下方「实例证书链」）：`bg1sb` 写的仍是 `radio.vlsc.net`，
+  实测该实例吐的就是那张真 LE 叶证书 + 4 段完整链（公钥与实例私钥配对，**不是**自签）——
+  即“迁移到 `<标签>.mrrc.vlsc.net`”机制已就位、仍未施用（这条从“未复测/未取证”升为已取证）。
   **标签规则**：主产品用裸呼号（`bg1sb`），附加产品加产品后缀（`bg1sb-legacy`）—— 见 `07-subject-area-model.md` §7.x.1
-- `https://portal.mrrc.vlsc.net:8899/` —— **呼号自助注册**（面向公众，另一套 vhost，
-  与实例入口同证书）。运维审批台在 `/admin`。详见 §12.9
+- `https://portal.mrrc.vlsc.net/` —— **呼号自助注册**（面向公众，另一套 vhost，
+  与实例入口同证书）。运维审批台在 `/admin`。详见 §12.9。
+  门户与站点、实例入口**同处一台机器**（V0.21，2026-10-02 迁至香港 `hub.vlsc.net`）；门户挂在该名字的根；
+- **双栈可达（2026-10-04 实测，取代 V0.19 时期“hub 的 v6 不可达”的结论）**：hub 机有全局 v6
+  `2403:2c81:2000:2189::a` 与 v6 默认路由；`hub.vlsc.net` / `www.vlsc.net` / `*.mrrc.vlsc.net`
+  的 **AAAA 已发布**。本机→hub 实测 **82 ms / 0% 丢包**（v4 对照 293 ms / 6.7% 丢包），
+  同一请求 v6 **0.37 s** vs v4 **1.40 s**（约 4×，v4 去程绕东京而 v6 走 CMCC/腾讯云骨干直达 HK）；
+  frps 8989 本来就是双栈（`*:8989`），`tunnel.mrrc.vlsc.net` 的 AAAA 发布后 **frpc 重连自己选了 v6**
+  （实测控制连接两端都是 v6）。待办：给 `hub.vlsc.net` 自身补一张含该名的证书（现在它落到通配证书，
+  浏览器会报名字不符）；`*.mrrc.vlsc.net` 的 v6 路径建议低 TTL 灰度后再全量（CMCC 到海外的 v6 并非一律更快）
 
 ### 证书（NFR-H030 的落地）
 
@@ -127,9 +141,9 @@
 - 凭证：`/root/.secrets/aliyun.ini`（0600）。存在 ⇒ 真证书；不存在 ⇒ 回退自签通配（脚本自动切换）
 - 续期：root crontab 每天 8:00 跑 `mrrc-hub-cert.sh`，剩余 <30 天自动续；日志 `/var/log/mrrc-hub-cert.log`；退出码 0/1/2（<14 天为告警）
 - 安装：`mrrc-hub-cert-hook.sh` 拷贝证书到 `/etc/mrrc-hub/tls/` 并 reload nginx
-- **www 边缘不再需要同步信任锚**：上游校验信任源是系统 CA。此前钉自签证书的做法咬过两次（换证书未同步 ⇒ 立即 502），已废弃
+- **www 边缘不再需要同步信任锚**（存史）：上游校验信任源是系统 CA。此前钉自签证书的做法咬过两次（换证书未同步 ⇒ 立即 502），已废弃。**V0.21 把海外边缘那条反代路径整体删除，这一跳今天已不存在** —— 本条已无对象，只留作教训记录
 
-### 实例证书链（一机一证，2026-10-01 就位）
+### 实例证书链（一机一证，2026-10-01 就位于旧 hub；下表读数为当日所取，V0.21 搬迁后未复测）
 
 通配证书解决的是**入口**；另有一条链解决**hub → 实例**这一跳的身份。
 
@@ -137,7 +151,7 @@
 | ------ | ------ |
 | 签发 | `deploy/make_instance_cert.sh <标签>`：自签证书，**签给实例自己的入口名**（`<标签>.mrrc.vlsc.net`），默认 3650 天，幂等（CN 匹配则不重签，`FORCE=1` 强制） |
 | 交付 | 实例侧设 `MRRC_SSL_CERT` / `MRRC_SSL_KEY`；**私钥永不外传**，只有公钥进 |
-| 钉住 | 公钥写入 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例证书）。现网 121 个证书块 |
+| 钉住 | 公钥写入 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例证书）。现网 121 个证书块（2026-10-01 在旧 hub 上所取，搬迁后未复测） |
 | 校验 | nginx `proxy_ssl_name $mrrc_tls_name` + `proxy_ssl_trusted_certificate …/trust-bundle.pem`，**校验始终开着**；自签证书靠"钉住它"通过，而不是靠关掉 verification |
 | 映射 | `$mrrc_tls_name` 由 `gen_hub_routes.py` 从注册表第三列生成；未指定时回落 `radio.vlsc.net`（兼容既有实例） |
 
@@ -146,6 +160,7 @@
 端到端校验），且不引入新的 CA 依赖。
 
 > 现网 `bg1sb` 仍在用 `radio.vlsc.net` 那张旧证书（注册表第三列未改）—— **能力已到位，迁移未做**。
+> 这条同样是 2026-10-01 在旧 hub 上的读数，V0.21 搬迁后**未复测**（未取证）。
 > 写文档时不要把"机制存在"写成"已在跑"。
 
 ### 实例开通链（安装器，2026-10-01 就位）
@@ -194,7 +209,8 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 现象 | 先查什么 |
 | ------ | ---------- |
 | 边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步） |
-| **边缘路径间歇性无响应（2026-10-01 实测）** | 6 次请求中 3 次 20 s 内无任何响应，呈交替出现。已排除：本地 DNS/TCP/TLS（均 0.2 s 内完成）、www 静态服务（6/6 正常）、www 上另一条代理腿 `/mrrc_modern/listen → radio.vlsc.net:8888`（6/6 正常）、hub 侧各种 SNI（`tunnel.*` 与 `<呼号>.*`）/Host 组合（各 6/6 正常）。**失败定位于 `www → hub:9988` 这一跳**。推测与云厂商对单一来源的入方向限流有关，待进一步取证（www 侧 error.log 无上游超时记录 —— 客户端 20 s 先于 nginx 的 60 s 阈值断开）。**当前对策：把边缘定位为备用路径，主路优先** |
+| **边缘路径间歇性无响应**（2026-10-01，2026-10-02 定根因；该路径已随 V0.21 删除，本条存史） | 6 次请求 3 次 20 s 无响应，当时只定到 `www → hub:9988` 这一跳、猜是云厂商入方向限流。**真因**：边缘 nginx 那两处指向 hub 的 `proxy_pass` 写的是**裸主机名**（无 `resolver` ⇒ 启动时解析一次），而 hub 已加 AAAA、边缘的 `getaddrinfo` 又按 RFC6724 把 IPv6 排前 ⇒ nginx 选了 hub 的 IPv6，而**该地址当时不可达**（实测 0/4 超时，同机 v4 4/4 通；边缘自身 v6 正常，google 0.1 s）。**修法**：两处 `proxy_pass` 钉为 hub 的 IPv4 `8.160.161.80:9988` 并 reload —— 复测 `/mrrc_portal/` **8/8 200**（修前 3/6 挂死），实例入口 4/4 302。**复现判据**：`getent ahosts https://portal.mrrc.vlsc.net` 首行是 v6 就说明任何一次 reload 都会踩中。**待办**：hub 的 IPv6 入站仍不可达（阿里云安全组/IPv6 公网带宽，见 V0.19），且 hub 上 `net.ipv6.conf.eth0.accept_ra=0` ⇒ RA 派生的地址与默认路由约 2.5 h 后过期不续（要设 `accept_ra=2` 并持久化）；v6 端到端验通后可改成 upstream 双地址（v6 优先 + 连接超时 3 s 退 v4）。**2026-10-04 补正**：搬去香港那台 hub 的 v6 **可达且 AAAA 已发布**（本机实测 82 ms / 0% 丢包，v4 对照 293 ms / 6.7%；同一请求 0.37 s vs 1.40 s），本条"hub 的 IPv6 入站仍不可达"与旧机那句 `accept_ra` 待办**均随搬迁作废**（新机 sysctl 未复测） |
+| hub 日志被 `proxy [<名>] already exists` 刷屏 | **先去查“这个名字有几个客户端”，不要去改 frps**。三步取证：① `sudo grep -a 'client login info' /var/log/frps.log \| tail` 给出各 run id 的**来源 IP / hostname / os / frpc 版本**（同一台机器会占好几个 run id）；② `sudo ss -tn \| grep :8989` 看当前控制连接与地址族；③ 到那台实例机上数进程（Windows：`Get-Process frpc`，看各自命令行、启动时间与父进程是否还在）。**2026-10-04 实例**：一台 Windows 机（hostname `MRRC`）积累了 **6 个 frpc**（命令行逐字相同、5 个为孤儿），1 个赢得注册、其余每 30 s 重试 —— 一天 7143 行 `ba4eg`。那是**客户端缺陷**（回收旧 frpc 的代码依赖 Win11 已移除的 `wmic` 且失败静默，修法见 `mrrc_modern/SDD/14` V2.69），hub 侧只能止血（杀掉多余进程）与取证。**同名噪音频次本身也是判据**：`bg6lh-legacy` 那 362 行查实是本机重连窗口的重叠（新旧连接争注册），属正常抖动，不要当故障查 |
 | 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
 | 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
 | `curl -sI .../login` 得到 405 | **不是故障**。`-I` 发 HEAD，而登录页只接受 GET。用 `curl -s -o /dev/null -w '%{http_code}'` 拿状态码 |
@@ -227,15 +243,32 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 呼号库（权威） | `/var/lib/mrrc-hub/portal/clublog_users.json` —— **Club Log** 全库（273,047 条），与站内留言版 `www.vlsc.net/feedback` **同源**；hub 每天 04:30 从 www 拉取（`mrrc-portal-sync-clublog.sh`，晚于 www 的 03:00 刷新） |
 | 呼号库（自建） | `/etc/mrrc-hub/callsigns.txt`（一行一个）—— 用于权威库暂未收录的新执照 |
 | 核验链 | `ClubLogVerifier → CallsignListVerifier → ManualVerifier`（能给出**确定结论**的依据先问，人工始终兜底） |
-| 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较 |
+| 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较；**只走请求头**（机器路径） |
+| 运维账号 | `/etc/mrrc-hub/portal-users`（htpasswd `$apr1$`，`0640 root:mrrcportal`）；加人：`printf '%s:%s\n' <user> "$(openssl passwd -apr1)" | sudo tee -a …`。只认 apr1，未知前缀 fail closed；用户不存在时跑假哈希防时序枚举 |
+| 会话与 CSRF | 登录后 `mrrc_portal_session`（HttpOnly/SameSite=Lax；公网 Host 带 Secure，回环不带）；空闲 8h/绝对 24h；状态变更要表单 CSRF；进程重启会话全失效 |
+| 登录防爆破 | 固定阈值：用户名 5 次/5 分钟、来源 IP 10 次/5 分钟，各锁 5 分钟（接受“按用户名可被恶意触发”的代价）；`X-Forwarded-For`（仅回环对端才信任）缺失时退化为 127.0.0.1 全局桶 |
+| 隧道性能 | frps `webServer` 只绑 127.0.0.1:7100（Basic 认证，凭据 `/etc/mrrc-hub/frps-web.credentials` 0640）；0.71 应答是 `{"proxies":[…]}`、每条只有 `todayTrafficIn/Out`+`curConns`（**无累计 trafficIn/Out**）⇒ 带宽按今日累计差分（跨日/重启由回绕检测兜底）；延时 = TLS 握手计时；每实例内存环形历史 120 样本（≈1h，重启即清）；「隧道」视图 **2026-10-05 已上线** |
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
-| 测试 | `python3 tests/test_portal.py` |
-| 入口 | `https://portal.mrrc.vlsc.net:8899/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
+| 测试 | `python3 tests/test_portal.py`（27 组）；另有 `test_portal_auth.py`（7）、`test_portal_metrics.py`（10）、`test_htpasswd.py`（4）——共 48 组 |
+| 入口 | `https://portal.mrrc.vlsc.net/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
+| **主机** | **与 hub 同一台机器**：香港 VPS `hub.vlsc.net`（203.25.119.168），门户挂在该名字的**根**（见 §12.8 主机表）。V0.20 把它迁到阿里云 `47.80.243.9` 的那次拆分只存续了几个小时，**已被 V0.21 取代**；那台机器不再承载门户（其后续处置**未取证**） |
 | 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |
+| 自维护 | **跨机同步已随 V0.21 失去对象**：V0.20 那条 `mrrc-portal-sync.timer`（每日 08:30 从 hub 拉通配证书 + 呼号库）不再需要 —— 证书与呼号库现在就在本机同一批目录（存史）。**仍在跑的**是每天 04:30 的 `mrrc-portal-sync-clublog.sh`：拉 `clublog_users.json`（来源 www 侧，V0.21 后即本机），**规模门 ≥10 万条**，换库后重启 portal |
+| ~~**仍耦合在 hub**~~ | **V0.21 后三条耦合都已消失**（同一台机器、同一批目录）：`grant` 写的注册表就是入口 nginx 读的那一份，30 s timer 直接接手重生成；`/enroll` 落的实例证书就在逐实例校验要读的 `instance-certs/` 里；边缘的 `/etc/nginx/mrrc-hub-trust.pem` 随反代路径一起删除，**已无归属**。这三条正是"合并值得一做"的理由，保留为记录 |
 | 限流 | `/apply` 上 `limit_req zone=mrrc_portal_apply burst=5 nodelay`（10 r/m/来源）。**这里能用真实客户端 IP** —— 与被隧道合并来源的实例侧不同 |
 
-**要记住的一条**：`grant` 只写注册表并打印实例侧命令，**不自动重生成路由** ——
-`gen_hub_routes.py` + `nginx reload` 仍需 root 手工执行，这是有意的分工。
+**要记住的一条**：`grant` 只写注册表并打印实例侧命令，**路由与信任包的重生成自 V0.17 起是自动的** ——
+root 的 `mrrc-hub-routes.timer` 每 30 s 触发一次 `mrrc-hub-routes.sh`（单元在 `deploy/systemd/`，
+脚本在 `deploy/mrrc-hub-routes.sh`）：哈希 map 与信任包 → `gen_hub_routes.py` → 再哈希，
+**只有生成物真的变了**才 `nginx -t` + `systemctl reload nginx`（`nginx -t` 不过就保持运行中的配置不动
+并报错退出）。**仍需人工的只有运维那一步**：在 `/admin` 里核验并批准。Portal 服务本身没有
+reload nginx 的权限，这是有意的分工（接收公网输入的服务不该持有它）。
+**实测落差（2026-10-03，已修复）**：上面这段描述的是**设计**，而现网直到 2026-10-03 才真的成立：
+那台 hub 上只装了 `.service`，包装脚本与 timer 都缺 ⇒ 单元指向不存在的脚本、每次 `203/EXEC` ⇒ **路由自 2026-10-02 01:07 起从未重生成**，新实例全部 404（而 frps、证书、注册表都已就绪）。
+补齐包装脚本 + timer 后实测：入口 404 → 302，邻居 `bg1sb`/`bg9aaa` 不受影响，
+常态每 ~35 s 输出 `nothing changed; not reloading`。验收方式：`systemctl is-enabled mrrc-hub-routes.timer`
+应为 `enabled`，且 `/usr/local/sbin/mrrc-hub-routes.sh` 的 sha256 应与仓库 `deploy/mrrc-hub-routes.sh` 一致。
+**文案滞后已修**：`portal/app.py` 的 `grant()` 对 `mrrc_modern` 的 `next_step` 原写"点「刷新状态」即自动完成"；客户侧 v1.25.0 起应用自己轮询完成接入，文案已改为"无需操作"。
 
 **核验为何必须在授予之前**：呼号是公开标识、入口可枚举（I-H9 接受），
 所以防线只能放在"核验通过才给访问"，不能放在"别人猜不到"。完整论证见
@@ -245,16 +278,18 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 
 | 项 | 实测 |
 | ---- | ------ |
-| 入口与证书 | `GET https://portal.mrrc.vlsc.net:8899/` → 200，**不带 `-k` 亦通过**（通配证书覆盖） |
+| 入口与证书 | `GET https://portal.mrrc.vlsc.net/` → 200，**不带 `-k` 亦通过**（通配证书覆盖） |
 | 自助申请（库外呼号） | `POST /apply` `bg1test` → `applied`，理由"呼号库中未收录，转人工核验" |
 | 自动核验（库内呼号） | `POST /apply` `bg1sb` → `verified`，"命中呼号库" |
 | 未核验不得授予 | 无令牌 `POST /grant` → **403**；状态未到 `verified` 亦拒绝（代码硬前置） |
 | 限流 | 14 连击 → `200×4` 后持续 **429**（按来源 IP，真实生效） |
+| **申请令牌交回申请方（V0.18）** | 公网 `POST /apply` `bg1prb` → 应答含 32 字符 `request_token`；`POST /status` 用它 → `200 applied`（未批准时 label/port/secret 全空）；错令牌 → **403**。客户端据此才能自动等到批准 |
 | 既有服务未受影响 | `bg1sb` 实例入口 401 ✓、www 边缘 401 ✓、未知名字 404 unknown instance ✓ |
 
 运维动作两种用法：脚本/curl 用请求头 `X-Portal-Token`；浏览器用表单里的同名字段
 （**令牌走请求体，不进 URL** —— URL 会进访问日志与浏览器历史）。
-授予之后仍需 root 手工执行 `gen_hub_routes.py` + `nginx reload`（有意分工，见 §12.9）。
+验收当时授予之后仍需 root 手工执行 `gen_hub_routes.py` + `nginx reload`；**自 V0.17 起这一步由 30 s 的
+root timer 自动完成**（有意分工，见 §12.9）。
 
 ### 12.9.2 核验依据：与留言版同源（2026-10-01）
 

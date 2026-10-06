@@ -1,0 +1,20 @@
+# Regenerate the hub's wildcard routes and trust bundle, then reload nginx - but only if the
+# configuration still tests clean. Runs as root because it reloads nginx; the Portal service
+# deliberately cannot, which is why this exists as its own unit rather than as a call from the
+# service that receives the certificate.
+[Unit]
+Description=MRRC hub: regenerate routes + trust bundle, verify, reload nginx
+After=network.target
+# One write can raise several path events (changed, modified, directory), and systemd's default
+# start limiter then marks the unit failed with 'start-limit-hit' even though every run succeeded
+# - measured. The script is idempotent and takes well under a second, so rate limiting it buys
+# nothing and only produces misleading failures.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mrrc-hub-routes.sh
+# A failure here means the generated configuration did not pass nginx -t. The script leaves the
+# running configuration alone in that case; these settings just make the failure visible.
+StandardOutput=journal
+StandardError=journal

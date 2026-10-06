@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>总体架构图 · as-built 校验版 2026-10-02（V0.21 一台机器）· 校验记录</title>
+<style>
+  body{margin:0;background:#f5f7fa;color:#1f2937;
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;}
+  .page{max-width:1200px;margin:0 auto;padding:32px 24px 60px;}
+  h1{font-size:26px;margin:0 0 6px}
+  .sub{color:#64748b;margin:0 0 18px}
+  .fig{background:#fff;border:1px solid #d7dce3;border-radius:12px;padding:10px;overflow-x:auto}
+  .fig img{display:block;width:100%;min-width:1400px;height:auto}
+  .meta{color:#64748b;font-size:13.5px;margin:10px 2px 26px}
+  code{font-family:"JetBrains Mono","SF Mono",Menlo,monospace;font-size:.9em;background:#eef2f7;padding:0 4px;border-radius:4px}
+  details{background:#fff;border:1px solid #d7dce3;border-radius:12px;padding:14px 18px;margin-top:16px}
+  summary{cursor:pointer;font-weight:700}
+  table{border-collapse:collapse;width:100%;margin-top:12px;font-size:13.5px}
+  td,th{border:1px solid #d7dce3;padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#f1f5f9}
+  .ok{color:#047857;font-weight:700}
+  .old{color:#b45309;font-weight:700}
+  .miss{color:#b91c1c;font-weight:700}
+  .note{background:#fff4ea;border:1px solid #f0a875;border-radius:12px;padding:12px 18px;margin:0 0 18px;color:#9a3412}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>MRRC Cloud Hub 远程接入 · 总体架构（as-built 校验版 2026-10-02 · V0.21 一台机器）</h1>
+  <p class="sub">图的本体是 <code>architecture-2026-10-02-as-built.svg</code>（唯一可编辑源）；同目录
+    <code>.png</code> 是其渲染件（3200×2000），物理图见 <code>physical-architecture-2026-10-02.svg</code>（3200×2100）。本页只承载校验记录。</p>
+  <p class="note"><b>取代关系：</b>本版取代 <code>architecture-2026-10-01-as-built.*</code> 与
+    <code>physical-architecture-2026-10-01.*</code> —— 那一对画的是 V0.20 及以前的「两条路」时代
+    （海外边缘退化路、<code>:9988</code>/<code>:8899</code>、三台主机），旧文件留作快照，不再维护。</p>
+  <div class="fig"><img src="architecture-2026-10-02-as-built.svg" alt="MRRC Cloud Hub 总体架构 as-built 校验版 2026-10-02"></div>
+  <p class="meta">改图：编辑 SVG → 重渲染
+    <code>"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars
+    --force-device-scale-factor=1 --window-size=3200,2000 --screenshot=architecture-2026-10-02-as-built.png
+    architecture-2026-10-02-as-built.svg</code>（物理图同法，窗口改 <code>--window-size=3200,2100</code>）</p>
+
+  <details open>
+    <summary>校验记录：逻辑图 2026-10-01「两条路」版 → 本版逐条订正</summary>
+    <table>
+      <tr><th style="width:30%">旧图陈述</th><th style="width:9%">判定</th><th>订正 / 依据</th></tr>
+      <tr><td>顶部决策条「境内备案前主入口 9988/8899 TLS，只放行 80/443 的网络走海外 443 边缘退化路」</td><td class="old">过时</td>
+        <td>V0.21 起门户/入口/站点合并在一台机器的 <b>443</b>；<code>:9988</code>/<code>:8899</code> 取消；边缘退化路整体删除；唯一独立端口是隧道控制 <b>8989</b>。SDD/08 卷首 V0.21 决定、SDD/14 V0.21</td></tr>
+      <tr><td>中泳道「单地域（乌兰察布 ECS）」「公网开放 8899 / 9988 / 8989 · 境内备案前 443 不可用（R-H13）」</td><td class="miss">错</td>
+        <td>现在是一台机器 <code>hub.vlsc.net</code> = <code>www.vlsc.net</code> = <code>portal.mrrc.vlsc.net</code>（203.25.119.168，香港 VPS）；公网只需放行 443 与 8989；R-H13 随入口回到 443 消退（SDD/13）。规格/安全组明细<b>未取证</b>，图上不写</td></tr>
+      <tr><td>「退化路 · 海外边缘 443」整盒（<code>www.vlsc.net/mrrc_modern/&lt;呼号大写&gt;/</code> 路径反代）</td><td class="old">作废</td>
+        <td>路径随 V0.21 删除。本版改为入口层注记条说明删除与理由（两条路指向同一个 nginx，留第二套只是多一处会坏的配置）；物理图另设「V0.21 删掉的（存史）」盒留档</td></tr>
+      <tr><td>「Portal 入口 <code>portal.mrrc.vlsc.net:8899</code>」</td><td class="miss">端口错</td>
+        <td>门户挂在<b>根</b>（旧 <code>/mrrc_portal/</code> 301）；服务本体仍只绑 <code>127.0.0.1:8890</code>，nginx 那层限流 <code>/apply</code>。SDD/12 §12.8、<code>deploy/deploy_hub_routes.sh</code></td></tr>
+      <tr><td>「主路 · 呼号通配 vhost <code>:9988</code> 与 <code>:8899</code>」；右泳道「主路／退化路」</td><td class="miss">错</td>
+        <td>入口 <code>https://&lt;呼号&gt;.mrrc.vlsc.net/</code>（443，不带端口）；「主路」二字删除 —— 已无第二条路。另：<code>:8899</code> <b>从未对公网开放</b>（实测三次被拒），「主路」的说法本就不符事实，见 SDD/08 卷首</td></tr>
+      <tr><td>数据路径「浏览器 → nginx <code>:9988/:8899</code> → …」</td><td class="miss">端口错</td>
+        <td>改为 <code>:443</code></td></tr>
+      <tr><td>Owner 盒「授予后路由重生成仍 root 手执行」</td><td class="miss">错</td>
+        <td>自 V0.17 起 <code>mrrc-hub-routes.timer</code>（30 s，root，oneshot）哈希比对、真变了才 <code>nginx -t</code> + reload（<code>deploy/systemd/*</code>）。仍手工的只有 <code>/admin</code> 的核验与授予；Portal 无 reload 权限是有意分工</td></tr>
+      <tr><td>用户访问链路五步（无令牌、无登记、入口带端口）</td><td class="old">缺环节</td>
+        <td>改为六步：<code>/apply</code> 应答交付 <code>request_token</code>（V0.18）→ <code>/status</code> 轮询或 <code>/claim</code> 领取 → 运维核验+分配（唯一手工）→ 应用自动签自签证书 + <code>/enroll</code> + 装常驻隧道（v1.24.0 起租户不敲命令）→ 443 入口 → 口令登录</td></tr>
+      <tr><td>页脚「剩余：ICP 备案（回 443）、一机一证、Operator 租约、成员管理」；「实测公网往返 118–168 ms」</td><td class="old">过时</td>
+        <td>入口已在 443，备案不再是前置（R-H13 消退，存史）；剩余项改列一机一证迁移（<code>bg1sb</code> 仍指旧证书名）、Operator 租约、成员管理。118–168 ms 是<b>旧 hub 时期</b>读数，迁港后未复测，显式标注</td></tr>
+      <tr><td>（缺失）站点/下载、30 s 路由 timer、hub→实例证书链、Portal 的 <code>/status</code>/<code>/claim</code>/<code>/enroll</code></td><td class="miss">补入</td>
+        <td>入口层加第三盒「站点与下载 · 同机」；注册表盒补 timer 语义；证书横切补「实例自签 → <code>/enroll</code> → 信任包钉住 → <code>proxy_ssl_name $mrrc_tls_name</code>」；Portal 盒补令牌交付与三个端点（<code>portal/app.py</code> 实为 9 POST + 2 GET）</td></tr>
+      <tr><td>左列 PTT/角色 gate/出站隧道语义、控制面六盒与目标态存储、PTT 不变量、容量基线、日志不记 query（AD-H07）</td><td class="ok">保留</td>
+        <td>与现网仍一致，未改动语义；左列补 Windows 计划任务与裸呼号标签规则（V0.21）</td></tr>
+    </table>
+  </details>
+
+  <details>
+    <summary>校验记录：物理图 2026-10-01「三台主机」版 → 本版逐条订正</summary>
+    <table>
+      <tr><th style="width:30%">旧图陈述</th><th style="width:9%">判定</th><th>订正 / 依据</th></tr>
+      <tr><td>标题「三台主机 + 外部依赖」；主机③「海外边缘 · www.vlsc.net（193.111.30.163）」整块</td><td class="old">结构变</td>
+        <td>改两台主机：实例 + 一台机器（hub ＝ www ＝ 门户）。主机③ 的静态站与留言版并入主机②（同机 vhost）；边缘反代盒删除</td></tr>
+      <tr><td>主机②副标「阿里云 ECS 乌兰察布 · <code>iZ…a6Z</code> · 公 8.160.161.80 / 内 172.19.95.147 · 2vCPU/3.6G/40G · 安全组仅 22/8899/9988/8989」</td><td class="miss">全错</td>
+        <td>那是老机器。新版写 <code>hub.vlsc.net · 203.25.119.168 · Ubuntu 26.04</code>，公网只需放行 443 与 8989；规格/SSH 账号/安全组明细/IPv6 可达性<b>未取证</b>，图上不编</td></tr>
+      <tr><td>nginx 盒「<code>:9988 / :8899</code> TLS」「<code>:8899</code> 上 <code>portal.mrrc.vlsc.net</code> → 8890」</td><td class="miss">端口错</td>
+        <td>443 上三套 vhost（实例入口通配 / 门户挂根 / <code>vlsc.net</code> 静态）；门户旧路径 301；限流 <code>zone=mrrc_portal_apply burst=5 nodelay</code></td></tr>
+      <tr><td>回环拓扑「公网上只暴露 nginx(8899/9988) 与 frps(8989)」</td><td class="miss">端口错</td>
+        <td>nginx(<b>443</b>) 与 frps(<b>8989</b>)；188xx 与 8890 永不外听</td></tr>
+      <tr><td>运维入口「<code>ssh cheenle@8.160.161.80</code>」「路由变更 = <code>gen_hub_routes.py &amp;&amp; nginx -t &amp;&amp; reload</code>（root 手执行）」</td><td class="miss">错</td>
+        <td>新机 SSH 账号与 sudo 形态未取证，不写 IP；路由变更自 V0.17 起由 30 s timer 自动。管理台文案仍打印手工 root 命令属已知滞后，图上注明「另案」</td></tr>
+      <tr><td>定时盒「两个 cron」；V0.20 的跨机 <code>mrrc-portal-sync.timer</code>（08:30）</td><td class="old">不全/失效</td>
+        <td>补 <code>mrrc-hub-routes.timer</code>（30 s）；跨机同步 timer 随合并<b>失去对象</b>，标存史；04:30 呼号库同步保留（合并后为机内两跳，规模门 &lt;10 万条拒换）</td></tr>
+      <tr><td>外部依赖「主路 <code>:9988</code>（或 <code>:8899</code>）· 退化路 www 443 路径 · 只放行 80/443 出站才需要退化路」</td><td class="miss">错</td>
+        <td>443 唯一入口 + 局域网 <code>:8888</code>；退化路说明删除 —— 入口自身就在 443，R-H12 的缓解已达成</td></tr>
+      <tr><td>阿里云 DNS「通配 A → 8.160.161.80」；Let's Encrypt「仅 DNS-01（境内 80/443 不可用，R-H13）」</td><td class="old">理由过期</td>
+        <td>通配 A <b>当前指向未取证</b>（2026-09-30 实测为旧 hub）；DNS-01 的理由改写成 LE 通配证书规则，与备案无关</td></tr>
+      <tr><td>连线「9988 / 8899 · TLS 通配真证书（主路）」「443 边缘路径（退化·间歇）」「反代 →9988」</td><td class="old">作废</td>
+        <td>三条删除；改为一条 443 唯一入口线。间歇 3/6 的真因（边缘 nginx 选中旧 hub 不可达的 IPv6）写入「存史」盒，见 V0.19</td></tr>
+      <tr><td>实例侧「C1 未落地 / C2 未落地」「v1.22.0 已订正为未发布」「CN/SAN=&lt;label&gt;…」</td><td class="old">口径过期</td>
+        <td>C1/C2 在 SDD/11 §11.3 与 SDD/README（v1.22.0 打包版已含）之间互相冲突，现场已到 v1.24.x —— 标<b>未取证</b>不站队；shell 版自签证书<b>只有 CN</b>、Windows 版才有 SAN；落盘补 Windows 路径；「三件事」改「四件事」（补 30 s timer，且 v1.24.0 起第 2/3 步由应用自动做）</td></tr>
+      <tr><td>页脚信任锚「www→hub 靠系统 CA」；读数基线「2026-10-01 三处现场」</td><td class="old">作废/过期</td>
+        <td>www→hub 那一跳已无对象；基线改为「2026-10-02 按 V0.21 记录重绘，主机② 的逐项读数仍是旧机所取、搬迁后未逐项复测」</td></tr>
+      <tr><td>（缺失）合并的代价</td><td class="miss">补入</td>
+        <td>新增「合并的代价：单点变大了」盒 —— 一台机器同时是入口+门户+站点+隧道端点；真单点是这台 VPS 与通配证书续期链（两者都有告警退出码）；同时注明三条跨机坏链路随合并消失</td></tr>
+      <tr><td>主机① 电台/服务/frpc 语义、落盘权限位、重启行为、信任包钉住自签公钥</td><td class="ok">保留</td>
+        <td>与现网仍一致；frpc 盒补 Windows 计划任务与版本钉 0.71.0</td></tr>
+    </table>
+  </details>
+
+  <details>
+    <summary>本版仍未取证、刻意不画进图里的事实</summary>
+    <table>
+      <tr><th style="width:40%">项</th><th>说明</th></tr>
+      <tr><td>新主机规格 / SSH 账号 / 安全组明细</td><td>203.25.119.168 上的 CPU/内存/nginx 版本/登录账号/安全组内容无任何记录；旧图里的 2vCPU/3.6G/40G 与实例 ID 属老机器，不可照搬</td></tr>
+      <tr><td>新主机 IPv6 可达性</td><td>旧 hub 的 v6 入站/出站是坏的（V0.19 定根因）；搬迁后没人复测，而 <code>deploy_hub_routes.sh</code> 现在生成 <code>listen [::]:443</code> —— 图只写「未取证」，不把 v6 画成通的</td></tr>
+      <tr><td><code>*.mrrc.vlsc.net</code> 通配 A 的当前指向</td><td>2026-09-30 实测为 8.160.161.80（旧 hub）；V0.21 之后无记录</td></tr>
+      <tr><td>注册表当前行数与标签</td><td>SDD/12 §12.8 的机上读数「仅一行 <code>bg1sb 18802 radio.vlsc.net</code>」与 SDD/14 V0.21「已有两条记录已迁移」冲突，两条记录的标签从未写进任何文件 —— 图上不写具体行</td></tr>
+      <tr><td>47.80.243.9 那台 V0.20 门户主机的后续处置</td><td>只记录「不再承载门户」，不断言已下线</td></tr>
+    </table>
+  </details>
+</div>
+</body>
+</html>

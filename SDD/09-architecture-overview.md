@@ -77,22 +77,26 @@ MVP 的代理必须**对 5 个 WebSocket 端点与静态资源完全透明**：
 | 三层一致性校验 | NFR-H022 |
 | 诊断最小权限 + MFA + 审计 | NFR-H023 |
 
-## 9.9 实况指认（as-built，2026-09-30）
+## 9.9 实况指认（as-built，2026-10-02 更新）
 
-架构图与章节描述的是**目标形态**；目前已实际运行的是一条最小闭环：
+架构图与章节描述的是**目标形态**；目前已实际运行的是：
 
-呼号子域入口（8899/9988 TLS，真证书，npm nginx 通配 vhost）
-＋ 海外边缘路径反代（`/mrrc_modern/<呼号>/`，上游校验用系统 CA）
-＋ frps 单条通配 vhost 与注册表（`instances.tsv` + `gen_hub_routes.py`）
-＋ 实例侧 launchd 常驻隧道。
+**一台机器**（香港 VPS `hub.vlsc.net` = `www.vlsc.net` = `portal.mrrc.vlsc.net`，203.25.119.168）
+上：呼号子域入口（**443**，通配真证书，nginx 通配 vhost，逐实例上游校验）
+＋ 呼号自助门户（根路径 `https://portal.mrrc.vlsc.net/`，回环 8890）
+＋ 静态站点（`www.vlsc.net/mrrc_modern/` 下载页）
+＋ frps 0.71.0（控制口 **8989**，`proxyBindAddr=127.0.0.1`）
+＋ 注册表（`/etc/mrrc-hub/instances.tsv` + `gen_hub_routes.py` 生成 map 与路由）
+＋ 实例侧常驻隧道（launchd / systemd / 任务计划）。
 
-尚未落地的是管理 Portal、设备 mTLS 与 Operator 租约（阶段 2）。
-逐项事实（三台主机、两个入口、证书全流程、运维命令、已知退化）见
+**`:9988` 与 `:8899` 两个监听已取消**（V0.21）；海外边缘那条反代路径整体删除。
+尚未落地的是设备 mTLS 与 Operator 租约（阶段 2）。
+逐项事实（一台机器、一个入口、证书全流程、运维命令、已知退化）见
 `12-operational-model.md` §12.8 —— 与本章不一致时以 §12.8 为准并回改本章。
 
-**物理架构图**（机器/进程/文件/端口/cron 一级，2026-10-01 现场读数）：
-[`../docs/physical-architecture-2026-10-01.svg`](../docs/physical-architecture-2026-10-01.svg)（同目录 PNG 为渲染件）。
+**物理架构图**（机器/进程/文件/端口/cron 一级，按 V0.21 记录重绘；新主机上的逐项现场读数**尚未全部复测**）：
+[`../docs/physical-architecture-2026-10-02.svg`](../docs/physical-architecture-2026-10-02.svg)（同目录 PNG 为渲染件）。
 
-**as-built 校验版总体架构图**（2026-10-01，含对 2026-09-30 目标态旧图的逐条订正记录）：
-源为 [`../docs/architecture-2026-10-01-as-built.svg`](../docs/architecture-2026-10-01-as-built.svg)
+**as-built 校验版总体架构图**（2026-10-02，含对 2026-10-01「两条路」版本的逐条订正记录）：
+源为 [`../docs/architecture-2026-10-02-as-built.svg`](../docs/architecture-2026-10-02-as-built.svg)
 （同目录 PNG 为其渲染件，HTML 为校验记录页；改图改 SVG 后重渲染）。

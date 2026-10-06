@@ -1,0 +1,15 @@
+# Every half minute: regenerate if a certificate or the registry changed. The script itself decides
+# whether anything changed (it compares hashes) and reloads nginx only then, so the common case
+# costs one glob and no reload. A timer rather than a path unit because PathChanged fires on atime
+# updates too, which made a watching unit trigger itself continuously.
+[Unit]
+Description=MRRC hub: check for route changes every 30s
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=mrrc-hub-routes.service
+
+[Install]
+WantedBy=timers.target

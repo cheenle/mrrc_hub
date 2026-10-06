@@ -154,7 +154,7 @@
                 隧道控制口是
                 <code>tunnel.mrrc.vlsc.net:8989</code>（你的电脑连出去）；
                 入口是
-                <code>&lt;呼号&gt;.mrrc.vlsc.net:9988</code>（浏览器连进来）。
+                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>（浏览器连进来）。
                 <b>它们都要出站可达</b>，但只有前者是接入时必须打通的。
               </p>
             </div>
@@ -174,7 +174,7 @@
               </span>
               <p>
                 打开
-                <code>https://portal.mrrc.vlsc.net:8899/</code
+                <code>https://portal.mrrc.vlsc.net/</code
                 >，填呼号与联系方式提交。Portal 当场走完前三步：
               </p>
               <ul>
@@ -341,8 +341,8 @@ tail -5 "$HOME/Library/Application Support/mrrc-fleet/frpc-&lt;呼号&gt;.log"
 #           [&lt;呼号&gt;] start proxy success
 
 # 2) 从公网看整条链路健康吗
-curl -sI https://&lt;呼号&gt;.mrrc.vlsc.net:9988/login        # 期望 200
-curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net:9988/api/health     # 期望 401</code></pre>
+curl -sI https://&lt;呼号&gt;.mrrc.vlsc.net/login        # 期望 200
+curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net/api/health     # 期望 401</code></pre>
             </div>
 
             <div class="hub-callout ok">
@@ -360,7 +360,7 @@ curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net:9988/api/health     # 期望 401</
             </p>
 
             <div class="hub-code">
-              <pre><code>https://&lt;呼号&gt;.mrrc.vlsc.net:9988/</code></pre>
+              <pre><code>https://&lt;呼号&gt;.mrrc.vlsc.net/</code></pre>
             </div>
           </li>
 

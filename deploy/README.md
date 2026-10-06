@@ -2,24 +2,78 @@
 
 > **状态（2026-10-01 复核）：阶段 1 已部署并在真实公网验证通过。** 本目录的脚本是那一次的落地工具。
 > 下面「未部署」的叙述是当时的现场记录，保留供追溯。
-> **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」—— 其中两条会让现网退化。**
+> **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」—— 其中 X1 会让现网退化（X2/X3 已随 V0.21 失去对象，存史）。**
 
-## ⚠️ 脚本与现网漂移（2026-10-01 取证）
+## 注册表第三列：上游 TLS 校验名（老实例会被它绊住）
 
-以下两处**仓库脚本落后于现网**。重跑对应脚本会让现网退化，**务必先对齐再跑**：
+`/etc/mrrc-hub/instances.tsv` 每行是 `标签 <tab> 回环端口 <tab> 上游 TLS 名`。
+第三列**留空**时生成器按"它自己的入口名"校验（`<标签>.mrrc.vlsc.net`）—— 对自签证书的实例正好 ✓。
+
+但**自带公有证书**的实例（例如早期用 Let's Encrypt 签了 `radio.vlsc.net` 的那台）必须**显式写第三列**，
+否则入口会是 502，而 nginx 日志说：
+
+```
+upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL handshaking to upstream
+```
+
+**排查顺序**（2026-10-03 实测）：
+
+1. 实例的隧道端口在听 ⇒ 可以**直接从隧道口取证书**（不需要那台机器配合）：
+   `openssl s_client -connect 127.0.0.1:<端口> -servername <标签>.mrrc.vlsc.net -showcerts </dev/null`
+2. 看 CN/SAN：是 `<标签>.mrrc.vlsc.net` ⇒ 什么都不用写 ✓；是别的名字（如 `radio.vlsc.net`）⇒ 写进第三列 ✓
+3. 证书放进 `/etc/mrrc-hub/instance-certs/<标签>.pem`（生成器按**文件名**匹配注册表 ✓）
+4. `sudo /usr/local/sbin/gen_hub_routes.py && sudo systemctl reload nginx`
+5. 复核入口：`curl -sk -o /dev/null -w '%{http_code}\n' https://<标签>.mrrc.vlsc.net/api/health` ⇒ 401 ✓
+
+## 现行形态（V0.21，2026-10-02）—— 一台机器，只留 8989
+
+**门户、实例入口、静态站点在同一台机器上**（香港 VPS `hub.vlsc.net` = `www.vlsc.net` =
+`portal.mrrc.vlsc.net`，203.25.119.168）。原先"hub 一台 + 海外 www 边缘一台"的两级入口
+**已删除**：两条路指向同一个 nginx，保留第二套只是多一处会坏的配置。
+
+> **要 SSH 的是 `cheenle@www.vlsc.net`（203.25.119.168），不是 `8.160.161.80`。**
+> 本文下方标着「2026-09-30 实测」的拓扑、事实表与部署步骤描述的是**迁移前那台阿里云 ECS**
+> （`8.160.161.80` / `iZ0jlaouy9vk8n98wfp3a6Z`）—— 只作历史保留。**2026-10-03 重新取证**发现那台
+> 机器并未退役：它上面另跑着一套 frps + portal + nginx，注册表已经**分叉**（标签带 `-mrrc-modern`
+> 后缀），且**自 2026-09-30 19:22 起没有任何实例接入过**。它不承载任何现网入口，DNS 也不指向它。
+> 当日就因为这个过期段落把排查带错了方向 —— 所以这一条写在最前面。
+>
+> **现网 hub 的实测事实（2026-10-03）**：Ubuntu，**1 vCPU / 1914 MB 内存 / 磁盘 13721 MB（已用 5823）**；
+> `frps`（8989）· `nginx`（443）· `mrrc-portal`（127.0.0.1:8890，`User=mrrcportal`，无 sudo）
+> 四个单元常驻；`mrrc-hub-routes.timer`（30 s）见下方「路由重生成」一节。
+> SSH 为 `cheenle@www.vlsc.net`，**有 NOPASSWD sudo**（`sudo -n` 可直接用）。
+
+| 用途 | 地址 | 端口 |
+| --- | --- | --- |
+| 实例入口（统一，标签=裸呼号） | `https://<呼号>.mrrc.vlsc.net/` | **443** |
+| 呼号自助门户（挂根） | `https://portal.mrrc.vlsc.net/` | **443** |
+| 静态站点与下载 | `https://www.vlsc.net/mrrc_modern/` | **443** |
+| 隧道控制（实例出站连它） | `tunnel.mrrc.vlsc.net` | **8989** |
+
+**防火墙只需要放行 8989 与 443**（`:9988` / `:8899` 两个监听已取消）。
+
+## ⚠️ 脚本与现网漂移（2026-10-01 取证，2026-10-02 按 V0.21 复核）
+
+**仓库脚本落后于现网**。2026-10-01 记的是三条；V0.21 删掉海外边缘那条反代路径之后，**X2 / X3 已失去对象**
+（保留为记录，不删行），X1 里原先的三项倒退有两项已对齐、只剩两处仍是活的漂移。
+重跑 `deploy_hub_routes.sh` 仍会让现网退化，**务必先对齐再跑**：
 
 | # | 漂移 | 后果 |
 | --- | --- | --- |
-| **X1** | `deploy_hub_routes.sh` 生成**两个** server block（`listen 8899;` 明文 + 301、`listen 9988 ssl`），而现网是**一个** block、且 `8899` 已是 **TLS**；且它生成的 `proxy_ssl_name` 写死 `radio.vlsc.net`、信任源写死系统 CA，**不认识 `$mrrc_tls_name` 与 `trust-bundle.pem`** | 重跑会**三重倒退**：① 8899 从 TLS 退回明文 → 境内被改写（R-H13 的失效模式）；② 抹掉**逐实例证书校验**，退回"所有实例共用 `radio.vlsc.net`"；③ 抹掉**信任包**，自签实例证书立即 502。另：脚本头部注释仍写 "currently self-signed"，现网已是真 Let's Encrypt |
-| **X2** | `deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | 重跑会把现网形态降级为 302 或子域代理，丢掉"标准端口 + 真证书 + 前缀透明"三项收益。www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的 |
+| **X1**（**仍是活的**） | **已对齐的两项**：脚本现在只生成**一个** `listen 443 ssl` 的 vhost（`8899` / `9988` 两个口已随 V0.21 取消，无处可退），并且已经写入 `proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem`。**仍漂移的两处**（读脚本取证）：① `proxy_ssl_name` 用的是写死的 `${MRRC_UPSTREAM_SSL_NAME:-radio.vlsc.net}`（第 24、88 行），**不引用 `gen_hub_routes.py` 生成的 `$mrrc_tls_name`**；② vhost 头部注释仍写 `currently self-signed: a trusted one needs DNS-01`（第 58–59 行），而现网是真 Let's Encrypt（DNS-01 已跑通并每日续期） | 重跑会把逐实例的**校验名压平成 `radio.vlsc.net`** ⇒ 凡按自己入口名 `<标签>.mrrc.vlsc.net` 签证的实例立即 502（`bg1sb` 的第三列本来就写着 `radio.vlsc.net`，反而不受影响）。信任包这一项不再倒退；`$mrrc_tls_name` 的 map 仍会被生成（脚本第 49 行会跑生成器），只是 vhost 不再引用它。② 属注释误导，不影响运行 |
+| **X3**（存史，**已失去对象**） | 原漂移：边缘 nginx 里指向 hub 的两处 `proxy_pass`（`/mrrc_modern/BG1SB/` 与 `/mrrc_portal/`）为 **hub 的 IPv4 字面量** `8.160.161.80`，不是脚本里的主机名 | **V0.21 删除了海外边缘那条反代路径**，这两处 `proxy_pass` 连同所在的 vhost 段一起不再存在 ⇒ 本条今天没有对象。**留档理由**：根因（裸主机名 + AAAA ⇒ nginx 无 `resolver` 时只在启动解析一次，于是选中不可达的 IPv6）与旧 hub 的 v6 不可达都还在记录里，而**新机器的 IPv6 可达性未取证**（搬迁后没人复测）；将来若再引入「主机名式 upstream」，同一条会再咬一次（见 `SDD/12 §12.8` 排障增补、`SDD/14` V0.19） |
+| **X2**（存史，**已失去对象**） | 原漂移：`deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | **V0.21 删除了边缘路径** ⇒ 现网已没有那段手工配置可供降级，整个脚本也就没有落点（脚本仍在仓内，两种模式的代码未动，可复核；当时 www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的）。**留档理由**：那段 `path proxy` 从来没有脚本能复现 —— 将来若再需要「另一台机器上的路径入口」，得先把它写回脚本 |
 
-> **X1 现在是两者中最危险的**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
-> `proxy_ssl_name $mrrc_tls_name`）是在脚本之外手工落的。在那套校验写回脚本之前，
-> **不要重跑 `deploy_hub_routes.sh`**。参见 `SDD/12 §12.8 「实例证书链」`。
+> **X1 现在是唯一需要防的一条**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
+> `proxy_ssl_name $mrrc_tls_name`）里，信任包那一半已经写回脚本，**校验名那一半仍是手工落的**。
+> 在 `proxy_ssl_name $mrrc_tls_name` 写回脚本之前，**不要重跑 `deploy_hub_routes.sh`**。
+> 参见 `SDD/12 §12.8 「实例证书链」`。
 
 **处置**：只记录，**不改脚本**（改部署脚本的风险与验证成本超出文档任务范围）。对齐留作独立变更。
 
-## 已探明的事实（2026-09-30 实测）
+## 已探明的事实（2026-09-30 实测，**指迁移前那台 `8.160.161.80`，仅作历史**）
+
+> 本节的"Hub 主机"是阿里云 ECS，**不是现网**。现网事实见文首提示框。
 
 | 项 | 事实 |
 | --- | --- |
@@ -34,18 +88,19 @@
 | DNS `radio.vlsc.net` | 家宽 IPv6（无 A），即实例侧现状入口 |
 | 实例证书 | `certs/fullchain.pem` = **真 Let's Encrypt**，`CN=radio.vlsc.net`，SAN 仅 `radio.vlsc.net`，2026-12-10 到期 |
 
-**推论**：SDD 里那套命名（`portal.mrrc.vlsc.net` / `tunnel.mrrc.vlsc.net` / `<id>.mrrc.vlsc.net`）
+**推论**：SDD 里那套命名（`https://portal.mrrc.vlsc.net` / `tunnel.mrrc.vlsc.net` / `<id>.mrrc.vlsc.net`）
 **今天就解析得到**，不需要动 DNS。而你说的 `hub.vlsc.net` 需要新增一条记录（它在 `vlsc.net`
 区下，不在那条通配里）。本目录默认用 `test1.mrrc.vlsc.net` 做验证，避开这个前置。
 
 ## 解除阻塞（三件，只有你能做）
 
-1. **阿里云控制台 → 安全组入方向**放行：**`8899/tcp`、`9988/tcp`、`8989/tcp`**
+1. **VPS 控制台 → 安全组入方向**放行：**`8989/tcp`（隧道控制）与 `443/tcp`（入口/门户/站点）**。
+   历史端口 `8899` / `9988` 已随 V0.21 取消，无需放行
 
    | 端口 | 用途 |
    | --- | --- |
-   | **8899** | 用户入口的明文口（只做 301 跳转；**不能**用于 ACME，见下） |
-   | **9988** | 用户入口的 TLS 口 —— 用户实际访问 `https://test1.mrrc.vlsc.net:9988` |
+   | ~~8899~~ | **已取消**（原为明文 301 口，后升 TLS，V0.21 随合并删除） |
+   | ~~9988~~ | **已取消**（原为用户入口 TLS 口；现入口在 443） |
    | **8989** | frps 控制口，实例出站连它 |
 
    非标端口的代价已写进设计记录（AD-H02 的 port 修订、风险 R-H12）：**入口 URL 带端口**，
@@ -68,19 +123,19 @@
   │  https://test1.mrrc.vlsc.net   ← TLS 由 hub 的 nginx 终结（Let's Encrypt，HTTP-01）
   ▼
 Hub ECS 8.160.161.80
-  nginx :9988 server_name test1.mrrc.vlsc.net
+  nginx  server_name test1.mrrc.vlsc.net
      └─ proxy_pass https://127.0.0.1:18888
            proxy_ssl_verify on                       ← 这一步是刻意的：
            proxy_ssl_name radio.vlsc.net                B2 现状是 proxy_ssl_verify off，
            proxy_ssl_trusted_certificate <系统 CA 库>    hub 侧必须开着校验证书
-  nginx :8899 301 → https://…:9988（明文口只跳转）
+  nginx :443（入口、门户、站点同一个端口）
   frps :8989  bindPort（实例出站连它；token 鉴权 + TLS）
        :18888 tcp 代理端口（**只绑 127.0.0.1**，不暴露到公网）
        ▲
        │ 出站 WSS/TLS，客户侧零入站
        │
 家宽 Mac（实例侧）
-  frpc → 8.160.161.80:8989
+  frpc → tunnel.mrrc.vlsc.net:8989
       local 127.0.0.1:8888  ← MRRC_modern（真的 Let's Encrypt 证书）
 ```
 
@@ -89,6 +144,9 @@ Hub ECS 8.160.161.80
 同时覆盖两项设计主张：AD-H02（通配子域可行）与 NFR-H021（禁止 `proxy_ssl_verify off`）。
 
 ## 部署步骤
+
+> **注意**：下面的 `8.160.161.80` 是历史目标。现网重装/迁移走 `cheenle@www.vlsc.net`，步骤相同，
+> 但请同时确认 `mrrc-hub-routes.{sh,timer,service}` 三件套都装上了（见下方「路由重生成」）。
 
 ```bash
 # 1) hub 侧（需要第 1、2 项已解除）
@@ -102,15 +160,15 @@ cp deploy/frpc-instance.toml.example ~/mrrc-frpc.toml   # 填 token
 frpc -c ~/mrrc-frpc.toml
 
 # 3) 验证
-curl -sI https://test1.mrrc.vlsc.net:9988/login            # 期望 200（自签阶段加 -k）
-curl -s  https://test1.mrrc.vlsc.net:9988/api/health       # 期望 401（鉴权生效）
+curl -sI https://test1.mrrc.vlsc.net/login            # 期望 200（自签阶段加 -k）
+curl -s  https://test1.mrrc.vlsc.net/api/health       # 期望 401（鉴权生效）
 ```
 
 ## 这次验证要检查什么（不只是"能连上"）
 
 | # | 检查项 | 期望 | 对应设计主张 |
 | --- | --- | --- | --- |
-| V-a | 登录页可达 | `https://test1.mrrc.vlsc.net:9988/login` 200 | AD-H01 / SC-H1（客户侧零入站） |
+| V-a | 登录页可达 | `https://test1.mrrc.vlsc.net/login` 200 | AD-H01 / SC-H1（客户侧零入站） |
 | V-b | 五个 WS 端点全通 | `/WSradio` `/WSspectrum` `/WSaudioRX` `/WSaudioTX` `/WSatr1000` 均完成握手（浏览器不复现"控制/频谱在、音频缺席"） | 透明代理契约 |
 | V-c | **WS URL 里没有 `?token=`** | 浏览器 DevTools 的 Network→WS 请求 URL 无 token；`journalctl -u nginx` grep `token=` 无命中 | AD-H07 / NFR-H020 |
 | V-d | **上游证书校验为真** | nginx 配置无 `proxy_ssl_verify off`；证书不匹配时链路应失败（可临时把 `proxy_ssl_name` 改错验证它真的会失败） | NFR-H021 |
@@ -159,7 +217,7 @@ manual 模式不会自动续订（脚本的错误信息里也写了这条退路�
 | `/usr/local/sbin/gen_hub_routes.py` | 把注册表生成成 nginx `map`（`/etc/nginx/conf.d/mrrc-hub-map.conf`），并校验端口落在 frps 的 `allowPorts` 内 |
 | `/etc/nginx/sites-available/mrrc-hub` | **唯一**的 vhost：`~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$` → `https://127.0.0.1:$mrrc_port`；未知名字 **404**（不回退到别的实例）。上游校验：`proxy_ssl_name $mrrc_tls_name` + `proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem`（**逐实例**，见下） |
 | `/etc/mrrc-hub/trust-bundle.pem` | 系统 CA + 各实例的自签证书公钥。自签证书靠"钉住它"通过校验，而不是靠关掉 verification |
-| `/etc/nginx/sites-available/mrrc-portal`〔+ `-edge`〕 | 呼号自助注册站点：`portal.mrrc.vlsc.net`（8899 面向用户 / 9988 面向边缘），`/apply` 带 `limit_req` |
+| `/etc/nginx/sites-available/mrrc-portal-mrrc` | 呼号自助注册站点：`https://portal.mrrc.vlsc.net/`（**挂在该名字的根**；旧 `/mrrc_portal/` 301 到根），带 `limit_req` |
 
 **加实例 = 注册表加一行 + 重跑生成器 + reload**，不再"每实例改 nginx"—— 那正是 B2 的痛
 （每加一个前端资源就要动中心配置、还踩过正则优先级）。
@@ -170,8 +228,8 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 避免两个客户端抢同一个名字导致抖动。**实例自己的电台服务不归它管** —— 隧道照常连，实例没起来就 502。
 
 **实测**：服务日志 `login to server success` + `start proxy success`；
-经通配 vhost `test1.mrrc.vlsc.net:9988` → `/api/health` **401**、`/login` **200**；
-`nope.mrrc.vlsc.net:9988` → **404**（未知实例不误路由，NFR-H022）。
+经通配 vhost `test1.mrrc.vlsc.net` → `/api/health` **401**、`/login` **200**；
+`nope.mrrc.vlsc.net` → **404**（未知实例不误路由，NFR-H022）。
 
 **本阶段已知限制（阶段 2 替换）**：**隧道自身的认证**仍是 frp 的**单个共享 token** ——
 这是 frp 的模型，也是 hub SDD 把 frp 定位为 MVP 验证通道、把设备 mTLS 留给自研 Agent 的原因（AD-H11/AD-H13）。
@@ -181,6 +239,36 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 两者层次不同：前者是"谁能接入隧道"，后者是"这台实例是不是它声称的那台"。
 详见 `../SDD/12-operational-model.md` §12.8 「实例证书链」与「实例开通链」。
 
+## 后台管理台账号与 frps 面板（V0.28）
+
+部署新版 portal 前先看这份检查单（代码在 `portal/`，行为细节见 `../portal/README.md`）：
+
+1. **账号文件**（`/etc/mrrc-hub/portal-users`，htpasswd `$apr1$`）：
+
+   ```bash
+   printf '%s:%s\n' <用户名> "$(openssl passwd -apr1)" | sudo tee -a /etc/mrrc-hub/portal-users
+   sudo chown root:mrrcportal /etc/mrrc-hub/portal-users && sudo chmod 640 /etc/mrrc-hub/portal-users
+   ```
+
+   文件为空 = 没人能登管理台（令牌机器路径仍可用）。`bootstrap-hub.sh` 只创建占位，不覆盖。
+2. **frps 面板**：`frps.toml` 的 `webServer` 段只绑 `127.0.0.1:7100`，凭据
+   `/etc/mrrc-hub/frps-web.credentials`（0640 root:mrrcportal，bootstrap 自动生成）。
+   **改完必须 `systemctl restart frps`**：frp 0.71 **不热重载** —— SIGHUP 会让它
+   干净退出，而 systemd 把"干净退出"当成 reload 成功、**不会**自动拉起
+   （2026-10-05 实测踩中，随后移除了那个 ExecReload drop-in）。重启让隧道瞬断、
+   frpc 自动重连（实测 4 条隧道 ~7 秒全部回来）。
+3. **核验面板字段**：`curl -u "$(cut -d: -f1- /etc/mrrc-hub/frps-web.credentials)" http://127.0.0.1:7100/api/proxy/tcp`
+   —— 0.71 实测应答是 `{"proxies": [...], ...}`，每条代理只有 `todayTrafficIn/Out`、
+   `curConns` 与 `lastStartTime/CloseTime`，**没有累计 `trafficIn/Out`**（采样器因此用今日累计差分）。
+4. **来源 IP 透传**：portal vhost 必须设 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+   （与 `X-Real-IP`）。**缺了它登录锁定会退化成 127.0.0.1 全局桶**——与 §12.8 的实例侧同款教训。
+5. **重启 portal**：`sudo systemctl restart mrrc-portal`；随后逐项复验：登录/登出、无 CSRF 动作被拒、
+   隧道视图出数、停掉面板时页面显示原因而不是 0。
+6. **portal unit 不得设 `MRRC_PORTAL_BASE`**（现网 nginx 把门户挂在根，`/mrrc_portal/*` 只是 301；
+   unit 里那个过期变量曾让登录跳去租户页、会话 Cookie 的 Path 也对不上。2026-10-05 已移除）。
+
+> frps 那个单共享 token 仍然存在（见上）；本面板只是**只读统计**，不是第二套认证。
+
 ## 两级入口：主路走 hub，退化路走海外 www（迂回方案）
 
 境内地域的 80/443 在没有备案时不可用，而**明文 HTTP 到未备案域名会被途中改写**（实测见 R-H13）。
@@ -188,12 +276,12 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 
 | | 主路（低延迟） | 退化路（兼容性） |
 | --- | --- | --- |
-| URL | `https://<呼号>.mrrc.vlsc.net:9988`（或 `:8899`） | `https://www.vlsc.net/mrrc_modern/<呼号大写>/` |
-| 落点 | 阿里云 hub（乌兰察布） | 海外 <www.vlsc.net> 的 443 **路径代理**，反代回 hub 的 9988 |
+| URL（历史） | `https://<呼号>.mrrc.vlsc.net:9988` / `:8899` | `https://www.vlsc.net/mrrc_modern/<呼号大写>/` |
+| 落点（历史） | hub | 海外 <www.vlsc.net> 的 443 路径代理，反代回 hub 的 9988 |
 | 证书 | **真 Let's Encrypt**（`*.mrrc.vlsc.net`，DNS-01，2026-09-30 → 2026-12-29，每日续期） | **真证书**（www 上 certbot HTTP-01，80/443 在此可用） |
 | 实测 RTT | **0.13 s**（`/login`） | **0.69 s**（`/login`，多一跳海外往返） |
 | 适用 | 绝大多数用户 | 只放行 80/443 出站的网络（公司/访客 Wi-Fi） |
-| 可用性 | 多次实测均正常 | ⚠️ **2026-10-01 复测为间歇可用**（6 次中 3 次 20 s 无响应）；失败在 `www → hub:9988` 这一跳，详见 `SDD/12 §12.8` 排障增补 |
+| 可用性 | 多次实测均正常 | ⚠️ **2026-10-01 复测为间歇可用**（6 次中 3 次 20 s 无响应）；失败在 `www → hub` 这一跳，详见 `SDD/12 §12.8` 排障增补 |
 
 > 脚本里的 `proxy`（**子域**）模式 **不是**现网形态 —— 现网用的是第三种 `path proxy`。
 > 见上方「⚠️ 脚本与现网漂移」X2。
@@ -212,7 +300,7 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 ssh hub 'sudo cat /etc/mrrc-hub/tls/fullchain.pem' | ssh www 'sudo tee /etc/nginx/mrrc-hub-ca.pem'
 # 2) 推送并执行（幂等、marker 分块替换、改前备份、nginx -t 后才 reload）
 scp deploy/deploy_www_edge.sh www:/tmp/
-ssh www 'sudo bash /tmp/deploy_www_edge.sh test1.mrrc.vlsc.net tunnel.mrrc.vlsc.net:9988'
+ssh www 'sudo bash /tmp/deploy_www_edge.sh test1.mrrc.vlsc.net tunnel.mrrc.vlsc.net'
 ```
 
 **验证结果（经 www 全程实测，2026-09-30）**：`/login` 200、`/api/health` 401、`/listen` 302；
@@ -232,12 +320,12 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 已验证（2026-09-30 真实公网，安全组放行后）
 
-安全组放行 8899/9988/8989 之后，**真实公网路径**（本机 → hub nginx:9988 → frps:8989 → frpc → 实例）
+安全组放行 443/8989 之后，**真实公网路径**（本机 → hub nginx → frps:8989 → frpc → 实例）
 实测通过，无 SSH 转发、无端口映射、客户侧零入站：
 
 | 检查 | 结果 |
 | --- | --- |
-| 命名 | 实例入口 `test1.mrrc.vlsc.net:9988`；隧道控制 `tunnel.mrrc.vlsc.net:8989`（均走 `*.mrrc.vlsc.net` 通配） |
+| 命名 | 实例入口 `test1.mrrc.vlsc.net`；隧道控制 `tunnel.mrrc.vlsc.net:8989`（均走 `*.mrrc.vlsc.net` 通配） |
 | 边缘 | `/login` **200**、`/api/health` **401**、`/listen` **302**（未鉴权跳登录） |
 | 公网往返 | 家宽 → 乌兰察布 → 隧道 → 家宽，**118–168 ms** |
 | 上游证书校验 | 对实例的**真 LE 证书**校验通过（校验关闭时才可能拿到 502 之外的结果） |
@@ -261,13 +349,13 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 已验证（早前一轮：安全组未放行时用 SSH 转发绕开）
 
-安全组当时仍未放行，所以两条腿走了 SSH 本地转发（本地 18989→hub 8989、18988→hub 9988）。
+安全组当时仍未放行，所以两条腿走了 SSH 本地转发（本地 18989→hub 8989、18988→hub 9988（当时还有 9988））。
 **被验证的软件链条与真实部署完全一致**，只有"公网能不能到 hub"这一层没被覆盖。
 
 | 检查 | 结果 |
 | --- | --- |
 | 隧道建立 | frpc `login to server success` + `[mrrc-test1] start proxy success` ✓ |
-| TLS 终结 + 子域 vhost | `https://test1.mrrc.vlsc.net:9988/login` → **200**；`/api/health` → **401** ✓ |
+| TLS 终结 + 子域 vhost | `https://test1.mrrc.vlsc.net/login` → **200**；`/api/health` → **401** ✓ |
 | **上游证书校验为真（V-d）** | 直连一个"CN 错误的自签上游"→ 200，经 nginx → **502**；换成实例的**真 LE 证书**后 → **401/200 正常通过**。两向都测过：该校验既会拦、也不会误拦 ✓ |
 | **WS 透明性（V-b）** | 裸握手矩阵（直连 vs 经隧道）：无凭据 **403 / 403**、Cookie **101 / 101**、`?token=` **101 / 101** —— 升级与自定义关闭语义完全一致 ✓ |
 | **令牌传输（V-c 部分）** | 前端已不再拼 `?token=`；本次 WS 用 Cookie 头即可通过（AD-024 的 cookie 路径经隧道有效）✓ |
@@ -325,3 +413,53 @@ www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续�
 | `fetch_installer_payload.sh` | 实例 | 免预装取件器：无第三方依赖，**必校 SHA-256**，不符即拒绝（不降级） |
 | `gen_hub_routes.py` | hub（**root**） | 按注册表生成通配 vhost 路由 + 把 `instance-certs/` 并成一册信任包；**原子替换，`nginx -t` 过了才 reload**，校验不通过就回滚且**不回退到关闭校验** |
 | `mrrc-hub-cert.sh` | hub（root） | 通配证书（DNS-01）签发与续期 —— **由 `issue_wildcard_cert.sh` 改名而来** |
+
+## 装机后才暴露的三个缺陷（2026-10-01，VM 实测；v1.23.1 待带）
+
+在干净的 Win11 VM 上**装线上包并真跑接入脚本**才发现的，三个都不是"没写对"，而是"写完没在那个环境下跑过"：
+
+| # | 症状 | 根因 | 状态 |
+| --- | --- | --- | --- |
+| 1 | `openssl req` 报 `Can't open "…/MRRC Modern/etc/ssl/openssl.cnf"` ⇒ 签不出证书 | msys2 的 `openssl.exe` 按**编译前缀**找默认配置，租户机上没有该前缀 | **已修** ✓：随包带 `openssl.cnf` + 脚本显式 `-config`，缺文件即报错（不再回退） |
+| 2 | shell 侧在 stock macOS 上同样签不出 | 用了 `-addext` —— OpenSSL 3 有、**LibreSSL 没有**（`/usr/bin/openssl` 就是 LibreSSL） | **已修** ✓：改用 `-config` 形式（两边都认） |
+| 3 | 脚本在签名一步抛异常中断，日志只有 `+++…+++` | PowerShell 5.1 在 `$ErrorActionPreference="Stop"` 下把**原生程序写 stderr**（openssl 进度点）当成 terminating error | **已定位** ✗ 未修：把原生调用包起来（局部降级为 Continue + 用 `$LASTEXITCODE` 判成败） |
+
+**给自己的判据教训**（第 1 条）：我当时的"自足性证明"证的是"**带 `-config`** 能签" ✓，而脚本**没传 `-config`** ✗ ⇒ 判据比结论窄一点，就差出一次事故。
+**验证方式教训**：`build.ps1` 与租户脚本都必须**在装上之后**跑一次；`fleet/` 不在热修覆盖面内 ⇒ 这类缺陷**只能重打包**，热修救不了。
+
+## hub 侧两条运维铁律（2026-10-01 各踩一次）
+
+1. **改了 Portal 代码，必须重新部署到 hub 才算修好**。`import re` 的修复在仓库里躺了一整天，
+   hub 上跑的还是旧代码 ⇒ 端点把一张**完全正确**的证书报成"名字不符"。部署后自检：
+   **不带口令**请求 `/enroll` 应得 403/400（不是 200）。
+2. **`/etc/mrrc-hub/instance-certs` 的属主必须是服务账号**（本仓 `mrrc-hub-cert.sh:104` 写的就是
+   `install -d -o mrrcportal -g mrrcportal -m 750`）。手工建成 `root:mrrcportal 750` ⇒ 服务**写不了**
+   登记上来的证书 —— 而它会以 **409** 的形式出现（看起来像"你自己提交的冲突"，误导性极强）。
+   核对：`stat -c '%a %U:%G' /etc/mrrc-hub/instance-certs` ⇒ 期望 `750 mrrcportal:mrrcportal`。
+
+## 路由重生成现在是自动的（2026-10-01 起）
+
+`gen_hub_routes.py` 过去要人手工跑一次（脚本会把那条 root 命令交给运维）。现在 hub 上装的是
+**root 的 systemd timer**（`deploy/systemd/mrrc-hub-routes.{timer,service}` + `mrrc-hub-routes.sh`）：
+
+```
+证书或注册表一变 → mrrc-hub-routes.service（oneshot，root）
+  ⇒ gen_hub_routes.py（幂等；没变化也算成功 ✓）
+  ⇒ nginx -t **过了才** systemctl reload nginx（不过就保持运行中的配置不动并报错退出）
+```
+
+- 为什么不放进 Portal 服务里：它接收公网提交，**不该有** reload nginx 的权限（AD 里的分工）。
+- 为什么是 **timer** 而不是 path 单元：systemd 的 `PathChanged` 也包含**属性变化（含 atime）**，
+  而服务本来就要读证书目录 ⇒ 会不断触发自己（实测 2 分钟 232 次 ✗）。30 秒一次的 timer 只花一次
+  glob + 一次哈希比较 ✓，脚本**只在生成物真的变了**才 `nginx -t` + reload ✓（所以常态下不 reload ✓）。
+- 新装 hub：`bootstrap-hub.sh` 会一并安装（`install -m 755/644` + `systemctl enable --now`）。
+  **但 2026-10-03 实测到一次装配缺失，所以别把这句话当保证**：现网那台 hub 上**只有**
+  `mrrc-hub-routes.service`，**包装脚本与 timer 都没装** ⇒ 该 unit 指向的
+  `/usr/local/sbin/mrrc-hub-routes.sh` 不存在 ⇒ 每次执行 `status=203/EXEC` ⇒ **自 2026-10-02 01:07
+  起路由从未重生成过**。症状：新实例的一切都就绪（frps 已在 `127.0.0.1:<端口>` 监听、
+  `instance-certs/<标签>.pem` 已登记、注册表有行），**只有入口 404**，因为 nginx 的
+  label→端口表里没有它。
+  确认方式：`systemctl is-enabled mrrc-hub-routes.timer`（期望 `enabled`）+ `sha256sum /usr/local/sbin/mrrc-hub-routes.sh`
+  与仓库 `deploy/mrrc-hub-routes.sh` 比对。
+- **验收**：① `touch /etc/mrrc-hub/instance-certs/<名>.pem` ⇒ `journalctl -u mrrc-hub-routes.service`
+  出现 `nginx -t passed; reloading`；② 常态下每 30 s 一行 `nothing changed; not reloading`。

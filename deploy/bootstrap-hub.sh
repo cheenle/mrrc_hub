@@ -103,6 +103,33 @@ if [[ ! -s /etc/frp/frps.token ]]; then
 fi
 chmod 600 /etc/frp/frps.token
 
+# Dashboard panel credentials for the portal's tunnel metrics (read-only).
+# Loopback-only; the portal service account reads a 0640 copy, never frps' own files.
+install -d -m 0755 /etc/mrrc-hub
+if [[ ! -s /etc/mrrc-hub/frps-web.credentials ]]; then
+    printf 'portal:%s\n' "$(openssl rand -hex 24)" >/etc/mrrc-hub/frps-web.credentials
+    chmod 640 /etc/mrrc-hub/frps-web.credentials
+    if id -u mrrcportal >/dev/null 2>&1; then
+        chown root:mrrcportal /etc/mrrc-hub/frps-web.credentials
+    else
+        echo "⚠️ user mrrcportal does not exist: leaving panel credentials root:root;" >&2
+        echo "   the portal will honestly report '凭据不可读' until the account exists" >&2
+    fi
+fi
+FRPS_WEB_USER="$(cut -d: -f1 /etc/mrrc-hub/frps-web.credentials)"
+FRPS_WEB_PW_QUOTED="\"$(cut -d: -f2- /etc/mrrc-hub/frps-web.credentials)\""
+
+# An empty htpasswd file (never overwritten): the admin console has no accounts
+# until one is added, while the machine token still works.
+if [[ ! -e /etc/mrrc-hub/portal-users ]]; then
+    install -m 640 /dev/null /etc/mrrc-hub/portal-users
+    if id -u mrrcportal >/dev/null 2>&1; then
+        chown root:mrrcportal /etc/mrrc-hub/portal-users
+    fi
+    echo "==> created empty /etc/mrrc-hub/portal-users; add an account with:"
+    echo "    printf '%s:%s\\n' <user> \"\$(openssl passwd -apr1)\" | sudo tee -a /etc/mrrc-hub/portal-users"
+fi
+
 log "frps.toml"
 cat >/etc/frp/frps.toml <<EOF
 # Managed by mrrc_hub/deploy/bootstrap-hub.sh — edits are overwritten on re-run.
@@ -128,6 +155,14 @@ allowPorts = [{ start = 18800, end = 18999 }]
 
 log.to = "/var/log/frps.log"
 log.level = "info"
+
+# Read-only dashboard API on loopback: the portal samples per-proxy
+# todayTrafficIn/Out + curConns from it (0.71 has no cumulative counters; the
+# sampler diffs the today counters). Never exposed by nginx.
+webServer.addr = "127.0.0.1"
+webServer.port = 7100
+webServer.user = "${FRPS_WEB_USER}"
+webServer.password = ${FRPS_WEB_PW_QUOTED}
 EOF
 chmod 600 /etc/frp/frps.toml
 
@@ -141,6 +176,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
+# frp 0.71 does NOT hot-reload: SIGHUP makes it exit cleanly, and systemd reads that
+# as a successful reload — it never restarts it (measured on the hub 2026-10-05,
+# which left all tunnels down until a manual start). Config changes need a restart;
+# frpc reconnects on its own (4 tunnels were back within ~7s).
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536
@@ -277,3 +316,15 @@ temporarily set \`proxy_ssl_name example.com;\`, reload, and confirm the request
 now FAILS. A verification setting nobody has seen fail is not a verification
 setting — that is how \`proxy_ssl_verify off\` survived in B2.
 EOF
+
+# ---- 路由自动重生成（root）----
+# 证书或注册表一变就重生成通配路由与信任包，nginx -t 过了才 reload。
+# 放在 root 的 path 单元里，而不是让接收证书的 Portal 服务去 reload nginx（它没有那个权限，
+# 也不应该有）。装了它以后，批准一个实例就不再需要任何人手工敲命令。
+install -m 755 "$SELF_DIR/mrrc-hub-routes.sh" /usr/local/sbin/mrrc-hub-routes.sh
+install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.service" /etc/systemd/system/mrrc-hub-routes.service
+install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.timer" /etc/systemd/system/mrrc-hub-routes.timer
+rm -f /etc/systemd/system/mrrc-hub-routes.path   # 早期版本用过 path 单元，会自激（见脚本注释）
+systemctl daemon-reload
+systemctl enable --now mrrc-hub-routes.timer
+echo "routes auto-regeneration: enabled"

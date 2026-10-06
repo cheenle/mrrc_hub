@@ -97,11 +97,16 @@ def is_normalized(value: str) -> bool:
 def label_for(callsign: str, product: str | None = None) -> str:
     """把呼号变成注册表标签（AD-H15 + §7.x.1 标签规则）。
 
-    主产品用**裸呼号**（小写，因为标签受 `[a-z0-9-]+` 约束，与 nginx 通配 vhost 一致）；
-    附加产品加产品后缀，如 `bg1sb-legacy`。
+    主产品用**裸呼号**（小写，因为标签受 `[a-z0-9-]+` 约束，与 nginx 通配 vhost 一致）：
+    一个呼号就是一台设备、一个入口，`bg1sb.mrrc.vlsc.net`。只有附加产品才加后缀
+    （如 `bg1sb-legacy`），并且无论应用把主产品写成 `modern` 还是 `mrrc_modern` 都视为主产品。
     """
     base = callsign.split("/")[0].lower()
-    if product in (None, "", "modern"):
+    # The app used to send "mrrc_modern" here, which is not "modern", so every registration grew a
+    # suffix and the entry read bg9aaa-mrrc-modern.mrrc.vlsc.net. One callsign is one device now:
+    # anything that names the main product - however it is spelled - gets the bare callsign.
+    main_product = {"", "modern", "mrrc_modern", "mrrc-modern", "mrrcmodern", "mrrc modern"}
+    if product is None or str(product).strip().lower() in main_product:
         return base
     slug = re.sub(r"[^a-z0-9]+", "-", str(product).lower()).strip("-")
     if not slug:

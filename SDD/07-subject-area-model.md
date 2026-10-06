@@ -83,8 +83,8 @@ ACTIVE ──TX 开始──► TX_ACTIVE ──500 ms 心跳──► 继续 TX
 
 | 情形 | 标签 | 入口 |
 |------|------|------|
-| 该呼号的**主产品**（当前 = `mrrc_modern`） | **裸呼号**，如 `bg1sb` | `https://bg1sb.mrrc.vlsc.net:9988/`（`:8899` 是同一 vhost 的第二个 TLS 入口） |
-| 该呼号的**附加产品** | `<呼号>-<产品>`，如 `bg1sb-legacy` | `https://bg1sb-legacy.mrrc.vlsc.net:9988/` |
+| 该呼号的**主产品** | **裸呼号**，如 `bg1sb` | `https://bg1sb.mrrc.vlsc.net/`（443，与其余服务同端口） |
+| 该呼号的**附加产品** | `<呼号>-<产品>`，如 `bg1sb-legacy` | `https://bg1sb-legacy.mrrc.vlsc.net/` |
 
 规则要点：
 

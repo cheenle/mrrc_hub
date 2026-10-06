@@ -28,13 +28,24 @@ if [[ "${FORCE:-0}" != "1" && -s "$CRT" && -s "$KEY" ]] \
 	# 否则"hub 可达后重跑"这个恢复路径形同虚设（实测踩过：日志里只有一次 200）。
 fi
 
+# -config 形式：LibreSSL 与 OpenSSL 3 都认；-addext 在 LibreSSL（macOS 自带）上不存在 ✗
+CFG="$(mktemp -t mrrc-cert-cnf)"
+cat > "$CFG" <<'CNF'
+[req]
+distinguished_name = dn
+x509_extensions    = v3
+prompt             = no
+[dn]
+CN = placeholder
+[v3]
+basicConstraints = critical,CA:FALSE
+keyUsage         = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+CNF
 openssl req -x509 -newkey rsa:2048 -nodes -days "$DAYS" \
 	-keyout "$KEY" -out "$CRT" \
-	-subj "/CN=${FQDN}" \
-	-addext "subjectAltName=DNS:${FQDN}" \
-	-addext "basicConstraints=critical,CA:FALSE" \
-	-addext "keyUsage=critical,digitalSignature,keyEncipherment" \
-	-addext "extendedKeyUsage=serverAuth" 2>/dev/null
+	-subj "/CN=${FQDN}" -config "$CFG" 2>/dev/null
+rm -f "$CFG"
 
 chmod 600 "$KEY"; chmod 644 "$CRT"
 echo "已签发自签名证书（${DAYS} 天）:"
@@ -47,7 +58,7 @@ echo "               （hub 侧只需公钥；私钥永远不离开实例）"
 # ---- 登记：把**公钥**交给 hub（私钥永不外传）----
 # 口令来自 Portal 的"分配入口"（运维页显示），一次性；没有口令时跳过并说明后果。
 if [[ -n "${MRRC_ENROLL_SECRET:-}" ]]; then
-	url="${MRRC_ENROLL_URL:-https://portal.mrrc.vlsc.net:8899/enroll}"
+	url="${MRRC_ENROLL_URL:-https://portal.mrrc.vlsc.net/enroll}"
 	echo "登记到 hub: $url"
 	if out="$(curl -fsS --retry 3 --connect-timeout 20 \
 			-X POST --data-urlencode "callsign=$NAME" \

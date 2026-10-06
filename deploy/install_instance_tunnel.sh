@@ -112,7 +112,7 @@ mkdir -p "$CONF_DIR" "$HOME/Library/LaunchAgents"
 umask 077
 cat >"$CONF" <<EOF
 # Managed by mrrc_hub/deploy/install_instance_tunnel.sh (instance: ${NAME}).
-# Put this machine's radio server on the hub as https://${NAME}.mrrc.vlsc.net:9988.
+# Put this machine's radio server on the hub as https://${NAME}.mrrc.vlsc.net.
 #
 # The instance side only dials OUT (no public IP, no port forwarding, no UPnP) —
 # hub SDD AD-H01. The hub claims ${PORT} on its loopback for this name; that port
@@ -218,11 +218,11 @@ esac
 # 同一组变量在 Windows 安装器里已经写了；这里补上 macOS/Linux 的两种惯例位置。
 "$(dirname "${BASH_SOURCE[0]}")/wire_instance_env.sh" "${LOCAL_PORT}"
 
-echo "==> ${NAME} → https://${NAME}.mrrc.vlsc.net:9988 (local 127.0.0.1:${LOCAL_PORT})"
+echo "==> ${NAME} → https://${NAME}.mrrc.vlsc.net (local 127.0.0.1:${LOCAL_PORT})"
 echo
 echo "check:"
 echo "  tail -5 '${CONF_DIR}/frpc-${NAME}.log'          # want: login to server success / start proxy success"
-echo "  curl -sk https://${NAME}.mrrc.vlsc.net:9988/api/health   # 401 once the radio server is up"
+echo "  curl -sk https://${NAME}.mrrc.vlsc.net/api/health   # 401 once the radio server is up"
 case "$(uname -s)" in
 	Darwin) echo "  launchctl bootout gui/$UID/${LABEL}            # to remove it" ;;
 	Linux)  echo "  systemctl --user disable --now mrrc-fleet-tunnel-${NAME}.service   # to remove it"

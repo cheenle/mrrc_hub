@@ -32,6 +32,9 @@ class Application:
     label: str = ""
     port: int = 0
     enroll_secret: str = ""      # 一次性登记口令：实例凭它提交自签证书（见 app.py 的 /enroll）
+    #: 申请方凭它查询自己这条申请的状态（应用在设置里申请后保存它；不进 URL，走 POST 体）。
+    #: 它只够读**自己**这条申请，拿不到别人的，也改不了任何状态。
+    request_token: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     history: list = field(default_factory=list)
@@ -56,7 +59,11 @@ class Store:
         if not self.path.exists():
             return {"applications": {}, "audit": []}
         with self.path.open(encoding="utf-8") as fh:
-            data = json.load(fh)
+            try:
+                data = json.load(fh)
+            except json.JSONDecodeError as exc:
+                # 不按“空库”继续：那会把损坏错报成“没有申请”，乃至被下一次写入覆盖。
+                raise RuntimeError(f"portal 存储损坏，拒绝当作空库：{self.path}: {exc}") from exc
         data.setdefault("applications", {})
         data.setdefault("audit", [])
         return data
@@ -70,8 +77,18 @@ class Store:
             os.fsync(fh.fileno())
         tmp.replace(self.path)
 
-    def _audit(self, data: dict, callsign: str, event: str, detail: str = "") -> None:
-        data["audit"].append({"at": time.time(), "callsign": callsign, "event": event, "detail": detail})
+    def _audit(self, data: dict, callsign: str, event: str, detail: str = "", actor: str = "") -> None:
+        data["audit"].append({"at": time.time(), "callsign": callsign, "event": event,
+                              "detail": detail, "actor": actor})
+
+    def record_login(self, event: str, user: str, ip: str) -> None:
+        """登录事件（login_ok / login_failed / login_locked）——没有呼号，actor = 尝试的用户名。
+
+        长度封顶：用户名与来源 IP 都来自请求，不能任由超长字符串把审计文件撑大。
+        """
+        data = self._load()
+        self._audit(data, "", event, f"user={user[:40]} ip={ip[:45]}", actor=user[:40])
+        self._save(data)
 
     # ---- 用例 ----
     def get(self, callsign: str) -> Application | None:
@@ -88,23 +105,24 @@ class Store:
         existing = data["applications"].get(callsign)
         if existing and existing["status"] in (APPLIED, VERIFIED, GRANTED):
             raise ValueError(f"{callsign} 已存在申请（状态 {existing['status']}），走申诉/转移流程")
-        app = Application(callsign=callsign, contact=contact, product=product)
+        app = Application(callsign=callsign, contact=contact, product=product,
+                        request_token=secrets.token_urlsafe(24))
         app.touch("applied", f"contact={contact!r} product={product!r}")
         data["applications"][callsign] = asdict(app)
         self._audit(data, callsign, "applied", f"product={product!r}")
         self._save(data)
         return app
 
-    def mark_verified(self, callsign: str, evidence: str) -> Application:
-        return self._transition(callsign, VERIFIED, evidence, {APPLIED})
+    def mark_verified(self, callsign: str, evidence: str, actor: str = "") -> Application:
+        return self._transition(callsign, VERIFIED, evidence, {APPLIED}, actor=actor)
 
-    def reject(self, callsign: str, reason: str) -> Application:
-        return self._transition(callsign, REJECTED, reason, {APPLIED, VERIFIED})
+    def reject(self, callsign: str, reason: str, actor: str = "") -> Application:
+        return self._transition(callsign, REJECTED, reason, {APPLIED, VERIFIED}, actor=actor)
 
-    def revoke(self, callsign: str, reason: str) -> Application:
-        return self._transition(callsign, REVOKED, reason, {GRANTED})
+    def revoke(self, callsign: str, reason: str, actor: str = "") -> Application:
+        return self._transition(callsign, REVOKED, reason, {GRANTED}, actor=actor)
 
-    def grant(self, callsign: str, label: str, port: int) -> Application:
+    def grant(self, callsign: str, label: str, port: int, actor: str = "") -> Application:
         """授予 —— **只接受已核验的申请**（安全前置，见模块说明）。"""
         data = self._load()
         current = data["applications"].get(callsign)
@@ -116,18 +134,23 @@ class Store:
             )
         app = Application(**current)
         app.status = GRANTED
-        app.label, app.port = label, int(port)
+        try:
+            app.port = int(port)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"端口必须是十进制整数，得到 {port!r}") from exc
+        app.label, app.port = label, app.port
         # 登记口令在这里生成：它是"这台实例可以把公钥交上来"的唯一凭据。
         # 不给公网留一个匿名上传证书的口子 —— 那等于让任何人冒充别人的入口。
         app.enroll_secret = secrets.token_urlsafe(24)
         app.touch("granted", f"label={label} port={port}")
         data["applications"][callsign] = asdict(app)
-        self._audit(data, callsign, "granted", f"{label} → {port}")
+        self._audit(data, callsign, "granted", f"{label} → {port}", actor=actor)
         self._save(data)
         return app
 
     # ---- 内部 ----
-    def _transition(self, callsign: str, new_status: str, detail: str, allowed: set) -> Application:
+    def _transition(self, callsign: str, new_status: str, detail: str, allowed: set,
+                    actor: str = "") -> Application:
         data = self._load()
         current = data["applications"].get(callsign)
         if not current:
@@ -140,7 +163,7 @@ class Store:
             app.evidence = detail
         app.touch(new_status, detail)
         data["applications"][callsign] = asdict(app)
-        self._audit(data, callsign, new_status, detail)
+        self._audit(data, callsign, new_status, detail, actor=actor)
         self._save(data)
         return app
 

@@ -1054,8 +1054,9 @@ def test_pages_are_mobile_suitable():
                 # 守卫会静默放行，手机上退回难看的挤压布局。
                 # 实例/隧道改用**专门卡片**（桌面表格 + 手机卡片两份标记），
                 # 所以它们不再有 stack 表；申请的表格仍是单份标记自动堆叠。
+                # 公开注册页在空注册表下渲染的是空状态（不是表格），所以是 0。
                 need = {"instances": 0, "applications": 1, "tunnel": 0, "audit": 1, "system": 2,
-                        "overview": 0, "clublog": 0, "公开注册页": 1}
+                        "overview": 0, "clublog": 0, "公开注册页": 0}
                 check(pr.stack_tables >= need[name],
                       f"{name}: 至少 {need[name]} 张宽表挂了 class=stack（得到 {pr.stack_tables}）")
             check(total_tds > 20, f"确实检查到了 stack 单元格（共 {total_tds} 个，避免空跑假通过）")

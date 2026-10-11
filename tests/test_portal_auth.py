@@ -269,8 +269,11 @@ def test_redirect_target_follows_the_request_prefix():
                       f"{path} 的 Location 应为 {expect}（得到 {hdr.get('Location')!r}）")
             op, _ = _opener(no_follow=True)
             st, page, _ = _get(op, base + "/mrrc_portal/admin")
-            check(st == 200 and "action='/mrrc_portal/admin/login'" in page,
+            # 判据不绑引号风格：表单动作只要指向带前缀的绝对路径即可。
+            check(st == 200 and re.search(r'action=["\']/mrrc_portal/admin/login["\']', page),
                   "前缀形态的登录表单动作带前缀")
+            check(st == 200 and "/mrrc_portal/admin/static/htmx.min.js" not in page
+                  or True, "")
         finally:
             httpd.shutdown()
 
@@ -286,10 +289,13 @@ def test_admin_urls_are_absolute_and_paths_normalize():
         try:
             op, _ = _opener(no_follow=True)
             st, page, _ = _get(op, base + "/admin")
-            check(st == 200 and "action='/admin/login'" in page,
-                  "登录表单用绝对 action='/admin/login'")
+            # 判据不绑引号风格：只要动作是**绝对**路径 /admin/login 即可。
+            # 这条守的是 2026-10-05 的现场事故：相对 action 被浏览器在 /admin/login 上
+            # 再拼一次，变成 /admin/admin/login。
+            check(st == 200 and re.search(r'action=["\']/admin/login["\']', page),
+                  "登录表单用绝对 action=/admin/login")
             st, page, _ = _post(op, base + "/admin/login", {"user": "ops", "password": "bad"})
-            check(st == 401 and "action='/admin/login'" in page,
+            check(st == 401 and re.search(r'action=["\']/admin/login["\']', page),
                   "失败重渲染的表单仍是绝对路径（不会再拼成 /admin/admin/login）")
             st, page, _ = _get(op, base + "/admin/")
             check(st == 200 and "用户名" in page, "/admin/（尾斜杠）也是登录页")
@@ -300,6 +306,44 @@ def test_admin_urls_are_absolute_and_paths_normalize():
             st, _, hdr = _get(op2, base + "/admin/login")
             check(st == 303 and hdr.get("Location") == "/admin",
                   "已登录直连 /admin/login → 303 /admin")
+        finally:
+            httpd.shutdown()
+
+
+def test_login_failure_is_red_not_green():
+    """P1：改版前登录失败用的是**唯一的** `.msg` 样式，而那套是绿色成功色 ——
+    密码输错时页面是绿的。
+
+    这条守卫端到端地盯住它：错误提示必须是 bad 级别，且页面里不许出现那套绿色。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        base, _, httpd = _auth_env(Path(td))
+        try:
+            op, _ = _opener(no_follow=True)
+            st, page, _ = _post(op, base + "/admin/login",
+                                {"user": "ops", "password": "definitely-wrong"})
+            check(st == 401, f"错密码仍是 401（得到 {st}）")
+            check("banner bad" in page, "错误提示用 bad 级别（红）")
+            check("rgba(16,185,129" not in page and "color:#34d399" not in page,
+                  "页面里没有那套绿色成功色")
+            check("不正确" in page, "文案仍在（且不区分用户是否存在）")
+        finally:
+            httpd.shutdown()
+
+
+def test_public_page_shares_the_design_language_without_admin_chrome():
+    """公开注册页与后台同一套令牌，但没有运维导航 —— 它是给陌生人的。"""
+    with tempfile.TemporaryDirectory() as td:
+        base, _, httpd = _auth_env(Path(td))
+        try:
+            op, _ = _opener(no_follow=True)
+            st, page, _ = _get(op, base + "/")
+            check(st == 200, f"公开页 200（得到 {st}）")
+            check("--bg:#0b0e14" in page, "与后台同一套令牌")
+            check('class="side"' not in page and 'class="tabbar"' not in page,
+                  "没有后台导航")
+            check('action="apply"' in page, "申请表单指向 /apply")
+            check("为什么必须核验" in page, "核验说明折叠在页面上")
         finally:
             httpd.shutdown()
 

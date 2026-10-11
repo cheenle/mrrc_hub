@@ -37,6 +37,7 @@ from portal import metrics as metrics_mod   # noqa: E402
 from portal import registry as reg          # noqa: E402
 from portal import ui                       # noqa: E402
 from portal import views as vs              # noqa: E402
+from portal.views import STATUS_CN          # noqa: E402
 from portal.views import _days_left         # noqa: E402,F401 — 权威实现在 views，这里 re-export
 from portal.sessions import LoginGuard, SessionStore  # noqa: E402
 from portal.store import Store             # noqa: E402
@@ -974,20 +975,35 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             return self._admin_root() + "/admin"
 
         def _login_page(self, error: str = "", status: int = 200, retry_after: int = 0):
-            note = ("<p><small>账号文件：<code>/etc/mrrc-hub/portal-users</code>（htpasswd，"
-                    "$apr1$；用 <code>openssl passwd -apr1</code> 生成）。脚本/curl 仍可用 "
-                    "<code>X-Portal-Token</code> 请求头调用运维动作。</small></p>")
+            """登录页。
+
+            P1：改版前错误提示用的是唯一的 `.msg` 样式，而那套是**绿色成功色** ——
+            密码输错时页面是绿的。现在错误走 `banner bad`（红），锁定走 `banner warn`。
+            """
+            alert = ""
             if retry_after:
-                note = (f"<p class=msg>失败次数过多，请 {retry_after} 秒后再试。</p>" + note)
+                alert = ui.banner("warn", f"失败次数过多，请 {retry_after} 秒后再试。")
             elif error:
-                note = f"<p class=msg>{html.escape(error)}</p>" + note
-            body = ("<h1>运维审批</h1>"
-                    f"<form method=post action='{self._admin_root()}/admin/login'>"
-                    "<input name=user placeholder=用户名 autocomplete=username autofocus required>"
-                    "<input type=password name=password placeholder=密码 autocomplete=current-password required>"
-                    "<button>登录</button></form>" + note)
+                alert = ui.banner("bad", html.escape(error))
+            note = ("<details><summary class=hint>账号与机器路径</summary>"
+                    "<p><small>账号文件：<code>/etc/mrrc-hub/portal-users</code>（htpasswd，"
+                    "$apr1$；用 <code>openssl passwd -apr1</code> 生成）。"
+                    "脚本/curl 仍可用 <code>X-Portal-Token</code> 请求头调用运维动作。</small></p>"
+                    "</details>")
+            body = ('<div style="max-width:360px;margin:6vh auto 0">'
+                    '<h1>运维审批</h1>'
+                    '<p class=hint>呼号自助注册的后台。需要账号，见页面底部。</p>'
+                    + alert
+                    + f'<form method="post" action="{self._admin_root()}/admin/login" '
+                      'style="display:grid;gap:8px">'
+                      '<input name="user" placeholder="用户名" autocomplete="username" '
+                      'autofocus required>'
+                      '<input type="password" name="password" placeholder="密码" '
+                      'autocomplete="current-password" required>'
+                      '<button class="pri">登录</button></form>'
+                    + note + '</div>')
             headers = {"Retry-After": str(retry_after)} if retry_after else None
-            return self._send(status, _page("MRRC Portal — 运维登录", body, noindex=True),
+            return self._send(status, ui.page("MRRC Portal — 运维登录", body, noindex=True),
                               ctype="text/html; charset=utf-8", headers=headers)
 
         def _operator_ok(self, body: dict | None = None) -> bool:
@@ -1093,29 +1109,32 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                                   ctype="text/html; charset=utf-8")
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})
-            # 这是租户在**自己手机上**看的那张表，所以同样要能在窄屏堆叠。
-            rows = "".join(trow(
-                ("呼号", f"<code>{html.escape(a['callsign'])}</code>"),
-                ("状态", f"<span class='pill ok'>{html.escape(a['status'])}</span>"),
-                ("标签", html.escape(a['label'] or '—')),
-                ("端口", str(a['port'] or '—')))
-                for a in portal.store.bindings().values()
-            ) or "<tr><td colspan=4>（暂无已授予实例）</td></tr>"
-            self._send(200, _page(
+            # 这是租户在**自己手机上**看的页面，所以卡片/表格都要窄屏友好。
+            grants = list(portal.store.bindings().values())
+            rows = [[("呼号", f"<code>{html.escape(a['callsign'])}</code>"),
+                     ("状态", ui.pill("ok", STATUS_CN.get(a['status'], a['status']))),
+                     ("标签", html.escape(a['label'] or '—')),
+                     ("端口", f'<span class="mono">{a["port"] or "—"}</span>')] for a in grants]
+            granted = (ui.grid_table(["呼号", "状态", "标签", "端口"], rows, stack=True)
+                       if rows else ui.empty("还没有已授予的实例"))
+            self._send(200, ui.page(
                 "MRRC Cloud Hub — 呼号自助注册",
-                "<h1>呼号自助注册</h1>"
-                "<p>按 <strong>规范化 → 查重 → 核验 → 分配</strong> 四步完成。呼号经核验通过后才会分配入口。</p>"
-                "<form method=\"post\" action=\"apply\" class=\"p-apply\">"
-                "<input name=\"callsign\" placeholder=\"呼号，例如 BG1SB\" required>"
-                "<input name=\"contact\" placeholder=\"联系方式（可选）\">"
-                "<input name=\"product\" placeholder=\"产品（留空=主产品）\">"
-                "<button type=\"submit\">提交申请</button>"
-                "</form>"
-                "<p><small>为什么必须核验：呼号是<strong>公开标识</strong>，入口名就是呼号，"
-                "因此实例存在性必然可枚举（I-H9 已接受）。防不了“被猜到”，就只能守住"
-                "“核验通过才授予访问”。冒用可被举报并撤销（<code>/revoke</code>）。</small></p>"
-                f"<h2>已授予</h2><table class=stack><tr><th>呼号</th><th>状态</th><th>标签</th><th>端口</th></tr>{rows}</table>"),
-                       ctype="text/html; charset=utf-8")
+                '<h1>呼号自助注册</h1>'
+                '<p class="hint">按 <b>规范化 → 查重 → 核验 → 分配</b> 四步完成；'
+                '呼号经核验通过后才会分配入口。</p>'
+                '<form method="post" action="apply" data-tools class="tools">'
+                '<input name="callsign" placeholder="呼号，例如 BG1SB" required '
+                'autocomplete="off" style="flex:2 1 160px">'
+                '<input name="contact" placeholder="联系方式（可选）" style="flex:1 1 140px">'
+                '<input name="product" placeholder="产品（留空＝主产品）" style="flex:1 1 140px">'
+                '<button class="pri">提交申请</button>'
+                '</form>'
+                '<details><summary class="hint">为什么必须核验？</summary>'
+                '<p><small>呼号是<b>公开标识</b>，入口名就是呼号，因此实例存在性必然可枚举'
+                '（I-H9 已接受）。防不了“被猜到”，就只能守住“核验通过才授予访问”。'
+                '冒用可被举报并撤销（<code>/revoke</code>）。</small></p></details>'
+                '<h2>已授予</h2>' + granted),
+                ctype="text/html; charset=utf-8")
 
         def do_POST(self):                       # noqa: N802
             route = self._route()

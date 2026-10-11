@@ -139,6 +139,8 @@ margin-bottom:9px}
 .meta b{color:var(--tx2);font-weight:500}
 .hint{font-size:10.5px;color:var(--tx3)}
 .hint.bad{color:var(--bad)}.hint.warn{color:var(--warn)}
+/* 文字色工具类：状态色**只许**这样用，不许写成内联 style='color:…' */
+.ok-tx{color:var(--ok)}.warn-tx{color:var(--warn)}.bad-tx{color:var(--bad)}
 .empty{text-align:center;padding:26px 12px;color:var(--tx3);font-size:12px}
 .empty p{margin:0 0 10px}
 .badge{background:rgba(251,113,133,.16);color:var(--bad);border:1px solid rgba(251,113,133,.35);

@@ -182,7 +182,9 @@ def test_login_flow_and_csrf():
             check("SameSite=Lax" in set_cookie, "Cookie 带 SameSite=Lax")
             check("Secure" not in set_cookie, "回环 Host（auto 策略）不带 Secure，便于本机 SSH 隧道登录")
             st, page, _ = _get(op, base + "/admin?view=system")
-            check(st == 200 and "后台管理" in page and "hub 主机" in page, "会话可切换视图")
+            # 判据用外壳特征 + 视图内文：切视图不该把会话扔掉。
+            check(st == 200 and 'class="side"' in page and "hub 主机" in page,
+                  "会话可切换视图")
             portal.store.apply("BG1SB")
             st, _, _ = _post(op, base + "/verify", {"callsign": "BG1SB", "evidence": "人工"})
             check(st == 403, "有会话但没有 CSRF 的动作被拒")

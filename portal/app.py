@@ -181,6 +181,23 @@ table.kv{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
 _PORTAL_CSS = ui.CSS
 
 
+def _clublog_hit(query: str) -> str:
+    """运维问“这个呼号在不在库里”时，**到底是哪个库**答的 → hit-clublog / hit-list / miss。
+
+    分开问两个库而不是用 build_verifier() 的链：链只回“通过/待人工”，
+    而运维需要知道是权威库命中（可以直接批）还是自建清单命中（库里暂时没有）。
+    顺序与 build_verifier() 一致：权威库先问。
+    """
+    try:
+        if ClubLogVerifier(DEFAULT_CLUBLOG).check(query).outcome is VerificationOutcome.VERIFIED:
+            return "hit-clublog"
+        if CallsignListVerifier(DEFAULT_CALLSIGN_DB).check(query).outcome is VerificationOutcome.VERIFIED:
+            return "hit-list"
+    except Exception:                                                # noqa: BLE001
+        return ""
+    return "miss"
+
+
 def _int_or(value, default: int) -> int:
     """把查询串里来的数字变成 int；不是数字就用默认值（不要在路由层抛 500）。"""
     try:
@@ -991,6 +1008,15 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             _, session = self._session()
             entries = portal.registry.entries()
             entries_full = portal.registry.entries_full()
+            # 呼号库查询：纯本地，用现有核验链问一次（**不联网**）。
+            clublog_query = q.strip() if view == "clublog" else ""
+            clublog_hit = ""
+            if clublog_query:
+                try:
+                    outcome = build_verifier().verify(clublog_query)
+                except Exception:                                    # noqa: BLE001
+                    outcome = None
+                clublog_hit = _clublog_hit(outcome)
             return vs.Ctx(
                 root=self._admin_root(),
                 csrf=session.csrf if session else "",
@@ -1002,7 +1028,8 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 entries=entries,
                 entries_full=entries_full,
                 states=_tunnel_states(entries),
-                reports=_instance_reports(entries_full) if view == "instances" else {},
+                reports=_instance_reports(entries_full)
+                if view in ("instances", "instance") else {},
                 resources=_host_resources() if view == "system" else {},
                 services=_service_states() if view == "system" else [],
                 net=_net_facts() if view == "system" else {},
@@ -1010,6 +1037,8 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 cert_days=_cert_days() if view == "overview" else "—",
                 clublog=_clublog_info() if view in ("overview", "clublog") else "",
                 clublog_path=str(DEFAULT_CLUBLOG),
+                clublog_query=clublog_query,
+                clublog_hit=clublog_hit,
                 registry_first=portal.registry.first,
                 registry_last=portal.registry.last,
                 sampler=(sampler.snapshot() if sampler is not None else None),
@@ -1023,7 +1052,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             )
 
         def _admin(self, view: str, msg: str = "", part: str | None = None,
-                   flt: str = "", q: str = "", page: int = 1) -> str:
+                   flt: str = "", q: str = "", page: int = 1, label: str = "") -> str:
             """后台管理台：装配 Ctx → 交给 views 渲染（服务端渲染，全部 7 个视图）。
 
             安全姿态（变化的与不变的要分清）：
@@ -1033,7 +1062,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
               * **需要 root 的操作不由本服务执行**：Web 服务解析外网输入，给它
                 nginx reload / 拉库的权限是自找麻烦。这里只把命令打出来让运维执行。
             """
-            ctx = self._ctx_for(view, msg=msg, flt=flt, q=q, page=page)
+            ctx = self._ctx_for(view, msg=msg, flt=flt, q=q, page=page, label=label)
             r = vs.render(view, ctx, part=part)
             nav = ui.Nav(view=view, root=ctx.root, badges=vs.badges(ctx),
                          user=ctx.user, csrf=ctx.csrf)
@@ -1059,7 +1088,8 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 return self._send(200, self._admin(q_params.get("view") or "overview",
                                                    part=part, flt=q_params.get("f") or "",
                                                    q=q_params.get("q") or "",
-                                                   page=_int_or(q_params.get("page"), 1)),
+                                                   page=_int_or(q_params.get("page"), 1),
+                                                   label=(q_params.get("label") or "").strip()),
                                   ctype="text/html; charset=utf-8")
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})

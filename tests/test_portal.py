@@ -882,23 +882,35 @@ def test_admin_views_render_the_probe_facts_end_to_end():
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         opener, _ = _signed_in_opener(base, "ops", "pw-123456789")
 
-        def view(name):
-            with opener.open(base + f"/admin?view={name}", timeout=30) as r:
+        def view(name, **params):
+            qs = "".join(f"&{k}={v}" for k, v in params.items())
+            with opener.open(base + f"/admin?view={name}{qs}", timeout=30) as r:
                 return r.status, r.read().decode()
 
         try:
+            # 列表页只留"一眼判断"要的量：结论 + 构建代号 + 两个动作。
+            # 证书主体、Server 头、状态行这些细节搬进了详情页（P5：一行塞三组事实，
+            # 手机上堆成十余行小字）。
             st, page = view("instances")
             check(st == 200, f"实例页 200（得到 {st}）")
             for needle, why in (
                     ("服务中", "隧道状态"),
-                    ("401", "实例的 HTTP 状态行"),
-                    ("uvicorn", "上游 Server 头"),
                     ("mrrc-v99", "实例应用的构建代号"),
-                    ("probe.mrrc.vlsc.net", "上游证书主体"),
-                    ("名字相符", "证书名与注册表第三列的比对结论"),
-                    ("自签", "签发者被识别为自签")):
+                    ("详情", "进详情页的入口")):
                 check(needle in page, f"实例页渲染出{why}（{needle!r}）")
             check("打开入口" in page, "实例页仍有入口链接")
+            check('data-mobile-cards' in page, "实例页有窄屏卡片容器")
+            # 详情页：那一台的完整事实（端到端，走真 HTTP）
+            st, detail = view("instance", label="probe")
+            check(st == 200, f"实例详情页 200（得到 {st}）")
+            for needle, why in (
+                    ("401", "实例的 HTTP 状态行"),
+                    ("uvicorn", "上游 Server 头"),
+                    ("probe.mrrc.vlsc.net", "上游证书主体"),
+                    ("名字相符", "证书名与注册表第三列的比对结论"),
+                    ("自签", "签发者被识别为自签"),
+                    ("撤销入口", "破坏性动作在详情页也有")):
+                check(needle in detail, f"实例详情页渲染出{why}（{needle!r}）")
 
             st, page = view("system")
             check(st == 200, f"系统页 200（得到 {st}）")
@@ -1040,7 +1052,9 @@ def test_pages_are_mobile_suitable():
                           f"{name}: 侧栏与底栏各恰有一项标了 aria-current=page（得到 {pr.aria_current}）")
                 # 宽表必须挂着 class=stack：丢了它，那些 td 就退出 data-label 检查范围，
                 # 守卫会静默放行，手机上退回难看的挤压布局。
-                need = {"instances": 1, "applications": 1, "tunnel": 1, "audit": 1, "system": 2,
+                # 实例/隧道改用**专门卡片**（桌面表格 + 手机卡片两份标记），
+                # 所以它们不再有 stack 表；申请的表格仍是单份标记自动堆叠。
+                need = {"instances": 0, "applications": 1, "tunnel": 0, "audit": 1, "system": 2,
                         "overview": 0, "clublog": 0, "公开注册页": 1}
                 check(pr.stack_tables >= need[name],
                       f"{name}: 至少 {need[name]} 张宽表挂了 class=stack（得到 {pr.stack_tables}）")

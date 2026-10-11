@@ -29,7 +29,7 @@
 
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
-| `HUB_TUNNEL_HOST` / `HUB_TUNNEL_PORT` | `tunnel.mrrc.vlsc.net:443` | Agent 隧道入口（支持多地址列表） |
+| `HUB_TUNNEL_HOST` / `HUB_TUNNEL_PORT` | `tunnel.mrrc.vlsc.net:8989` | Agent 隧道入口（支持多地址列表） |
 | `HUB_HEARTBEAT_INTERVAL_S` | 15 | 实例心跳周期（NFR-H002） |
 | `HUB_LEASE_TTL_S` | 25 | Operator 租约 TTL（20–30） |
 | `HUB_LAUNCH_CODE_TTL_S` | 60 | 一次性 code（NFR-H010） |
@@ -162,7 +162,7 @@
 端到端校验），且不引入新的 CA 依赖。
 
 > 现网 `bg1sb` 仍在用 `radio.vlsc.net` 那张旧证书（注册表第三列未改）—— **能力已到位，迁移未做**。
-> 这条同样是 2026-10-01 在旧 hub 上的读数，V0.21 搬迁后**未复测**（未取证）。
+> `bg1sb` 的证书实况已于 2026-10-04 在**新 hub** 上复测（已取证，见上表：仍用旧证书名 `radio.vlsc.net`，能力已到位、迁移未做）。
 > 写文档时不要把"机制存在"写成"已在跑"。
 
 ### 实例开通链（安装器，2026-10-01 就位）
@@ -226,7 +226,7 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 能力 | 状态 |
 | ------ | ------ |
 | 子域根路径入口 | **开箱即用** —— 无需改造；其认证走会话（无 URL 令牌），故 fleet 评审的 P0-2 对它不适用 |
-| 路径前缀能力 | **已实现**（`mrrc` 分支 `feat/hub`）：`base_path.py` + `[SERVER] base_path`，**默认空 = 行为与改造前完全一致**；含 **Cookie path 限定**（路径入口下同 origin 多产品不再互踩会话，即 P0-3 在该产品上的落点）、HTML 8 处 / `fetch` 3 处 / WebSocket 10 处 / `sw.js` 预缓存的前缀化。守卫：`dev_tools/test_path_prefix.py` |
+| 路径前缀能力 | **已实现**（`mrrc`，该分支已并入 `main`）：`base_path.py` + `[SERVER] base_path`，**默认空 = 行为与改造前完全一致**；含 **Cookie path 限定**（路径入口下同 origin 多产品不再互踩会话，即 P0-3 在该产品上的落点）、HTML 8 处 / `fetch` 3 处 / WebSocket 10 处 / `sw.js` 预缓存的前缀化。守卫：`dev_tools/test_path_prefix.py` |
 | 会话遥测 | **已实现**：`GET /api/session_metrics` + `[SERVER] metrics_interval_s`（默认 60s 打印一行；0 = 关闭）；连接数直读既有 `*Clients` 列表，**不侵入 WS 生命周期** |
 | PTT 安全 | **已具备三层，无需新增**：① 活性闸门（连续未收帧 ≈5s 即收回，`[CTRL] tx_liveness_s` 可配，默认即原行为）② TOT 硬上限（`[CTRL] ptt_tot_seconds`，默认 120s）③ 释放失败每 2s 重试 |
 
@@ -235,9 +235,10 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 在 map 里、入口 **302**，§12.8 用的措辞也是"不打断**正在服务的** legacy 入口"
 （§7.x.1 举的 `bg1sb-legacy` 只是标签示例，并不在表里）。
 **隧道后面是不是真有该产品在服务，SDD 没有记录，这里不下断言。**
-**仍然没上的是 www 的产品段**（形如 `/mrrc_legacy/<呼号>/`）。
-前置条件是**一个能独立运行该产品的站点** —— 它要占用电台/音频/串口，不能与主产品同机并行，
-因此上线验证需独立硬件或经同意的停机窗口。
+**该产品今天也走通配子域入口**（`<标签>.mrrc.vlsc.net`，如实测在表的 `bg6lh-legacy`）；
+早先设想的 www 路径产品段（形如 `/mrrc_legacy/<呼号>/`）与主产品那条一样，**已随 V0.21 删除**，
+不再是接入方式。若要在一台**独立运行该产品的站点**上做实机验证，仍需独立硬件或经同意的停机窗口
+（它要占用电台/音频/串口，不能与主产品同机并行）。
 
 改造记录与逐步计划：`../../mrrc/docs/current/design/hub-parity-plan.md`。
 
@@ -257,7 +258,7 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 登录防爆破 | 固定阈值：用户名 5 次/5 分钟、来源 IP 10 次/5 分钟，各锁 5 分钟（接受“按用户名可被恶意触发”的代价）；`X-Forwarded-For`（仅回环对端才信任）缺失时退化为 127.0.0.1 全局桶 |
 | 隧道性能 | frps `webServer` 只绑 127.0.0.1:7100（Basic 认证，凭据 `/etc/mrrc-hub/frps-web.credentials` 0640）；0.71 应答是 `{"proxies":[…]}`、每条只有 `todayTrafficIn/Out`+`curConns`（**无累计 trafficIn/Out**）⇒ 带宽按今日累计差分（跨日/重启由回绕检测兜底）；延时 = TLS 握手计时；每实例内存环形历史 120 样本（≈1h，重启即清）；「隧道」视图 **2026-10-05 已上线** |
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
-| 测试 | `python3 tests/test_portal.py`（27 组）；另有 `test_portal_auth.py`（7）、`test_portal_metrics.py`（10）、`test_htpasswd.py`（4）——共 48 组 |
+| 测试 | `python3 tests/test_portal.py`（27 组）；另有 `test_portal_auth.py`（8）、`test_portal_metrics.py`（10）、`test_htpasswd.py`（4）——共 49 组 |
 | 入口 | `https://portal.mrrc.vlsc.net/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
 | **主机** | **与 hub 同一台机器**：香港 VPS `hub.vlsc.net`（203.25.119.168），门户挂在该名字的**根**（见 §12.8 主机表）。V0.20 把它迁到阿里云 `47.80.243.9` 的那次拆分只存续了几个小时，**已被 V0.21 取代**；那台机器不再承载门户（其后续处置**未取证**） |
 | 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |
@@ -294,8 +295,8 @@ reload nginx 的权限，这是有意的分工（接收公网输入的服务不�
 | **申请令牌交回申请方（V0.18）** | 公网 `POST /apply` `bg1prb` → 应答含 32 字符 `request_token`；`POST /status` 用它 → `200 applied`（未批准时 label/port/secret 全空）；错令牌 → **403**。客户端据此才能自动等到批准 |
 | 既有服务未受影响 | `bg1sb` 实例入口 401 ✓、www 边缘 401 ✓、未知名字 404 unknown instance ✓ |
 
-运维动作两种用法：脚本/curl 用请求头 `X-Portal-Token`；浏览器用表单里的同名字段
-（**令牌走请求体，不进 URL** —— URL 会进访问日志与浏览器历史）。
+运维动作两种用法：脚本/curl 用请求头 `X-Portal-Token`；浏览器走**会话 + 表单 CSRF 字段**
+（**只认请求头**，不再收表单令牌字段；令牌不进 URL —— URL 会进访问日志与浏览器历史）。
 验收当时授予之后仍需 root 手工执行 `gen_hub_routes.py` + `nginx reload`；**自 V0.17 起这一步由 30 s 的
 root timer 自动完成**（有意分工，见 §12.9）。
 

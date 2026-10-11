@@ -51,7 +51,7 @@ Access Gateway ──(内网 RPC)──► Tunnel Gateway ──(mTLS WSS)──
 
 | # | 变更 | 目的 | 关联 |
 | --- | --- | --- | --- |
-| C1 | 远程会话活性闸门（`MRRC_REMOTE_SESSION_TX_HEARTBEAT_S`，默认 1.0 s，0=关） | 半开连接下本地释放 PTT | AD-H06、第 15 章、I-H6 |
+| C1 | 远程会话活性闸门（`MRRC_REMOTE_SESSION_TX_HEARTBEAT_S`，默认 **0 = 关**，Hub 模式建议 3–5 s） | 半开连接下本地释放 PTT | AD-H06、第 15 章、I-H6 |
 | C2 | 前端停止把 token 放 URL（改 Cookie 或 `Sec-WebSocket-Protocol`） | 令牌不进日志/Referer/历史 | AD-H07、NFR-H020 |
 | C3 | 会话 Cookie 加 `Secure`（远程模式） | 与短时效票证叙事一致 | AD-H09 |
 | C4 | （评估）远程模式下缩短 30 天会话有效期 | 限制长期免登录 | AD-H09 |

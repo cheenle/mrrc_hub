@@ -1062,7 +1062,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 entries=entries,
                 entries_full=entries_full,
                 states=_tunnel_states(entries),
-                help_by_label=_help_by_label(portal),
+                help=_help_by_label(portal),
                 reports=_instance_reports(entries_full)
                 if view in ("instances", "instance") else {},
                 resources=_host_resources() if view == "system" else {},

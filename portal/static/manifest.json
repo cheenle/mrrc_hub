@@ -1,0 +1,21 @@
+{
+  "note": "vendored 前端资源。逐字节冻结，不得手改 —— 改这里必须同时改 sha256 与版本，并在同一个 commit 里说明为什么升级。2026-10-11 从 unpkg 与 jsdelivr 两个独立 CDN 分别下载并比对，字节完全一致。",
+  "files": [
+    {
+      "name": "htmx.min.js",
+      "version": "2.0.7",
+      "license": "0BSD",
+      "source_url": "https://unpkg.com/htmx.org@2.0.7/dist/htmx.min.js",
+      "sha256": "60231ae6ba9db3825eb15a261122d5f55921c4d53b66bf637dc18b4ee27c79f9",
+      "bytes": 51076
+    },
+    {
+      "name": "htmx.LICENSE",
+      "version": "2.0.7",
+      "license": "0BSD",
+      "source_url": "https://unpkg.com/htmx.org@2.0.7/LICENSE",
+      "sha256": "d3d2456f76414f2456104660ebd65aff1c04cd7966b942bdabd63f3cdb316a38",
+      "bytes": 642
+    }
+  ]
+}

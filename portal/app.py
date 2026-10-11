@@ -35,6 +35,7 @@ from portal import callsign as cs          # noqa: E402
 from portal import htpasswd as hp          # noqa: E402
 from portal import metrics as metrics_mod   # noqa: E402
 from portal import registry as reg          # noqa: E402
+from portal import ui                       # noqa: E402
 from portal.sessions import LoginGuard, SessionStore  # noqa: E402
 from portal.store import Store             # noqa: E402
 from portal.store import VERIFIED as STORE_VERIFIED  # noqa: E402
@@ -174,30 +175,17 @@ table.kv{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
 """
 
 
+# 兼容导出：既有测试从 portal.app 取 _PORTAL_CSS。样式表的权威在 portal/ui.py。
+_PORTAL_CSS = ui.CSS
+
+
 def _page(title: str, body: str, noindex: bool = False) -> str:
-    robots = "<meta name=robots content=noindex>\n" if noindex else ""
-    return f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#000000">
-{robots}<title>{title}</title>
-<style>{_PORTAL_CSS}</style>
-</head>
-<body data-site="hub">
-<header class="p-head">
-  <a class="p-brand" href="https://www.vlsc.net/mrrc_hub/">📡 MRRC <em>Cloud Hub</em></a>
-  <span class="p-crumb">{html.escape(title)}</span>
-</header>
-<main class="p-main">
-{body}
-</main>
-<footer class="p-foot">呼号即身份 · 核验通过才授予访问 ·
-<a href="https://www.vlsc.net/mrrc_hub/">文档站</a></footer>
-<script src="https://www.vlsc.net/js/global-nav.js?v=8" defer></script>
-</body>
-</html>"""
+    """兼容包装：旧调用点（登录页/公开页）仍用 3 参数形式。
+
+    页面外壳的权威在 `portal/ui.page()`；旧的两套外观（p-head/p-foot + 外链
+    global-nav.js）已被新外壳取代。登录页与公开页在后续任务里改用 ui 组件直接渲染。
+    """
+    return ui.page(title, body, noindex=noindex)
 
 
 def trow(*cells) -> str:
@@ -915,6 +903,29 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             self.end_headers()
             self.wfile.write(data)
 
+        # ---- 静态资源（白名单）----
+        def _serve_static(self, name: str):
+            """白名单静态资源。名字**精确匹配**，不做路径拼接 ⇒ `..` 无从下手。
+
+            不需要登录：这是公开的第三方库与本站脚本，且公开注册页也要用它。
+            缓存一年 + immutable：内容按 sha256 冻结，靠 manifest 守卫保证它不变。
+            """
+            ctype = ui.STATIC_WHITELIST.get(name)
+            if ctype is None:
+                return self._send(404, {"error": "not found"})
+            try:
+                blob = (ui.STATIC_DIR / name).read_bytes()
+            except OSError as exc:
+                return self._send(404, {"error": f"asset unavailable: {exc}"})
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Cache-Control", ui.STATIC_CACHE)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(blob)
+
         # ---- 认证：会话 Cookie + CSRF（浏览器），令牌请求头（机器）----
         def _query(self) -> dict:
             from urllib.parse import parse_qs, urlsplit
@@ -1306,6 +1317,8 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
         # ---- routes ----
         def do_GET(self):                        # noqa: N802
             route = self._route()
+            if route.startswith("/admin/static/"):
+                return self._serve_static(route[len("/admin/static/"):])
             if route in ("/admin", "/admin/login"):
                 _, session = self._session()
                 if session is None:

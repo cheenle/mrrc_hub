@@ -1038,7 +1038,9 @@ def test_pages_are_mobile_suitable():
 
             # CSS 本身要含窄屏堆叠规则与触摸目标尺寸
             from portal.app import _PORTAL_CSS as css
-            for needle, why in (("@media(max-width:720px)", "窄屏断点"),
+            # 断点 2026-10-11 从 720px 提到 767px：桌面侧栏在 768px 以上才出现，
+            # 两者必须对齐，否则 721–767px 会出现"有侧栏但没有底部标签栏"的真空。
+            for needle, why in (("@media(max-width:767px)", "窄屏断点"),
                                 ("table.stack td::before", "堆叠后的小标题"),
                                 ("content:attr(data-label)", "小标题取自 data-label"),
                                 ("clip:rect(0 0 0 0)", "表头对读屏保留、只视觉隐藏"),

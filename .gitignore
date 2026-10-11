@@ -9,3 +9,6 @@ venv/
 .DS_Store
 *.log
 .pytest_cache/
+
+# 视觉伴侣（brainstorming 原型，不入库）
+.superpowers/

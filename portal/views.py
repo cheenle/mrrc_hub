@@ -45,6 +45,9 @@ class Ctx:
     registry_first: int = 0
     registry_last: int = 0
     sampler: dict | None = None
+    #: {实例标签: 协助记录}。门户**不是口令的保管人**：这些记录里根本没有口令字段，
+    #: 所以卡片也没什么东西可泄露（design §4.3）。
+    help: dict = field(default_factory=dict)
     tunnel_text: dict = field(default_factory=dict)
     tunnel_pill: dict = field(default_factory=dict)
     now: float = 0.0
@@ -569,11 +572,62 @@ def view_instance(ctx: Ctx, label: str = "") -> Rendered:
               + f'<div class="tools"><a class="chip" href="https://{ui.esc(label)}.mrrc.vlsc.net/" '
                 f'target=_blank rel=noopener>打开入口</a>'
                 f'<a class="chip" href="{ctx.root}/admin?view=instances">返回实例列表</a></div>'
+              + _help_card(ctx, label)
               + '<h2>这个实例的审计</h2>' + audit_html
               + '<h2>动作</h2>'
               + _post(ctx, "/revoke", label, "撤销入口", dgr=True)
               + '<p><small>撤销会移除注册表里的一行，入口立刻 404；重开要重新走完核验。</small></p>')
     return Rendered(title=f"MRRC Portal — {label}", chrome=chrome, live="")
+
+
+HELP_STATE_CN = {"pending": "客户已申请，等隧道就绪", "open": "进行中", "closed": "已结束"}
+HELP_REASON_CN = {
+    "user": "客户手动关闭", "expired": "窗口到期", "portal": "门户强制结束",
+    "auth_failures": "口令被连续试错，已自动关闭", "error": "出错关闭",
+    "shutdown": "应用退出", "heartbeat_lost": "心跳消失（客户离线或退出）",
+    "client": "客户端关闭",
+}
+
+
+def _help_card(ctx: Ctx, label: str) -> str:
+    """「远程协助」区块。
+
+    门户只显示状态与那行命令，**永不显示口令**：口令是客户开的窗口里才有的一对字符，
+    由他口头告诉支持者（design §4.3）。他要真想连，缺的就是这一句口令；
+    门户能替支持者做的，是给出准确的端口与"客户还在不在线"。
+    """
+    head = "<h2>远程协助</h2>"
+    record = (ctx.help or {}).get(label)
+    if not record:
+        return head + ui.banner(
+            "info",
+            "客户尚未开启。开启动作在客户的应用界面（遇到问题 → 远程协助），"
+            "他会把用户名与口令直接告诉支持者——<b>门户里看不到口令</b>。")
+    state = str(record.get("state") or "")
+    mark = ui.pill({"open": "ok", "pending": "warn"}.get(state, "mute"),
+                   HELP_STATE_CN.get(state, state or "—"))
+    rows = [
+        ("状态", mark),
+        ("端口", f'<span class="mono">{record.get("port")}</span>'),
+        ("客户口令", "客户自己持有 —— 门户不存、不显示、不转发"),
+        ("已连接", f'{int(record.get("connections") or 0)} 次'),
+    ]
+    if state != "closed":
+        rows.insert(2, ("到期", _ago_text(time.time(), (record.get("expires_at") or 0))))
+        rows.append(("最近心跳", _ago_text(time.time(), (record.get("last_heartbeat") or 0))))
+        cmd = f'ssh -p {record.get("port")} {record.get("username") or "<用户名>"}@127.0.0.1'
+        body = (ui.kv(rows)
+                + '<p><small>在 hub 上执行（frps 只把代理口绑在回环，所以没有公网入口）：</small></p>'
+                + '<p><code>' + ui.esc(cmd) + '</code> ' + ui.copy_button(cmd) + '</p>'
+                + '<p><small>口令请向客户索取并当场使用；这一页永远不会显示它。</small></p>'
+                + _post(ctx, "/help/revoke", label, "强制结束", dgr=True)
+                + '<p><small>强制结束依靠实例下一次心跳（≤20 秒）读到它——实例离线时'
+                  '没有活着的会话可断，记录会由心跳超时标记为结束。</small></p>')
+    else:
+        rows.append(("结束原因", ui.esc(HELP_REASON_CN.get(
+            record.get("closed_reason") or "", record.get("closed_reason") or "—"))))
+        body = ui.kv(rows) + '<p><small>要再开一次，请客户重新开启（窗口不复用）。</small></p>'
+    return head + ui.card(ui.esc(label), HELP_STATE_CN.get(state, state), body)
 
 
 # ── 隧道 ────────────────────────────────────────────────────────────────

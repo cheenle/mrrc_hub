@@ -83,9 +83,15 @@ class Registry:
     def used_ports(self) -> set:
         return {port for _, port in self.entries()}
 
-    def free_port(self) -> int:
-        """从低到高挑一个未被占用的端口；端口用尽时明确报错，不静默复用。"""
-        used = self.used_ports()
+    def free_port(self, extra=()) -> int:
+        """从低到高挑一个未被占用的端口；端口用尽时明确报错，不静默复用。
+
+        `extra` 是**不在注册表里**但同样占着端口段的那些：远程协助口就是这一类——
+        它们短命、由门户分配，写进注册表反而会让 `gen_hub_routes.py` 给它们生成
+        nginx 路由。所以协助口住在 store 里，分配时由调用方把在线的那几个传进来。
+        一个池子、两种占用者，这就是"共用端口段"的落地方式。
+        """
+        used = self.used_ports() | {int(p) for p in extra}
         for port in range(self.first, self.last + 1):
             if port not in used:
                 return port

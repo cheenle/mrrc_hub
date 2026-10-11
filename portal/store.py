@@ -22,6 +22,40 @@ from pathlib import Path
 APPLIED, VERIFIED, REJECTED, GRANTED, REVOKED = "applied", "verified", "rejected", "granted", "revoked"
 
 
+#: 协助窗口的状态。`pending` = 门户已分配端口、等实例把代理挂上；`open` = 心跳在走。
+HELP_PENDING, HELP_OPEN, HELP_CLOSED = "pending", "open", "closed"
+
+#: 心跳消失多久算这个窗口已死。比实例的 20 秒心跳宽得多：一次网络抖动不该让门户
+#: 把端口判死并回收（那时 frpc 那边还占着它，回收就等于把这个端口发给下一个客户）。
+HELP_STALE_SECONDS = 300
+
+#: 协助窗口的上限（分钟）。与实例侧的 help_session.MAX_WINDOW_MINUTES 同值：
+#: 两边都夹一次，因为一边被改动时另一边不该跟着松开。
+HELP_MAX_MINUTES = 180
+
+
+@dataclass
+class HelpSession:
+    """一次远程协助在门户这边的记录。
+
+    **没有口令字段，而且这是有意的**：门户不是口令的保管人——客户开了窗口之后，口令
+    只存在于他的应用进程内存里，由他口头/短信告诉支持者。一个不存在的字段，也就不会
+    出现在日志、页面、备份或某次取证里（设计 §4.3）。
+    """
+    callsign: str
+    port: int
+    username: str = ""
+    state: str = HELP_PENDING
+    started_at: float = field(default_factory=time.time)
+    expires_at: float = 0.0
+    last_heartbeat: float = 0.0
+    connections: int = 0
+    closed_reason: str = ""
+    #: 运维按下「强制结束」后置位，由下一次心跳读走——实例方向是唯一的既有通道，
+    #: 门户没有反向连接可用（设计 §4.3）。
+    revoke: bool = False
+
+
 @dataclass
 class Application:
     callsign: str
@@ -57,7 +91,9 @@ class Store:
     # ---- 读写 ----
     def _load(self) -> dict:
         if not self.path.exists():
-            return {"applications": {}, "audit": []}
+            # 新库的骨架要与"文件已存在"那条路径**同一形状**：少了 help 这个键，
+            # 第一条协助记录就会 KeyError（2026-10-12 被测试抓到）。
+            return {"applications": {}, "audit": [], "help": {}}
         with self.path.open(encoding="utf-8") as fh:
             try:
                 data = json.load(fh)
@@ -66,6 +102,7 @@ class Store:
                 raise RuntimeError(f"portal 存储损坏，拒绝当作空库：{self.path}: {exc}") from exc
         data.setdefault("applications", {})
         data.setdefault("audit", [])
+        data.setdefault("help", {})
         return data
 
     def _save(self, data: dict) -> None:
@@ -89,6 +126,50 @@ class Store:
         data = self._load()
         self._audit(data, "", event, f"user={user[:40]} ip={ip[:45]}", actor=user[:40])
         self._save(data)
+
+    # ---- 远程协助（call help）----
+    def help_get(self, callsign: str) -> HelpSession | None:
+        raw = self._load()["help"].get(callsign)
+        return HelpSession(**raw) if raw else None
+
+    def help_all(self) -> dict:
+        """{callsign: 记录字典} —— 视图与清单都要一份全量。"""
+        return dict(self._load()["help"])
+
+    def help_put(self, session: HelpSession, event: str = "", detail: str = "",
+                 actor: str = "") -> HelpSession:
+        data = self._load()
+        data["help"][session.callsign] = asdict(session)
+        if event:
+            self._audit(data, session.callsign, event, detail, actor=actor)
+        self._save(data)
+        return session
+
+    def help_expire_stale(self, now: float | None = None,
+                          grace: float = HELP_STALE_SECONDS) -> list[str]:
+        """把心跳断了超过 grace 的窗口标成关闭，返回被动关闭的那些呼号。
+
+        不回收端口以外的任何东西：端口在这里才真正可用（这条记录是它的唯一占用者），
+        而释放得晚一点只会让下一个请求多等一次——释放早了却会把端口发给别人，
+        而 frpc 那边还挂着它（2026-10-11 的端口互踩事故就是这么来的）。
+        """
+        now = time.time() if now is None else now
+        data = self._load()
+        closed = []
+        for callsign, raw in list(data["help"].items()):
+            if raw.get("state") == HELP_CLOSED:
+                continue
+            last = float(raw.get("last_heartbeat") or raw.get("started_at") or 0)
+            if now - last <= grace:
+                continue
+            raw["state"] = HELP_CLOSED
+            raw["closed_reason"] = "heartbeat_lost"
+            data["help"][callsign] = raw
+            self._audit(data, callsign, "help_closed", "heartbeat_lost")
+            closed.append(callsign)
+        if closed:
+            self._save(data)
+        return closed
 
     # ---- 用例 ----
     def get(self, callsign: str) -> Application | None:

@@ -36,6 +36,8 @@ from portal import htpasswd as hp          # noqa: E402
 from portal import metrics as metrics_mod   # noqa: E402
 from portal import registry as reg          # noqa: E402
 from portal import ui                       # noqa: E402
+from portal.store import (HELP_CLOSED, HELP_MAX_MINUTES, HELP_OPEN,  # noqa: E402
+                         HELP_PENDING, HelpSession, Store)
 from portal import views as vs              # noqa: E402
 from portal.views import STATUS_CN          # noqa: E402
 from portal.views import _days_left         # noqa: E402,F401 — 权威实现在 views，这里 re-export
@@ -713,6 +715,22 @@ def _probe_http(sock, host_header: str, timeout: float):
     return (lines[0].strip() if lines else ""), server
 
 
+def _help_by_label(portal) -> dict:
+    """{实例标签: 协助记录} —— 视图按标签寻址，而协助记录按呼号存。
+
+    标签恒为小写、呼号恒为大写，所以这张映射不是可有可无的糖：少了它，视图拿着
+    `bg7ifp` 去查 `BG7IFP` 的记录，永远查不到，卡片会一直显示"客户尚未开启"。
+    """
+    apps = portal.store._load()["applications"]
+    out = {}
+    for callsign, record in portal.store.help_all().items():
+        label = (apps.get(callsign) or {}).get("label") or callsign.lower()
+        record = dict(record)
+        record["callsign"] = callsign
+        out[label] = record
+    return out
+
+
 def _tunnel_state(port, label: str = "", timeout: float = 2.5):
     """一个实例端口的 (状态, 说明)。判据与四种结论的修法见 `_probe`。
 
@@ -1044,6 +1062,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 entries=entries,
                 entries_full=entries_full,
                 states=_tunnel_states(entries),
+                help_by_label=_help_by_label(portal),
                 reports=_instance_reports(entries_full)
                 if view in ("instances", "instance") else {},
                 resources=_host_resources() if view == "system" else {},
@@ -1235,6 +1254,67 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     }
                     return self._send(200, reply)
 
+                if route in ("/help/request", "/help/heartbeat", "/help/close"):
+                    callsign = cs.normalize(body.get("callsign", ""))
+                    app = portal.store.get(callsign)
+                    supplied = str(body.get("token") or "")
+                    if not app or not app.request_token or \
+                            not hmac.compare_digest(supplied, app.request_token):
+                        return self._send(403, {"error": "申请令牌无效"})
+                    if route == "/help/request":
+                        if app.status != "granted":
+                            return self._send(403, {"error": "该呼号尚未获授权"})
+                        portal.store.help_expire_stale()
+                        current = portal.store.help_get(callsign)
+                        if current and current.state != HELP_CLOSED:
+                            return self._send(409, {"error": "已有进行中的协助窗口",
+                                                    "port": current.port})
+                        # 在线协助口不在注册表里，分配时要显式避开它们（同池共用）。
+                        live = {h["port"] for h in portal.store.help_all().values()
+                                if h.get("state") != HELP_CLOSED}
+                        port = portal.registry.free_port(extra=live)
+                        minutes = int(body.get("minutes") or 60)
+                        minutes = max(1, min(minutes, HELP_MAX_MINUTES))
+                        now = time.time()
+                        session = HelpSession(
+                            callsign=callsign, port=port,
+                            username=str(body.get("username") or "")[:32],
+                            state=HELP_PENDING, started_at=now,
+                            expires_at=now + minutes * 60, last_heartbeat=now)
+                        portal.store.help_put(session, event="help_requested",
+                                              detail=f"port={port} minutes={minutes}")
+                        return self._send(200, {"port": port, "expires_at": session.expires_at})
+                    if route == "/help/heartbeat":
+                        session = portal.store.help_get(callsign)
+                        if not session or session.state == HELP_CLOSED:
+                            # 没有活着的窗口：让实例把它的端口关掉（可能是门户这边
+                            # 已经把它标成失效，或者它自己重启后丢了状态）。
+                            return self._send(200, {"stop": True,
+                                                    "reason": "no_session"})
+                        now = time.time()
+                        stop = bool(session.revoke) or now > session.expires_at
+                        session.last_heartbeat = now
+                        session.connections = int(body.get("connections") or session.connections or 0)
+                        if stop:
+                            session.state = HELP_CLOSED
+                            session.closed_reason = "portal" if session.revoke else "expired"
+                        else:
+                            session.state = HELP_OPEN
+                        portal.store.help_put(
+                            session,
+                            event="help_closed" if stop else "help_heartbeat",
+                            detail=session.closed_reason or f"conn={session.connections}")
+                        return self._send(200, {"stop": stop,
+                                                "reason": session.closed_reason})
+                    # /help/close：实例侧先关的（用户按了停止、到期、认证失败、出错）。
+                    session = portal.store.help_get(callsign)
+                    if session and session.state != HELP_CLOSED:
+                        session.state = HELP_CLOSED
+                        session.closed_reason = str(body.get("reason") or "client")[:32]
+                        portal.store.help_put(session, event="help_closed",
+                                              detail=f"reason={session.closed_reason}")
+                    return self._send(200, {"ok": True})
+
                 if route == "/enroll":
                     # 实例提交自签证书的公钥。这条路**对公网开放**，所以凭据是一次性口令，
                     # 而且要校验证书名字就是它自己的入口名 —— 否则可以拿别人的证书来冒充。
@@ -1263,13 +1343,13 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                         "names": sorted(names),
                         "next_step": "sudo /usr/local/sbin/gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx",
                     })
-                if route not in ("/verify", "/reject", "/grant", "/revoke"):
+                if route not in ("/verify", "/reject", "/grant", "/revoke", "/help/revoke"):
                     return self._send(404, {"error": "not found"})
                 ok, actor = self._action_actor(body)
                 if not ok:
                     return self._send(403, {"error": "运维动作需要会话+CSRF 令牌，或 X-Portal-Token 请求头"})
                 who = cs.normalize(body.get("callsign", ""))
-                if route in ("/reject", "/revoke") and actor != "token":
+                if route in ("/reject", "/revoke", "/help/revoke") and actor != "token":
                     # 破坏性动作的**服务端两阶段确认**：没带 confirm=yes 就只回确认页。
                     # JS 在时 admin.js 把它弹成 <dialog>，关掉 JS 时它是一张普通页面 ——
                     # 两条路走同一段服务端代码，所以降级不会绕开确认。
@@ -1290,6 +1370,15 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                         return self._send(200, self._admin(str(body.get("view") or "overview"), msg),
                                           ctype="text/html; charset=utf-8")
                     return None
+                if route == "/help/revoke":
+                    session = portal.store.help_get(who)
+                    if not session or session.state == HELP_CLOSED:
+                        return self._send(409, {"error": "该实例当前没有进行中的协助窗口"})
+                    session.revoke = True
+                    portal.store.help_put(session, event="help_revoke_queued", actor=actor,
+                                          detail="下一次心跳读到它才真正断开（≤20 秒）")
+                    rendered = done("已请求结束：实例在下一次心跳（≤20 秒）断开")
+                    return rendered or self._send(200, {"ok": True, "within_s": 20})
                 if route == "/verify":
                     result = portal.store.mark_verified(who, body.get("evidence", "人工核验通过"), actor=actor)
                     rendered = done("已核验")

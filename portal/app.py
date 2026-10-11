@@ -36,6 +36,8 @@ from portal import htpasswd as hp          # noqa: E402
 from portal import metrics as metrics_mod   # noqa: E402
 from portal import registry as reg          # noqa: E402
 from portal import ui                       # noqa: E402
+from portal import views as vs              # noqa: E402
+from portal.views import _days_left         # noqa: E402,F401 — 权威实现在 views，这里 re-export
 from portal.sessions import LoginGuard, SessionStore  # noqa: E402
 from portal.store import Store             # noqa: E402
 from portal.store import VERIFIED as STORE_VERIFIED  # noqa: E402
@@ -188,19 +190,8 @@ def _page(title: str, body: str, noindex: bool = False) -> str:
     return ui.page(title, body, noindex=noindex)
 
 
-def trow(*cells) -> str:
-    """一行表格；每个 cell 是 (窄屏标签, HTML)，也可以只给 HTML（表示不需要小标题）。
-
-    标签写进 `data-label`：窄屏下 `table.stack` 会堆叠成卡片，每格用 `::before` 显示它
-    （见 `_PORTAL_CSS`）。标签与单元格**写在同一处**，所以以后加一列不可能忘了配标签 ——
-    `tests/test_portal.py` 有一条守卫会检查 stack 表里每个 td 都带 data-label。
-    """
-    out = ["<tr>"]
-    for cell in cells:
-        label, value = cell if isinstance(cell, tuple) else ("", cell)
-        attr = f' data-label="{html.escape(label, quote=True)}"' if label else ""
-        out.append(f"<td{attr}>{value}</td>")
-    return "".join(out) + "</tr>"
+# 兼容导出：既有代码与测试从 portal.app 取 trow。实现已搬去 portal/ui.py。
+trow = ui.trow
 
 
 def build_verifier(callsign_db: str | Path = DEFAULT_CALLSIGN_DB,
@@ -338,35 +329,16 @@ TUNNEL_PILL = {
 
 
 def _fmt_bps(value) -> str:
-    if value is None:
-        return "—"
-    if value < 1000:
-        return f"{value:.0f} bps"
-    if value < 1_000_000:
-        return f"{value / 1000:.1f} kbps"
-    return f"{value / 1_000_000:.2f} Mbps"
+    """已搬去 portal/views.py（纯格式化）；保留名字以免外部引用断掉。"""
+    return vs._fmt_bps(value)
 
 
 def _fmt_bytes(value) -> str:
-    if value is None:
-        return "—"
-    if value < 1024:
-        return f"{value} B"
-    if value < 1024 ** 2:
-        return f"{value / 1024:.1f} KiB"
-    if value < 1024 ** 3:
-        return f"{value / 1024 ** 2:.1f} MiB"
-    return f"{value / 1024 ** 3:.2f} GiB"
+    return vs._fmt_bytes(value)
 
 
 def _ago(seconds) -> str:
-    if seconds is None:
-        return "—"
-    if seconds < 90:
-        return f"{seconds:.0f}s 前"
-    if seconds < 5400:
-        return f"{seconds / 60:.0f}m 前"
-    return f"{seconds / 3600:.1f}h 前"
+    return vs._ago(seconds)
 
 
 # ── 可观测面：系统 → 服务 → 隧道 → 实例 → 实例里的应用 ──────────────
@@ -540,21 +512,6 @@ def _cert_facts(der: bytes, expect: str = "", inform: str = "der") -> dict:
     if expect:
         out["name_ok"] = expect.strip().lower() in out["names"]
     return out
-
-
-def _days_left(not_after: str):
-    """openssl 的 `notAfter=Sep 30 01:11:09 2036 GMT` → 剩余天数（解析不了就 None）。"""
-    if not not_after or not_after == "—":
-        return None
-    try:
-        import calendar
-        stamp = not_after.split("=", 1)[-1].strip()
-        # openssl 给的是 GMT，所以用 timegm 而不是 mktime —— 后者按本地时区解释，
-        # 会带进最多 ±14 小时的偏差（_cert_days 就有这个毛病，但那是既有行为，不在本轮改）。
-        end = calendar.timegm(time.strptime(" ".join(stamp.split()[:4]), "%b %d %H:%M:%S %Y"))
-        return int((end - time.time()) // 86400)
-    except (ValueError, IndexError):
-        return None
 
 
 def _hub_cert_inventory(cert_dir=None) -> list:
@@ -1016,303 +973,61 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             return hmac.compare_digest(supplied, token)
 
         # ---- operator console ----
-        def _admin(self, view: str, msg: str = "") -> str:
-            """后台管理台：全部服务端渲染。
+        def _ctx_for(self, view: str, msg: str = "", flt: str = "", q: str = "",
+                     page: int = 1, label: str = "") -> "vs.Ctx":
+            """装配一次渲染需要的**全部**事实。这是唯一的采集点（视图层不许自己采）。
+
+            采集量按视图裁剪：只有实例页要跑 TLS 探测，只有系统页要读主机事实 ——
+            否则「换个 tab」也要把每个实例都探一遍。
+            """
+            _, session = self._session()
+            entries = portal.registry.entries()
+            entries_full = portal.registry.entries_full()
+            return vs.Ctx(
+                root=self._admin_root(),
+                csrf=session.csrf if session else "",
+                user=session.user if session else "",
+                msg=msg,
+                view=view,
+                apps=portal.store._load()["applications"],
+                audit=list(reversed(portal.store.audit())),
+                entries=entries,
+                entries_full=entries_full,
+                states=_tunnel_states(entries) if view in ("overview", "instances") else {},
+                reports=_instance_reports(entries_full) if view == "instances" else {},
+                resources=_host_resources() if view == "system" else {},
+                services=_service_states() if view == "system" else [],
+                net=_net_facts() if view == "system" else {},
+                certs=_hub_cert_inventory() if view == "system" else [],
+                cert_days=_cert_days() if view == "overview" else "—",
+                clublog=_clublog_info() if view in ("overview", "clublog") else "",
+                clublog_path=str(DEFAULT_CLUBLOG),
+                registry_first=portal.registry.first,
+                registry_last=portal.registry.last,
+                sampler=(sampler.snapshot() if sampler is not None else None),
+                tunnel_text=TUNNEL_TEXT,
+                tunnel_pill=TUNNEL_PILL,
+                now=time.time(),
+                flt=flt,
+                q=q,
+                page=page,
+                flt_label=label,
+            )
+
+        def _admin(self, view: str, msg: str = "", part: str | None = None,
+                   flt: str = "", q: str = "", page: int = 1) -> str:
+            """后台管理台：装配 Ctx → 交给 views 渲染（服务端渲染，全部 7 个视图）。
 
             安全姿态（变化的与不变的要分清）：
               * 浏览器路径靠**会话 Cookie（HttpOnly/SameSite=Lax/Secure）+ 表单 CSRF 字段**；
                 机器路径（脚本/curl）仍用 `X-Portal-Token` 请求头，**表单不再接受令牌字段**。
-              * 令牌/会话值不进 URL、不进 Location、不进访问日志；导航只是 GET `?view=`（视图名不是秘密）。
+              * 令牌/会话值不进 URL、不进 Location、不进访问日志；导航只是 GET `?view=`。
               * **需要 root 的操作不由本服务执行**：Web 服务解析外网输入，给它
                 nginx reload / 拉库的权限是自找麻烦。这里只把命令打出来让运维执行。
             """
-            _, session = self._session()
-            csrf_attr = html.escape(session.csrf if session else "")
-            root = self._admin_root()
-            def nav(label, target):
-                cur = " aria-current=page" if target == view else ""
-                return f"<a class=navlink href='{root}/admin?view={target}'{cur}>{html.escape(label)}</a>"
-            def act(route, callsign, label, extra=""):
-                return (f"<form method=post action='{root}{route}' style='display:inline'>"
-                        f"<input type=hidden name=callsign value='{html.escape(callsign)}'>"
-                        f"<input type=hidden name=csrf value='{csrf_attr}'>"
-                        f"<input type=hidden name=view value='{html.escape(view)}'>{extra}"
-                        f"<button>{html.escape(label)}</button></form>")
-
-            apps = portal.store._load()["applications"]
-            registry = portal.registry
-            entries = registry.entries()
-            body = ""
-
-            if view == "overview":
-                by = {}
-                for a in apps.values():
-                    by[a["status"]] = by.get(a["status"], 0) + 1
-                cert = _cert_days()
-                cl = _clublog_info()
-                states = _tunnel_states(entries)
-                online = sum(1 for s, _ in states.values() if s == TUNNEL_SERVING)
-                # 不能只给个数字：“3 个在线”与“3 个在线但其中 1 个其实用不了”是两回事，
-                # 而后者正是支持回路里最耗时的那种误判。
-                not_serving = [(l, p) + states[p] for l, p in entries
-                               if states[p][0] != TUNNEL_SERVING]
-                bad = "".join(
-                    f"<br><small><span class='pill {TUNNEL_PILL[s]}'>{html.escape(TUNNEL_TEXT[s])}</span> "
-                    f"<code>{html.escape(l)}</code>:{p} — {html.escape(d)}</small>"
-                    for l, p, s, d in not_serving)
-                tunnel_summary = ""
-                if sampler is not None:
-                    snap = sampler.snapshot()
-                    lats = [i["last"].latency_ms for i in snap["labels"].values()
-                            if i["last"].latency_ms is not None]
-                    outs = [i["last"].out_bps for i in snap["labels"].values()
-                            if i["last"].out_bps is not None]
-                    if lats and outs:
-                        tunnel_summary = (f"<br><small>延时均值 {sum(lats) / len(lats):.0f} ms；"
-                                          f"出带宽 {_fmt_bps(sum(outs))}（<a href='?view=tunnel'>隧道视图</a>）</small>")
-                    elif snap["panel_error"]:
-                        tunnel_summary = f"<br><small>{html.escape(snap['panel_error'])}</small>"
-                body = f"""<h2>总览</h2>
-<table class=kv><tr><th>项</th><th>值</th></tr>
-<tr><td>申请</td><td>{'　'.join(f"{k}={v}" for k, v in sorted(by.items())) or '（无）'}</td></tr>
-<tr><td>注册表实例</td><td>{len(entries)} 个，其中<b>真正在服务</b> {online} 个{bad}{tunnel_summary}</td></tr>
-<tr><td>入口证书剩余</td><td>{cert}</td></tr>
-<tr><td>Club Log 呼号库</td><td>{cl}</td></tr>
-<tr><td>端口池</td><td>{registry.first}-{registry.last}，已用 {len(entries)}，空闲 {registry.last - registry.first + 1 - len(entries)}</td></tr>
-</table>
-<p><small>需要 root 的动作不在此执行，请照抄命令：<br>
-<code>sudo /usr/local/sbin/gen_hub_routes.py &amp;&amp; sudo systemctl reload nginx</code>（新增/撤销实例后）<br>
-<code>sudo /usr/local/sbin/mrrc-portal-sync-clublog.sh</code>（立即刷新呼号库）</small></p>"""
-
-            elif view == "applications":
-                def rows(statuses, actions):
-                    out = []
-                    for c, a in sorted(apps.items()):
-                        if a["status"] not in statuses:
-                            continue
-                        out.append(trow(
-                            ("呼号", f"<code>{html.escape(c)}</code>"),
-                            ("状态", f"<span class='pill mute'>{html.escape(a['status'])}</span>"),
-                            ("产品", html.escape(a.get('product') or '主产品')),
-                            ("标签", html.escape(a.get('label') or '—')),
-                            ("端口", str(a.get('port') or '—')),
-                            ("依据", html.escape((a.get('evidence') or '')[:70])
-                             + (f"<br><small>登记口令: <code>{html.escape(a['enroll_secret'])}</code></small>"
-                                if a.get('enroll_secret') and a['status'] == 'granted' else '')),
-                            ("动作", actions(c))))
-                    return ''.join(out) or "<tr><td colspan=7>（无）</td></tr>"
-                body = "<h2>申请（全部状态）</h2><table class=stack><tr><th>呼号</th><th>状态</th><th>产品</th><th>标签</th><th>端口</th><th>依据</th><th>动作</th></tr>" \
-                    + rows({"applied"}, lambda c: act("/verify", c, "核验通过", "<input type=hidden name=evidence value='人工核验通过'>") + act("/reject", c, "拒绝", "<input type=hidden name=reason value='材料不足'>")) \
-                    + rows({"verified"}, lambda c: act("/grant", c, "分配入口") + act("/reject", c, "拒绝", "<input type=hidden name=reason value='核验后驳回'>")) \
-                    + rows({"granted"}, lambda c: act("/revoke", c, "撤销", "<input type=hidden name=reason value='撤销'>")) \
-                    + rows({"rejected", "revoked"}, lambda c: "") + "</table>"
-
-            elif view == "system":
-                res = _host_resources()
-                svc = _service_states()
-                net = _net_facts()
-                certs = _hub_cert_inventory()
-                # 两列的「项/值」表在窄屏保持表格形态（class=kv），所以**不要**给 data-label；
-                # 而 trow() 收到单个 tuple 会当成「一个单元格 + 它的标签」，一行只剩 1 个 td，
-                # 而标签只在窄屏的 ::before 里出现 —— 桌面上就成了一列没有行名的数字。
-                rows_ = ''.join(trow(html.escape(k), html.escape(str(v)))
-                                for k, v in (("负载 (1/5/15 分钟)", res["load"]), ("CPU", res["cpu"]),
-                                             ("内存", res["mem"]), ("磁盘", res["disk"]),
-                                             ("已运行", res["uptime"]), ("Python", res["python"])))
-                svc_rows = ''.join(trow(
-                    ("单元", f"<code>{html.escape(u)}</code>"),
-                    ("状态", f"<span class='pill {'ok' if st == 'active' else 'bad'}'>{html.escape(st)}</span>"),
-                    ("开机自启", html.escape(en)),
-                    ("起于", html.escape(si)),
-                    ("重启次数", html.escape(nr)))
-                    for u, st, en, si, nr in svc)
-                reg_ports = {p for _, p in entries}
-                listening = [p for p in net["listen"] if 18800 <= p <= 18999]
-                missing = sorted(reg_ports - set(listening))
-                stray = sorted(set(listening) - reg_ports)
-                cert_rows = ''.join(trow(
-                    ("文件", f"<code>{html.escape(n)}</code>"),
-                    ("主体", html.escape(su)),
-                    ("到期", html.escape(na)),
-                    ("剩余", "—" if dy is None else f"{dy} 天"))
-                    for n, su, na, dy in certs) or "<tr><td colspan=4>（无）</td></tr>"
-                # ③ 的附加行：frps 面板（隧道速率来自它，拿不到就如实标注原因）
-                if sampler is None:
-                    tunnel_rows = "<tr><td>frps 面板</td><td>采集器未启用</td></tr>"
-                else:
-                    snap = sampler.snapshot()
-                    panel_line = ("可用" if not snap["panel_error"]
-                                  else f"<b>{html.escape(snap['panel_error'])}</b>")
-                    if snap["panel_age"] is not None:
-                        panel_line += f"（{_ago(snap['panel_age'])}）"
-                    agg_in = agg_out = 0.0
-                    have_agg = False
-                    for item in snap["labels"].values():
-                        if item["last"].in_bps is not None and item["last"].out_bps is not None:
-                            agg_in += item["last"].in_bps
-                            agg_out += item["last"].out_bps
-                            have_agg = True
-                    agg_line = (f"↓ {_fmt_bps(agg_out)} / ↑ {_fmt_bps(agg_in)}"
-                                if have_agg else "（本轮不可算）")
-                    nic = snap["nic"] or {}
-                    nic_line = (f"↓ {_fmt_bps(nic.get('rx_bps'))} / ↑ {_fmt_bps(nic.get('tx_bps'))}"
-                                if "rx_bps" in nic else html.escape(nic.get("note", "—")))
-                    tunnel_rows = (f"<tr><td>frps 面板</td><td>{panel_line}</td></tr>"
-                                   f"<tr><td>全代理合计速率</td><td>{agg_line}</td></tr>"
-                                   f"<tr><td>hub 网卡</td><td>{nic_line}</td></tr>")
-                body = (
-                    "<h2>系统</h2>"
-                    "<h3>① hub 主机</h3><table class=kv><tr><th>项</th><th>值</th></tr>" + rows_ + "</table>"
-                    "<h3>② hub 服务</h3><table class=stack><tr><th>单元</th><th>状态</th><th>开机自启</th>"
-                    "<th>起于</th><th>重启次数</th></tr>" + svc_rows + "</table>"
-                    "<p><small>「未安装」是一种<b>结论</b>而不是错误：单元文件在仓库里、却没装到 hub 上，"
-                    "正是路由不会自动重生成的原因（<code>mrrc-hub-routes.timer</code> 实测 "
-                    "<code>is-enabled</code> = not-found，而 SDD V0.22 写着「V0.17 起 30 s timer 自动」）。</small></p>"
-                    "<h3>③ 隧道层（frps）</h3><table class=kv><tr><th>项</th><th>值</th></tr>"
-                    f"<tr><td>frps 接入端口 8989</td><td>{'在听' if 8989 in net['listen'] else '<b>没在听</b>'}</td></tr>"
-                    f"<tr><td>frpc 控制连接</td><td>{len(net['peers'])} 条"
-                    f"{'：' + html.escape(', '.join(net['peers'])) if net['peers'] else ''}</td></tr>"
-                    f"<tr><td>注册表实例端口</td><td>{len(reg_ports)} 个</td></tr>"
-                    f"<tr><td>实际在听的实例端口</td><td>{len(listening)} 个"
-                    f"{'：' + ', '.join(str(x) for x in listening) if listening else ''}</td></tr>"
-                    f"<tr><td>注册了但没在听</td><td>{', '.join(str(x) for x in missing) or '（无）'}</td></tr>"
-                    f"<tr><td>在听但注册表里没有</td><td>{', '.join(str(x) for x in stray) or '（无）'}</td></tr>"
-                    + tunnel_rows
-                    + "</table>"
-                    + (f"<p><small>⚠️ {html.escape(net['note'])}</small></p>" if net["note"] else "")
-                    + "<h3>④ hub 侧已登记的实例证书</h3>"
-                    "<table class=stack><tr><th>文件</th><th>主体</th><th>到期</th><th>剩余</th></tr>" + cert_rows + "</table>"
-                    "<p><small>注册表里有一行只代表<b>预留</b>；没有证书就说明该实例从未走完批准→登记，"
-                    "它的入口只能 502。<br>"
-                    "本页采集不到的：<code>/var/log/nginx/*.log</code>（mrrcportal 不可读 ⇒ 无每实例的 nginx 错误计数）、"
-                    "实例内部状态（电台/录音/会话都在令牌之后）；frps 面板未启用或凭据不可读时，隧道速率会如实标注原因而不是显示 0。"
-                    "</small></p>")
-
-            elif view == "instances":
-                reports = _instance_reports(registry.entries_full())
-
-                def tunnel_cell(rep):                  # 同一探测的 HTML 版本（实例页）
-                    state = rep.get("state", TUNNEL_DOWN)
-                    return (f"<span class='pill {TUNNEL_PILL[state]}' "
-                            f"title='{html.escape(rep.get('detail', '未探测'), quote=True)}'>"
-                            f"{html.escape(TUNNEL_TEXT[state])}</span>")
-
-                def app_cell(rep):
-                    line = rep.get("status_line") or ""
-                    if not line:
-                        return "<small>—</small>"
-                    gen = rep.get("generation") or "—"
-                    srv = rep.get("server") or ""
-                    return (f"<small><code>{html.escape(line)}</code>"
-                            + (f"<br>server: {html.escape(srv)}" if srv else "")
-                            + f"<br>构建代号 <b>{html.escape(str(gen))}</b></small>")
-
-                def cert_cell(rep):
-                    c = rep.get("cert") or {}
-                    if not c or c.get("subject", "—") == "—":
-                        return "<small>—<br>（握手没成，拿不到证书）</small>"
-                    ok = c.get("name_ok")
-                    mark = ("<span class='pill ok'>名字相符</span>" if ok else
-                            "<span class='pill bad'>名字不符 ⇒ nginx 必 502</span>" if ok is not None else "")
-                    issuer = "自签" if c.get("issuer") == c.get("subject") else (c.get("issuer") or "")[:44]
-                    days = _days_left(c.get("not_after", ""))
-                    return (f"<small><code>{html.escape(c.get('subject', ''))}</code><br>"
-                            f"{html.escape(issuer)}<br>到期 {html.escape(c.get('not_after', ''))}"
-                            f"{'（' + str(days) + ' 天）' if days is not None else ''}<br>{mark}</small>")
-
-                rows_ = ''.join(trow(
-                    ("标签", f"<code>{html.escape(l)}</code>"),
-                    ("端口", str(p)),
-                    ("隧道", tunnel_cell(reports.get(l, {}))),
-                    ("实例里的应用", app_cell(reports.get(l, {}))),
-                    ("上游证书", cert_cell(reports.get(l, {}))),
-                    ("入口", f"<a href='https://{html.escape(l)}.mrrc.vlsc.net/' target=_blank "
-                            f"rel=noopener>打开入口</a>"))
-                    for l, p in sorted(entries)) or "<tr><td colspan=6>（注册表为空）</td></tr>"
-                body = ("<h2>实例</h2><table class=stack><tr><th>标签</th><th>端口</th><th>隧道</th>"
-                        "<th>实例里的应用</th><th>上游证书</th><th>入口</th></tr>"
-                        + rows_ + "</table><p><small>「在线」= 从 hub 回环向该端口完成 TLS 握手并拿到 HTTP 应答"
-                        "（<b>任何</b>状态码都算，包括 401）；鼠标悬停可看探测详情。<br>"
-                        "⚠️ 仅仅「端口可连」<b>不能</b>证明实例在服务：frps 是在 hub 本机接受连接的，"
-                        "frpc 只要注册过代理就一定连得上，所以旧判据会把「隧道在、后端空」显示成在线"
-                        "（2026-10-03 的 bg7zhs 就是这个状态，而每个访客拿到 502）。"
-                        "「隧道在、后端无应答」请查实例机：应用是否在跑、frpc 的 <code>localPort</code> 是否等于"
-                        "应用的 <code>MRRC_WEB_PORT</code>、<code>MRRC_WEB_HOST</code> 是否被改成了局域网 IP"
-                        "（那就只听那个地址，frpc 拨 127.0.0.1 必然失败）。<br>"
-                        "新增后仍需：<code>sudo /usr/local/sbin/gen_hub_routes.py &amp;&amp; sudo systemctl reload nginx</code></small></p>")
-
-            elif view == "audit":
-                entries_a = list(reversed(portal.store.audit()))[:60]
-                rows_ = ''.join(trow(
-                    ("时间", time.strftime('%m-%d %H:%M', time.localtime(e['at']))),
-                    ("呼号", f"<code>{html.escape(e['callsign'])}</code>" if e['callsign'] else "—"),
-                    ("事件", html.escape(e['event'])),
-                    ("操作者", f"<code>{html.escape(e.get('actor') or '—')}</code>"),
-                    ("细节", html.escape((e.get('detail') or '')[:90]))) for e in entries_a)
-                body = ("<h2>审计（最近 60 条，追加式）</h2><table class=stack><tr><th>时间</th><th>呼号</th><th>事件</th>"
-                        "<th>操作者</th><th>细节</th></tr>"
-                        + (rows_ or "<tr><td colspan=5>（无）</td></tr>") + "</table>")
-
-            elif view == "tunnel":
-                if sampler is None:
-                    body = ("<h2>隧道</h2><p class=msg>采集器未启用（--metrics-interval 0 或 dry-run）。"
-                            "延时与带宽需要后台采样线程。</p>")
-                else:
-                    snap = sampler.snapshot()
-                    rows_ = []
-                    for label, port in sorted(entries):
-                        item = snap["labels"].get(label)
-                        if item is None:
-                            rows_.append(trow(("标签", f"<code>{html.escape(label)}</code>"),
-                                              ("隧道", "<small>首轮采样中…</small>"),
-                                              ("延时", "—"), ("带宽（↓/↑）", "—"),
-                                              ("今日流量（↓/↑）", "—"), ("连接数", "—"), ("采样", "—")))
-                            continue
-                        last = item["last"]
-                        state = last.tunnel_state
-                        pill = (f"<span class='pill {TUNNEL_PILL[state]}'>"
-                                f"{html.escape(TUNNEL_TEXT[state])}</span>") if state in TUNNEL_PILL else "—"
-                        if last.latency_ms is not None:
-                            lat = (f"{last.latency_ms:.0f} ms<br><small>均值 {item['latency_mean']:.0f} · "
-                                   f"峰值 {item['latency_peak']:.0f}</small>")
-                        else:
-                            lat = f"<small>—（{html.escape(last.tunnel_detail or '无应答')}）</small>"
-                        bw = (f"↓ {_fmt_bps(last.out_bps)}<br>↑ {_fmt_bps(last.in_bps)}<br>"
-                              f"<small>均值 ↓ {_fmt_bps(item['out_mean'])} / ↑ {_fmt_bps(item['in_mean'])}</small>")
-                        traffic = f"↓ {_fmt_bytes(last.today_out)}<br>↑ {_fmt_bytes(last.today_in)}"
-                        conns = "—" if last.cur_conns is None else str(last.cur_conns)
-                        fresh = _ago(item["stale_s"])
-                        if last.note:
-                            fresh += f"<br><small>{html.escape(last.note)}</small>"
-                        rows_.append(trow(("标签", f"<code>{html.escape(label)}</code>"),
-                                          ("隧道", pill), ("延时", lat), ("带宽（↓/↑）", bw),
-                                          ("今日流量（↓/↑）", traffic), ("连接数", conns), ("采样", fresh)))
-                    body = ("<h2>隧道</h2><table class=stack><tr><th>标签</th><th>隧道</th><th>延时</th>"
-                            "<th>带宽（↓/↑）</th><th>今日流量（↓/↑）</th><th>连接数</th><th>采样</th></tr>"
-                            + ("".join(rows_) or "<tr><td colspan=7>（注册表为空）</td></tr>") + "</table>"
-                            + (f"<p class=msg>⚠️ {html.escape(snap['panel_error'])}</p>"
-                               if snap["panel_error"] else "")
-                            + "<p><small>带宽来自 frps 面板的累计字节差分（30 s 一轮）；历史只存内存、重启即清。"
-                            "延时是 hub 回环经隧道到实例应用的完整 TLS 握手耗时（只在握手成功时给出）。"
-                            "拿不到的一律如实标注，不用 0 冒充。</small></p>")
-
-            else:  # clublog
-                cl = _clublog_info()
-                body = (f"<h2>呼号库</h2><table class=kv><tr><th>项</th><th>值</th></tr>"
-                        f"<tr><td>来源</td><td>Club Log（与站内留言版 www.vlsc.net/feedback 同源）</td></tr>"
-                        f"<tr><td>状态</td><td>{cl}</td></tr>"
-                        f"<tr><td>路径</td><td><code>{html.escape(str(DEFAULT_CLUBLOG))}</code></td></tr></table>"
-                        f"<p><small>hub 每天 04:30 从 www 拉取（受限命令：只能读那一个文件）。<br>"
-                        f"立即刷新：<code>sudo /usr/local/sbin/mrrc-portal-sync-clublog.sh</code></small></p>")
-
-            return _page("MRRC Portal — 后台管理",
-                         "<h1>呼号自助 — 后台管理</h1>"
-                         + (f'<p class=msg>{html.escape(msg)}</p>' if msg else '')
-                         + f"<nav class=nav>{nav('总览','overview')}{nav('申请','applications')}{nav('实例','instances')}{nav('隧道','tunnel')}{nav('系统','system')}{nav('审计','audit')}{nav('呼号库','clublog')}</nav>"
-                         + (f"<div class=who><form method=post action='{root}/admin/logout' style='display:inline'>"
-                            f"<input type=hidden name=csrf value='{csrf_attr}'>"
-                            f"<button>登出（{html.escape(session.user)}）</button></form></div>" if session else "")
-                         + body, noindex=True)
+            ctx = self._ctx_for(view, msg=msg, flt=flt, q=q, page=page)
+            r = vs.render(view, ctx, part=part)
+            return _page(r.title, r.chrome + r.live, noindex=True)
 
         # ---- routes ----
         def do_GET(self):                        # noqa: N802

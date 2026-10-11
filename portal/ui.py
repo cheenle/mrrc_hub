@@ -245,6 +245,24 @@ def empty(text: str, action: str = "") -> str:
     return f'<div class="empty"><p>{esc(text)}</p>{tail}</div>'
 
 
+def trow(*cells) -> str:
+    """一行表格；每个 cell 是 (窄屏标签, HTML)，也可以只给 HTML（表示不需要小标题）。
+
+    标签写进 `data-label`：窄屏下 `table.stack` 会堆叠成卡片，每格用 `::before` 显示它。
+    标签与单元格**写在同一处**，所以以后加一列不可能忘了配标签 ——
+    `tests/test_portal.py` 有一条守卫会检查 stack 表里每个 td 都带 data-label。
+
+    与 `grid_table` 的分工：`trow` 只给行（调用方自己拼表头与 tbody），`grid_table`
+    一次给整张表（推荐）。两个都存在是因为既有代码里有按组拼行的写法。
+    """
+    out = ["<tr>"]
+    for cell in cells:
+        label, value = cell if isinstance(cell, tuple) else ("", cell)
+        attr = f' data-label="{html.escape(label, quote=True)}"' if label else ""
+        out.append(f"<td{attr}>{value}</td>")
+    return "".join(out) + "</tr>"
+
+
 def grid_table(headers, rows, stack: bool = False) -> str:
     """标准表格。stack=True 时窄屏堆叠成卡片，每格必须带 data-label。
 

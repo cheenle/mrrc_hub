@@ -21,7 +21,36 @@
 >   `portal/README.md` 与 `SDD/11`、`SDD/12 §12.9`、`SDD/14` 的同步**显式挂账** ——
 >   那三个文件当时都有**另一个会话的在飞未提交改动**（SDD V0.31 那一批），
 >   合并就得 stash 别人的半成品再 pop，风险不值得。
-> - **任务 20：未执行**。上线要动现网，等明确许可。
+> - **任务 20：已完成**（2026-10-11 18:18 CST / 10:18 UTC，hub `www.vlsc.net`）。
+>
+> ### 上线记录
+>
+> **升级路径是干净的**：现网 `/opt/mrrc-portal/portal/app.py` 的 sha256 与改造前的
+> `def9ed1:portal/app.py` **完全一致**，所以"改了什么"是可枚举的。
+>
+> 步骤：上传到 `/tmp/mrrc-new`（逐个核对 sha256）→ **以真正的服务账号 `mrrcportal`
+> 在生产机上跑全套 91 组**（全绿）→ `cp -a` 备份到 `/opt/mrrc-portal.bak-20261011-181755`
+> → `rsync --chown=mrrcportal` 安装 → 逐文件核对哈希 → `systemctl restart mrrc-portal`。
+>
+> 验收（全部通过）：
+> - 回环与公网两条路：登录页 200、静态 `htmx.min.js`/`admin.js` 200 且
+>   `Cache-Control: public, max-age=31536000, immutable`、`nosniff` 齐；
+>   `/admin/static/../portal/app.py` → **404**（回环与 nginx 两条路都是）；
+> - 未知静态 → 404；公开注册页与登录页都已是新设计（`--bg:#0b0e14` + 新外壳）；
+> - 服务 `active`、`NRestarts=0`、重启后日志无异常；loadavg 0.15（1 核）；
+> - frps 面板可达（隧道视图的数据源）；`journalctl` 无反复报错。
+>
+> **风险面被量化**：`callsign.py` / `htpasswd.py` / `metrics.py` / `registry.py` /
+> `sessions.py` / `store.py` / `verify.py` / `__init__.py` 这 8 个后端模块**逐字节未变**
+> ——认证、会话、注册表写入与探测判据的运行期行为不可能改变。改的只有呈现层。
+>
+> **实例入口的 502 与本次上线无关**（已取证）：同样的
+> `connect() failed (111: Connection refused)` 在当天 02:17、03:33 以及 10-04…10-09 的
+> nginx 日志里都有；frps 面板也independently 报那些代理 `offline`——是实例机的 frpc
+> 隧道没连（README 记着实例侧"源码运行、非常驻"）。nginx 配置最后修改时间是
+> 10-02/10-03，本次未触碰。
+>
+> 回滚方式（一条命令）：`sudo rsync -a --delete /opt/mrrc-portal.bak-20261011-181755/portal/ /opt/mrrc-portal/portal/ && sudo systemctl restart mrrc-portal`
 >
 > 计划与实现的偏差（都以代码为准，计划里那几处写错了）：
 > - 步骤里写的 `/admin/instance` 专用路由**没有采纳**：详情页就是

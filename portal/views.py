@@ -103,9 +103,20 @@ def render(view_id: str, ctx: Ctx, part: str | None = None, **kw) -> Rendered:
 
 
 def badges(ctx: Ctx) -> dict:
-    """侧栏与底栏的待办徽标。只在 >0 时显示（ui._badge_html 负责）。"""
+    """侧栏与底栏的待办徽标。只在 >0 时显示（ui._badge_html 负责）。
+
+    红 = 要动手（异常实例、待核验申请），黄 = 要注意（未安装/未跑的服务单元）。
+    `system` 那一项只有系统视图才采得到，其它视图不报 —— 宁可没徽标，
+    也不要为了让徽标好看而在每个页面上多跑一轮 systemctl。
+    """
     applied = sum(1 for a in ctx.apps.values() if a["status"] in ("applied", "verified"))
-    return {"applications": applied}
+    abnormal = sum(1 for _l, p in ctx.entries
+                   if ctx.tunnel_pill.get(ctx.states.get(p, ("", ""))[0]) != "ok")
+    out = {"applications": applied, "instances": abnormal}
+    if ctx.services:
+        out["system"] = sum(1 for _u, st, en, _s, _r in ctx.services
+                            if en == "not-found" or st != "active")
+    return out
 
 
 # ── 纯格式化 ───────────────────────────────────────────────────────────
@@ -172,6 +183,7 @@ def _days_left(not_after: str):
 # ── 视图 ────────────────────────────────────────────────────────────────
 
 def _nav(ctx: Ctx, label: str, target: str) -> str:
+    """旧的页内文字导航（标记保持原样，留着给需要它的视图用）。"""
     cur = " aria-current=page" if target == ctx.view else ""
     return (f"<a class=navlink href='{ctx.root}/admin?view={target}'{cur}>"
             f"{html.escape(label)}</a>")
@@ -186,20 +198,14 @@ def _act(ctx: Ctx, route: str, callsign: str, label: str, extra: str = "") -> st
 
 
 def _wrap(ctx: Ctx, body: str) -> str:
-    """导航 + 登录者 + 视图正文。搬移阶段这里是逐字节照抄的旧标记。"""
-    return ("<h1>呼号自助 — 后台管理</h1>"
-            + (f'<p class=msg>{html.escape(ctx.msg)}</p>' if ctx.msg else '')
-            + "<nav class=nav>"
-            + _nav(ctx, '总览', 'overview') + _nav(ctx, '申请', 'applications')
-            + _nav(ctx, '实例', 'instances') + _nav(ctx, '隧道', 'tunnel')
-            + _nav(ctx, '系统', 'system') + _nav(ctx, '审计', 'audit')
-            + _nav(ctx, '呼号库', 'clublog')
-            + "</nav>"
-            + (f"<div class=who><form method=post action='{ctx.root}/admin/logout' "
-               f"style='display:inline'>"
-               f"<input type=hidden name=csrf value='{html.escape(ctx.csrf)}'>"
-               f"<button>登出（{html.escape(ctx.user)}）</button></form></div>" if ctx.user else "")
-            + body)
+    """视图头部 + 正文。
+
+    导航、登出、待办徽标现在由**外壳**（`ui.page(nav=…)`）提供 —— 侧栏与手机底栏
+    都是它的。这里只负责“这个视图叫什么”与操作后的那条消息。
+    """
+    title = ui.TITLES.get(ctx.view, "后台管理")
+    msg = ui.banner("ok", ui.esc(ctx.msg)) if ctx.msg else ""
+    return f"<h1>{ui.esc(title)}</h1>{msg}" + body
 
 
 @register("overview", "MRRC Portal — 后台管理")

@@ -312,10 +312,10 @@ TUNNEL_HOLLOW = "hollow"
 TUNNEL_DOWN = "down"
 
 TUNNEL_TEXT = {
-    TUNNEL_SERVING: "在线",
-    TUNNEL_PLAIN_HTTP: "在说明文 HTTP",
-    TUNNEL_HOLLOW: "隧道在、后端无应答",
-    TUNNEL_DOWN: "未连接",
+    TUNNEL_SERVING: "服务中",
+    TUNNEL_PLAIN_HTTP: "明文 HTTP",
+    TUNNEL_HOLLOW: "后端无应答",
+    TUNNEL_DOWN: "隧道不在",
 }
 
 #: 每种状态对应的徽章类。能服务=绿；两类「连得上但用不了」=琥珀（容易和真离线混淆，
@@ -993,7 +993,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 audit=list(reversed(portal.store.audit())),
                 entries=entries,
                 entries_full=entries_full,
-                states=_tunnel_states(entries) if view in ("overview", "instances") else {},
+                states=_tunnel_states(entries),
                 reports=_instance_reports(entries_full) if view == "instances" else {},
                 resources=_host_resources() if view == "system" else {},
                 services=_service_states() if view == "system" else [],
@@ -1027,7 +1027,10 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             """
             ctx = self._ctx_for(view, msg=msg, flt=flt, q=q, page=page)
             r = vs.render(view, ctx, part=part)
-            return _page(r.title, r.chrome + r.live, noindex=True)
+            nav = ui.Nav(view=view, root=ctx.root, badges=vs.badges(ctx),
+                         user=ctx.user, csrf=ctx.csrf)
+            return ui.page(r.title, r.chrome, nav=nav, noindex=True,
+                           fragment=(part is not None), live=r.live)
 
         # ---- routes ----
         def do_GET(self):                        # noqa: N802

@@ -71,8 +71,13 @@ def _signed_in_opener(base, user, password):
 
 
 def _csrf_from(page):
-    m = (re.search(r"name=csrf value='([^']+)'", page)
-         or re.search(r'name=csrf value="([^"]+)"', page))
+    """从页面里取出会话 CSRF 值。
+
+    两套写法都要认：旧视图的 `name=csrf value='…'`（单引号、属性名不带引号）
+    与新外壳的 `name="csrf" value="…"`。认死一种会让重构时测试报“找不到 csrf”，
+    而那个报错指向的是测试而不是真问题。
+    """
+    m = re.search(r'name=["\']?csrf["\']?\s+value=["\']([^"\']+)["\']', page)
     if not m:
         raise AssertionError("管理台表单里找不到 csrf 隐藏字段")
     return m.group(1)
@@ -883,7 +888,7 @@ def test_admin_views_render_the_probe_facts_end_to_end():
             st, page = view("instances")
             check(st == 200, f"实例页 200（得到 {st}）")
             for needle, why in (
-                    ("在线", "隧道状态"),
+                    ("服务中", "隧道状态"),
                     ("401", "实例的 HTTP 状态行"),
                     ("uvicorn", "上游 Server 头"),
                     ("mrrc-v99", "实例应用的构建代号"),
@@ -1026,8 +1031,11 @@ def test_pages_are_mobile_suitable():
                       f"{name}: 每张表的行格数与表头列数一致（不符: {pr.shape_bad[:3]}）")
                 total_tds += pr.stack_tds
                 if name in ("instances", "applications", "tunnel", "audit", "system"):
-                    check(pr.aria_current == 1,
-                          f"{name}: 导航恰有一项标了 aria-current=page（得到 {pr.aria_current}）")
+                    # 侧栏与底部标签栏是**两个独立的 nav**，各自都要标“当前页”。
+                    # 改版前只有一个顶栏导航，所以当时断言是 1；现在两个 nav ⇒ 2。
+                    # 不能只放宽成 >=1 —— 那样“某个 nav 忘了标”就永远测不出来。
+                    check(pr.aria_current == 2,
+                          f"{name}: 侧栏与底栏各恰有一项标了 aria-current=page（得到 {pr.aria_current}）")
                 # 宽表必须挂着 class=stack：丢了它，那些 td 就退出 data-label 检查范围，
                 # 守卫会静默放行，手机上退回难看的挤压布局。
                 need = {"instances": 1, "applications": 1, "tunnel": 1, "audit": 1, "system": 2,

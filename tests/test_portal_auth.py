@@ -151,8 +151,8 @@ def _post(opener, url, fields):
 
 
 def _csrf_from(page: str) -> str:
-    m = (re.search(r"name=csrf value='([^']+)'", page)
-         or re.search(r'name=csrf value="([^"]+)"', page))
+    """两套写法都要认：旧视图的 `name=csrf value='…'` 与新外壳的 `name="csrf" value="…"`。"""
+    m = re.search(r'name=["\']?csrf["\']?\s+value=["\']([^"\']+)["\']', page)
     if not m:
         raise AssertionError("管理台表单里找不到 csrf 隐藏字段")
     return m.group(1)

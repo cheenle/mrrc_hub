@@ -194,7 +194,7 @@ def test_tunnel_view_renders_end_to_end():
                 page = r.read().decode()
             # Δin=3000B·8/30s=800 bps，Δout=9000B·8/30s=2400 bps
             for needle, why in (("隧道", "视图标题"), ("bg1sb", "实例标签"),
-                                ("23 ms", "延时数值"), ("在线", "隧道四态文案"),
+                                ("23 ms", "延时数值"), ("服务中", "隧道四态文案"),
                                 ("800 bps", "上行差分速率"), ("2.4 kbps", "下行差分速率"),
                                 ("2.3 MiB", "今日下行流量"), ("5", "当前连接数")):
                 check(needle in page, f"隧道视图渲染出{why}（{needle!r}）")

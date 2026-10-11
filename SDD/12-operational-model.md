@@ -257,8 +257,9 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 会话与 CSRF | 登录后 `mrrc_portal_session`（HttpOnly/SameSite=Lax；公网 Host 带 Secure，回环不带）；空闲 8h/绝对 24h；状态变更要表单 CSRF；进程重启会话全失效 |
 | 登录防爆破 | 固定阈值：用户名 5 次/5 分钟、来源 IP 10 次/5 分钟，各锁 5 分钟（接受“按用户名可被恶意触发”的代价）；`X-Forwarded-For`（仅回环对端才信任）缺失时退化为 127.0.0.1 全局桶 |
 | 隧道性能 | frps `webServer` 只绑 127.0.0.1:7100（Basic 认证，凭据 `/etc/mrrc-hub/frps-web.credentials` 0640）；0.71 应答是 `{"proxies":[…]}`、每条只有 `todayTrafficIn/Out`+`curConns`（**无累计 trafficIn/Out**）⇒ 带宽按今日累计差分（跨日/重启由回绕检测兜底）；延时 = TLS 握手计时；每实例内存环形历史 120 样本（≈1h，重启即清）；「隧道」视图 **2026-10-05 已上线** |
+| 界面层 | 2026-10-11 全面改版：8 个视图（新增**实例详情**）、桌面侧栏 + 手机标签栏、逐视图"首屏回答一个问题"、自动刷新（切后台/暂停/正在输入即停）、破坏性动作**服务端两阶段确认**（必填理由）。前端只引入一份 vendored htmx，**全部交互是渐进增强**（关掉 JS 照常可用）。设计令牌由 `ui.TOKENS` 单处生成，测试直接读它算对比度（每个文字色 ≥4.5:1）；静态资源走**白名单精确匹配**（`/admin/static/../portal/app.py` → 404）。详见 `portal/UI.md` |
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
-| 测试 | `python3 tests/test_portal.py`（27 组）；另有 `test_portal_auth.py`（8）、`test_portal_metrics.py`（10）、`test_htpasswd.py`（4）——共 49 组 |
+| 测试 | `python3 tests/test_portal.py`（37 组）；另有 `test_portal_auth.py`（10）、`test_portal_metrics.py`（10）、`test_htpasswd.py`（4）、`test_portal_ui.py`（30，令牌对比度/组件/外壳/静态白名单/降级/视图层纯度）——共 **91 组** |
 | 入口 | `https://portal.mrrc.vlsc.net/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
 | **主机** | **与 hub 同一台机器**：香港 VPS `hub.vlsc.net`（203.25.119.168），门户挂在该名字的**根**（见 §12.8 主机表）。V0.20 把它迁到阿里云 `47.80.243.9` 的那次拆分只存续了几个小时，**已被 V0.21 取代**；那台机器不再承载门户（其后续处置**未取证**） |
 | 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |

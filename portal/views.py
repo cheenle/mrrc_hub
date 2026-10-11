@@ -375,13 +375,13 @@ def view_applications(ctx: Ctx) -> Rendered:
             ("时间", _ago_text(ctx.now, a.get("at"))),
         ]
         if status == "applied":
-            acts = (_post(ctx, "/admin/verify", c, "核验通过", pri=True)
-                    + _post(ctx, "/admin/reject", c, "拒绝", dgr=True))
+            acts = (_post(ctx, "/verify", c, "核验通过", pri=True)
+                    + _post(ctx, "/reject", c, "拒绝", dgr=True))
         elif status == "verified":
-            acts = (_post(ctx, "/admin/grant", c, "分配入口", pri=True)
-                    + _post(ctx, "/admin/reject", c, "拒绝", dgr=True))
+            acts = (_post(ctx, "/grant", c, "分配入口", pri=True)
+                    + _post(ctx, "/reject", c, "拒绝", dgr=True))
         elif status == "granted":
-            acts = _post(ctx, "/admin/revoke", c, "撤销入口", dgr=True)
+            acts = _post(ctx, "/revoke", c, "撤销入口", dgr=True)
             if a.get("enroll_secret"):
                 acts = ui.copy_button(a["enroll_secret"], "复制登记口令") + acts
         else:
@@ -430,7 +430,7 @@ CONFIRM_TITLES = {
 def confirm_page(action: str, callsign: str, ctx: Ctx, *, reason_label: str = "原因") -> str:
     """破坏性动作的第二阶段：带理由输入的确认表单（服务端渲染，JS 可有可无）。"""
     title, body = CONFIRM_TITLES.get(action, (f"确认 {action}？", "此操作会改变状态。"))
-    return ui.confirm_form(f"{ctx.root}/admin/{action}",
+    return ui.confirm_form(f"{ctx.root}/{action}",
                            {"callsign": callsign, "view": "applications"},
                            "确认执行", csrf=ctx.csrf, reason_label=reason_label,
                            title=title.format(call=callsign.upper()), body=body)
@@ -571,7 +571,7 @@ def view_instance(ctx: Ctx, label: str = "") -> Rendered:
                 f'<a class="chip" href="{ctx.root}/admin?view=instances">返回实例列表</a></div>'
               + '<h2>这个实例的审计</h2>' + audit_html
               + '<h2>动作</h2>'
-              + _post(ctx, "/admin/revoke", label, "撤销入口", dgr=True)
+              + _post(ctx, "/revoke", label, "撤销入口", dgr=True)
               + '<p><small>撤销会移除注册表里的一行，入口立刻 404；重开要重新走完核验。</small></p>')
     return Rendered(title=f"MRRC Portal — {label}", chrome=chrome, live="")
 
@@ -819,7 +819,9 @@ def view_audit(ctx: Ctx) -> Rendered:
     window = picked[start:start + AUDIT_PAGE_SIZE]
 
     def link(fid: str, p: int = 1) -> str:
-        return f"{ctx.root}/admin?view=audit&amp;f={ui.esc(fid)}&amp;page={p}"
+        """回**原始** URL：HTML 转义是 href 出口的事。
+        在这里先写 &amp; 会被出口再转一次，变成 &amp;amp; —— 筛选就点不动了。"""
+        return f"{ctx.root}/admin?view=audit&f={fid}&page={p}"
 
     chips = []
     for fid, label, evs in AUDIT_FILTERS:

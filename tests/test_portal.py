@@ -1166,8 +1166,9 @@ def test_destructive_page_forms_are_stage_one_only():
                    "enroll_secret": None},
     })
     out = vs.render("applications", ctx).chrome + vs.render("applications", ctx).live
-    check("/admin/reject" in out, "拒绝动作存在")
-    check("/admin/grant" in out, "分配入口动作存在")
+    # 动作在**根级**（与公开自助端点同一命名空间），不是 /admin/reject。
+    check('action="/reject"' in out, "拒绝动作存在且指向根级路由")
+    check('action="/grant"' in out, "分配入口动作存在且指向根级路由")
     for m in re.finditer(r"<form[^>]*method=post[^>]*>.*?</form>", out, re.S):
         check("confirm" not in m.group(0), "页面上的表单不带 confirm 标记")
 
@@ -1180,6 +1181,7 @@ def test_confirm_page_asks_for_a_reason():
     check('name="confirm" value="yes"' in out, "确认页带二次确认标记")
     check('name="csrf" value="tok"' in out, "确认页带 csrf")
     check("撤销" in out and "BG1SB" in out, "说清在撤销谁")
+    check('action="/revoke"' in out, "确认表单指向根级 /revoke")
 
 
 def test_badges_report_what_needs_action():
@@ -1194,6 +1196,154 @@ def test_badges_report_what_needs_action():
     check(b.get("applications") == 1, "申请待办数正确")
     check(b.get("instances") == 1, "异常实例数正确")
     check(b.get("system", 0) == 0, "没有系统问题时不出系统徽标")
+
+
+def _admin_pages(tmp, sampler=None):
+    """起一个小服务并登录，返回 (httpd, base, opener, {视图: HTML})。
+
+    与 test_pages_are_mobile_suitable 同一套夹具形状，不提新花样。
+    """
+    from http.server import ThreadingHTTPServer
+    reg_path = tmp / "instances.tsv"
+    reg_path.write_text("bg1sb\t18802\n", encoding="utf-8")
+    (tmp / "callsigns.txt").write_text("BG1SB\n", encoding="utf-8")
+    users_path = tmp / "portal-users"
+    users_path.write_text("ops:" + ht.apr1("pw-123456789", "saltward") + "\n", encoding="utf-8")
+    portal = Portal(Store(tmp / "portal.json"), reg.Registry(reg_path),
+                    CallsignListVerifier(tmp / "callsigns.txt"))
+    portal.apply("bg1sb")
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
+        portal, token="tok", users=ht.UsersFile(users_path), sampler=sampler))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    opener, _jar = _signed_in_opener(base, "ops", "pw-123456789")
+    pages = {}
+    for v in ("overview", "applications", "instances", "tunnel", "system", "audit", "clublog"):
+        with opener.open(base + "/admin?view=" + v, timeout=30) as r:
+            pages[v] = r.read().decode()
+    return httpd, base, opener, pages
+
+
+_FORMS = re.compile(r"<form[^>]*method=[\"']?post[\"']?[^>]*>(.*?)</form>", re.S | re.I)
+
+
+def test_every_state_changing_form_carries_csrf():
+    """每个状态变更表单都要 csrf —— 本次新增了确认页与详情页动作，一个都不能漏。
+
+    改版前只有一两条路径被测过；现在按视图逐个扫，新加表单忘了带 csrf 会立刻变红。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        httpd, base, opener, pages = _admin_pages(tmp)
+        try:
+            for name, html_text in pages.items():
+                for m in _FORMS.finditer(html_text):
+                    check("csrf" in m.group(1),
+                          f"{name}: 每个 POST 表单都带 csrf（漏了：{m.group(1)[:60]}）")
+                    # 四个**运维动作**在根级（与公开自助端点同一命名空间）；
+                    # /admin/logout 与 /admin/login 是会话路由，在 /admin 下面。
+                    # 把动作写成 /admin/verify 会 404 —— 本守卫第一次跑就抓到了这个前缀错误。
+                    act = re.search(r'action=["\']([^"\']+)["\']', m.group(0))
+                    path_only = (act.group(1) if act else "").split("?")[0]
+                    if path_only.rstrip("/").endswith(("/verify", "/reject", "/grant", "/revoke")):
+                        check(path_only.startswith(("/verify", "/reject", "/grant", "/revoke")),
+                              f"{name}: 动作表单指向根级路由（得到 {path_only}）")
+            with opener.open(base + "/admin?view=instance&label=bg1sb", timeout=30) as r:
+                detail = r.read().decode()
+            for m in _FORMS.finditer(detail):
+                check("csrf" in m.group(1), "实例详情页的 POST 表单带 csrf")
+        finally:
+            httpd.shutdown()
+
+
+def test_every_destructive_action_is_two_stage():
+    """撤销/拒绝在页面上是"阶段一"（不带 confirm=yes），执行只能由确认页发出。
+
+    这一条同时守两件事：① 不能只靠 window.confirm（关掉 JS 就没了）；
+    ② 确认页必须真的要求填理由，空理由要被拒。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        httpd, base, opener, pages = _admin_pages(tmp)
+        try:
+            for name, html_text in pages.items():
+                for m in re.finditer(r"<form[^>]*action=[\"']?[^\"']*/(revoke|reject)"
+                                     r"[\"']?.*?</form>", html_text, re.S | re.I):
+                    check('value="yes"' not in m.group(0),
+                          f"{name}: 破坏性动作的页面表单不带 confirm=yes")
+            csrf = _csrf_from(pages["applications"])
+            body = urllib.parse.urlencode({"callsign": "bg1sb", "csrf": csrf}).encode()
+            # 动作路由是**根级**的（与公开自助端点同一命名空间），不是 /admin/…：
+            # 写成 /admin/revoke 会 404 —— 这条守卫第一次跑就抓到了这个前缀错误。
+            with opener.open(base + "/revoke", data=body, timeout=30) as r:
+                stage2 = r.read().decode()
+            check('name="confirm" value="yes"' in stage2, "阶段二确认表单存在")
+            check('name="reason"' in stage2, "阶段二要求填理由")
+            check('name="csrf"' in stage2, "阶段二仍带 csrf")
+            bad = urllib.parse.urlencode({"callsign": "bg1sb", "csrf": csrf,
+                                          "confirm": "yes", "reason": "  "}).encode()
+            try:
+                opener.open(base + "/revoke", data=bad, timeout=30)
+                check(False, "空理由应当被拒（期望 400）")
+            except urllib.error.HTTPError as exc:
+                check(exc.code == 400, f"空理由返回 400（得到 {exc.code}）")
+        finally:
+            httpd.shutdown()
+
+
+def test_pages_still_work_without_javascript():
+    """降级硬要求：导航与筛选都是真 <a href>，表单都是真 method/action。
+
+    关掉 JS 后 htmx 不存在，任何"只有 hx-get 没有 href"的控件都是死按钮。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        httpd, base, opener, pages = _admin_pages(tmp)
+        try:
+            for name, html_text in pages.items():
+                check("<script>" not in html_text, f"{name}: 没有内联 script")
+                check("htmx.min.js" in html_text, f"{name}: htmx 走外链文件")
+                for m in _FORMS.finditer(html_text):
+                    check('action="' in m.group(0) or "action='" in m.group(0),
+                          f"{name}: 每个 POST 表单都有 action（关掉 JS 才提交得出去）")
+            for vid in ("overview", "applications", "instances", "tunnel",
+                        "system", "audit", "clublog"):
+                check(f'href="/admin?view={vid}"' in pages["overview"],
+                      f"导航里 {vid} 是真 href")
+            # 筛选/翻页/搜索也得真链接或真表单
+            check('href="/admin?view=audit&amp;f=login' in pages["audit"], "审计筛选是真链接")
+            check('action="/admin" class="search"' in pages["audit"], "审计搜索是真表单")
+        finally:
+            httpd.shutdown()
+
+
+def test_live_regions_are_fragments_and_carry_the_refresh_guard():
+    """自动刷新的三段契约，缺一段都会静默失效（页面看着正常，只是永远不刷）。
+
+    ① 数据区带 data-live + hx-get；② 条件引用 admin.js 的 __portalPaused（切后台/
+    暂停/正在输入时停刷）；③ 带 HX-Request 的请求只回片段（不含 html/head/style），
+    否则 htmx 会把整页塞进目标元素。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        httpd, base, opener, pages = _admin_pages(tmp, sampler=_StubSampler())
+        try:
+            for name in ("overview", "instances", "tunnel", "system"):
+                html_text = pages[name]
+                check("data-live" in html_text, f"{name}: 有可刷新的数据区")
+                check(f'?view={name}&amp;part=live' in html_text, f"{name}: hx-get 指向 live 片段")
+                check("__portalPaused" in html_text, f"{name}: 刷新条件引用闸门函数")
+                check('aria-live="polite"' in html_text, f"{name}: 数据区外有礼貌播报容器")
+                req = urllib.request.Request(
+                    base + f"/admin?view={name}&part=live", headers={"HX-Request": "true"})
+                with opener.open(req, timeout=30) as r:
+                    frag = r.read().decode()
+                    check(r.headers.get("HX-Push-Url"), f"{name}: 回 HX-Push-Url 保持地址可分享")
+                check("<html" not in frag and "<head" not in frag and "<style" not in frag,
+                      f"{name}: 片段里没有 html/head/style")
+                check("<h2" in frag or "<div" in frag, f"{name}: 片段里有真内容")
+        finally:
+            httpd.shutdown()
 
 
 def main():

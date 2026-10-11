@@ -1078,12 +1078,17 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
               * **需要 root 的操作不由本服务执行**：Web 服务解析外网输入，给它
                 nginx reload / 拉库的权限是自找麻烦。这里只把命令打出来让运维执行。
             """
+            self._push_url = ""      # 本次请求的副作用，先归零
             ctx = self._ctx_for(view, msg=msg, flt=flt, q=q, page=page, label=label)
             r = vs.render(view, ctx, part=part)
             nav = ui.Nav(view=view, root=ctx.root, badges=vs.badges(ctx),
                          user=ctx.user, csrf=ctx.csrf)
-            return ui.page(r.title, r.chrome, nav=nav, noindex=True,
-                           fragment=(part is not None), live=r.live)
+            page_html = ui.page(r.title, r.chrome, nav=nav, noindex=True,
+                                fragment=(part is not None), live=r.live)
+            # 片段回来时把地址栏钉在**可分享**的视图 URL（去掉 part=live）。
+            # 头由调用方发（它才知道要回给谁），这里只把值算好。
+            self._push_url = (f"{ctx.root}/admin?view={view}") if part == "live" else ""
+            return page_html
 
         # ---- routes ----
         def do_GET(self):                        # noqa: N802
@@ -1101,12 +1106,14 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 q_params = self._query()
                 part = ("live" if (self.headers.get("HX-Request") and q_params.get("part") == "live")
                         else None)
-                return self._send(200, self._admin(q_params.get("view") or "overview",
-                                                   part=part, flt=q_params.get("f") or "",
-                                                   q=q_params.get("q") or "",
-                                                   page=_int_or(q_params.get("page"), 1),
-                                                   label=(q_params.get("label") or "").strip()),
-                                  ctype="text/html; charset=utf-8")
+                page_html = self._admin(q_params.get("view") or "overview",
+                                        part=part, flt=q_params.get("f") or "",
+                                        q=q_params.get("q") or "",
+                                        page=_int_or(q_params.get("page"), 1),
+                                        label=(q_params.get("label") or "").strip())
+                headers = {"HX-Push-Url": self._push_url} if self._push_url else None
+                return self._send(200, page_html, ctype="text/html; charset=utf-8",
+                                  headers=headers)
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})
             # 这是租户在**自己手机上**看的页面，所以卡片/表格都要窄屏友好。

@@ -185,7 +185,9 @@ def test_toolbar_chips_are_real_links():
     out = toolbar([("全部", "/admin?view=instances", True, 5),
                    ("异常", "/admin?view=instances&f=bad", False, 1)])
     check('href="/admin?view=instances"' in out, "chip 是真链接")
-    check("aria-current" in out, "当前筛选带 aria-current")
+    # 用 aria-current="true" 而不是 "page"：它是筛选状态不是页面，而且 "page" 会让
+    # “每个导航恰好一处当前页”的移动性守卫把筛选 chip 也算进去。
+    check('aria-current="true"' in out, "当前筛选用 aria-current=true")
     check(">5<" in out or "5</span>" in out, "chip 带计数")
 
 

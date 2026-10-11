@@ -181,6 +181,14 @@ table.kv{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
 _PORTAL_CSS = ui.CSS
 
 
+def _int_or(value, default: int) -> int:
+    """把查询串里来的数字变成 int；不是数字就用默认值（不要在路由层抛 500）。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _page(title: str, body: str, noindex: bool = False) -> str:
     """兼容包装：旧调用点（登录页/公开页）仍用 3 参数形式。
 
@@ -1045,7 +1053,13 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     # 直连 /admin/login 时把已登录者送回控制台（保持单一 URL）
                     return self._send(303, "", ctype="text/plain; charset=utf-8",
                                       headers={"Location": self._console_url()})
-                return self._send(200, self._admin(self._query().get("view") or "overview"),
+                q_params = self._query()
+                part = ("live" if (self.headers.get("HX-Request") and q_params.get("part") == "live")
+                        else None)
+                return self._send(200, self._admin(q_params.get("view") or "overview",
+                                                   part=part, flt=q_params.get("f") or "",
+                                                   q=q_params.get("q") or "",
+                                                   page=_int_or(q_params.get("page"), 1)),
                                   ctype="text/html; charset=utf-8")
             if self._route() != "/":
                 return self._send(404, {"error": "not found"})
@@ -1199,6 +1213,21 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 if not ok:
                     return self._send(403, {"error": "运维动作需要会话+CSRF 令牌，或 X-Portal-Token 请求头"})
                 who = cs.normalize(body.get("callsign", ""))
+                if route in ("/reject", "/revoke") and actor != "token":
+                    # 破坏性动作的**服务端两阶段确认**：没带 confirm=yes 就只回确认页。
+                    # JS 在时 admin.js 把它弹成 <dialog>，关掉 JS 时它是一张普通页面 ——
+                    # 两条路走同一段服务端代码，所以降级不会绕开确认。
+                    # 机器路径（X-Portal-Token）不受影响：脚本不需要弹窗。
+                    _, _session_now = self._session()
+                    cctx = vs.Ctx(root=self._admin_root(), view="applications",
+                                  csrf=_session_now.csrf if _session_now else "")
+                    if body.get("confirm") != "yes":
+                        return self._send(200, vs.confirm_page(route.lstrip("/"), who, cctx),
+                                          ctype="text/html; charset=utf-8")
+                    if not str(body.get("reason") or "").strip():
+                        # 有确认、没理由：拒绝，并把确认页回给用户重填。
+                        return self._send(400, vs.confirm_page(route.lstrip("/"), who, cctx),
+                                          ctype="text/html; charset=utf-8")
                 def done(msg):
                     # 浏览器路径（会话+CSRF）重渲染管理台；机器路径（令牌头）只回 JSON。
                     if actor != "token":

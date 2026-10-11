@@ -208,71 +208,254 @@ def _wrap(ctx: Ctx, body: str) -> str:
     return f"<h1>{ui.esc(title)}</h1>{msg}" + body
 
 
-@register("overview", "MRRC Portal — 后台管理")
+#: 状态 slug 的中文名。总览页曾把 `applied=1 verified=1` 直接打给运维看（P2）。
+STATUS_CN = {"applied": "待核验", "verified": "待分配", "granted": "已授予",
+             "rejected": "已拒绝", "revoked": "已撤销"}
+
+#: 申请分组：(组 id, 标题, 组内状态)。默认只看第一组 —— “七种状态一锅端”是 P3。
+APP_GROUPS = (
+    ("pending", "待处理", ("applied", "verified")),
+    ("granted", "已授予", ("granted",)),
+    ("closed", "已结束", ("rejected", "revoked")),
+)
+
+
+def _head(ctx: Ctx, subtitle: str = "") -> str:
+    """视图头部：标题 + 操作后的消息 + 一句说明。
+
+    导航与登出不在里 —— 它们属于外壳（`ui.page(nav=…)`），外壳变了这里不用跟着改。
+    """
+    out = f"<h1>{ui.esc(ui.TITLES.get(ctx.view, '后台管理'))}</h1>"
+    if ctx.msg:
+        out += ui.banner("ok", ui.esc(ctx.msg))
+    if subtitle:
+        out += f'<div class="hint">{subtitle}</div>'
+    return out
+
+
+def _is_serving(ctx: Ctx, state: str) -> bool:
+    """唯一判据是 `TUNNEL_PILL`：“服务中”即 pill == 'ok'。
+
+    视图不 import `TUNNEL_SERVING` 这类常量：它们在 app.py，而 app.py import views
+    （循环）；而且状态语义的权威本来就在探针那边。
+    """
+    return ctx.tunnel_pill.get(state) == "ok"
+
+
+def _level(ctx: Ctx, state: str) -> str:
+    """状态对应的视觉级别（''|warn|bad），同样只来自 tunnel_pill。"""
+    return {"ok": "", "warn": "warn", "bad": "bad"}.get(ctx.tunnel_pill.get(state, ""), "")
+
+
+def _ago_text(now: float, then) -> str:
+    if not then:
+        return "时间未知"
+    d = max(0, int(now - then))
+    if d < 60:
+        return "刚刚"
+    if d < 3600:
+        return f"{d // 60} 分钟前"
+    if d < 86400:
+        return f"{d // 3600} 小时前"
+    return f"{d // 86400} 天前"
+
+
+def _int_or_none(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _todo_items(ctx: Ctx) -> list[tuple[str, str, str, str]]:
+    """待办清单 → [(级别, 标题, 说明, 动作 HTML)]。
+
+    这是总览的核心：它回答“我现在该做什么”。级别决定颜色，**红＝要动手**。
+    """
+    items: list[tuple[str, str, str, str]] = []
+    pending = [a for a in ctx.apps.values() if a["status"] == "applied"]
+    for a in sorted(pending, key=lambda a: a.get("at") or 0)[:5]:
+        evidence = (a.get("evidence") or "需人工核验")[:60]
+        items.append((
+            "warn", f"待核验 · {a['callsign'].upper()}",
+            f"{ui.esc(evidence)} · {_ago_text(ctx.now, a.get('at'))}",
+            f'<a class="chip" href="{ctx.root}/admin?view=applications">去处理</a>'))
+    for label, port in ctx.entries:
+        state, detail = ctx.states.get(port, ("", "未探测"))
+        if _is_serving(ctx, state):
+            continue
+        items.append((
+            "bad" if _level(ctx, state) == "bad" else "warn",
+            f"{label} · {ctx.tunnel_text.get(state, state or '未探测')}",
+            ui.esc(detail) + " —— 访客会拿到 502，请查实例机",
+            f'<a class="chip" href="{ctx.root}/admin?view=instances">看实例</a>'))
+    for unit, st, enabled, _since, _restarts in ctx.services:
+        if enabled != "not-found" and st == "active":
+            continue
+        note = ("单元文件在仓库里、没装到 hub 上 —— 路由不会自动重生成"
+                if enabled == "not-found" else f"当前 {st}")
+        items.append(("warn", f"服务 {unit} · {st}", ui.esc(note),
+                      f'<a class="chip" href="{ctx.root}/admin?view=system">去系统页</a>'))
+    days = _int_or_none(ctx.cert_days)
+    if days is not None and days < 30:
+        items.append(("warn", "入口证书临期", f"还剩 {days} 天，到期前必须续",
+                      f'<a class="chip" href="{ctx.root}/admin?view=system">看证书</a>'))
+    if ctx.sampler and ctx.sampler.get("panel_error"):
+        items.append(("warn", "frps 面板取不到数",
+                      ui.esc(ctx.sampler["panel_error"]) + " —— 隧道带宽会缺数",
+                      f'<a class="chip" href="{ctx.root}/admin?view=system">去看原因</a>'))
+    return items
+
+
+@register("overview", "MRRC Portal — 总览")
 def view_overview(ctx: Ctx) -> Rendered:
     by: dict[str, int] = {}
     for a in ctx.apps.values():
         by[a["status"]] = by.get(a["status"], 0) + 1
-    online = sum(1 for s, _ in ctx.states.values() if s == "serving")
-    # 不能只给个数字：“3 个在线”与“3 个在线但其中 1 个其实用不了”是两回事，
-    # 而后者正是支持回路里最耗时的那种误判。
-    not_serving = [(l, p) + ctx.states[p] for l, p in ctx.entries
-                   if ctx.states.get(p, ("", ""))[0] != "serving"]
-    bad = "".join(
-        f"<br><small><span class='pill {ctx.tunnel_pill[s]}'>{html.escape(ctx.tunnel_text[s])}</span> "
-        f"<code>{html.escape(l)}</code>:{p} — {html.escape(d)}</small>"
-        for l, p, s, d in not_serving)
-    tunnel_summary = ""
-    if ctx.sampler is not None:
-        snap = ctx.sampler
-        lats = [i["last"].latency_ms for i in snap["labels"].values()
-                if i["last"].latency_ms is not None]
-        outs = [i["last"].out_bps for i in snap["labels"].values()
-                if i["last"].out_bps is not None]
-        if lats and outs:
-            tunnel_summary = (f"<br><small>延时均值 {sum(lats) / len(lats):.0f} ms；"
-                              f"出带宽 {_fmt_bps(sum(outs))}（<a href='?view=tunnel'>隧道视图</a>）</small>")
-        elif snap["panel_error"]:
-            tunnel_summary = f"<br><small>{html.escape(snap['panel_error'])}</small>"
-    body = f"""<h2>总览</h2>
-<table class=kv><tr><th>项</th><th>值</th></tr>
-<tr><td>申请</td><td>{'　'.join(f"{k}={v}" for k, v in sorted(by.items())) or '（无）'}</td></tr>
-<tr><td>注册表实例</td><td>{len(ctx.entries)} 个，其中<b>真正在服务</b> {online} 个{bad}{tunnel_summary}</td></tr>
-<tr><td>入口证书剩余</td><td>{ctx.cert_days}</td></tr>
-<tr><td>Club Log 呼号库</td><td>{ctx.clublog}</td></tr>
-<tr><td>端口池</td><td>{ctx.registry_first}-{ctx.registry_last}，已用 {len(ctx.entries)}，空闲 {ctx.registry_last - ctx.registry_first + 1 - len(ctx.entries)}</td></tr>
-</table>
-<p><small>需要 root 的动作不在此执行，请照抄命令：<br>
-<code>sudo /usr/local/sbin/gen_hub_routes.py &amp;&amp; sudo systemctl reload nginx</code>（新增/撤销实例后）<br>
-<code>sudo /usr/local/sbin/mrrc-portal-sync-clublog.sh</code>（立即刷新呼号库）</small></p>"""
-    return Rendered("MRRC Portal — 后台管理", chrome=_wrap(ctx, body), live="")
+    serving = sum(1 for _l, p in ctx.entries
+                  if _is_serving(ctx, ctx.states.get(p, ("", ""))[0]))
+    todos = _todo_items(ctx)
+
+    lat = [i["last"].latency_ms for i in (ctx.sampler or {}).get("labels", {}).values()
+           if i["last"].latency_ms is not None]
+    lat_note = f"均值 {sum(lat) / len(lat):.0f} 毫秒 · {serving} 条在线" if lat else "暂无采样"
+    cert_note = "天后到期" if _int_or_none(ctx.cert_days) is not None else ui.esc(ctx.cert_days)
+
+    stats = ('<div class="stats">'
+             + ui.stat("待你处理", str(len(todos)), "按下面那张清单计",
+                       "warn" if todos else "ok")
+             + ui.stat("实例异常", str(max(0, len(ctx.entries) - serving)),
+                       f"{len(ctx.entries)} 个已登记",
+                       "bad" if serving < len(ctx.entries) else "ok")
+             + ui.stat("入口证书", ctx.cert_days, cert_note)
+             + ui.stat("隧道总延时", f"{sum(lat) / len(lat):.0f}" if lat else "—", lat_note)
+             + '</div>')
+
+    todo_html = "".join(
+        f'<div class="card {"alert warn" if lv == "warn" else "alert"}">'
+        f'<div class="cardhead">{ui.pill(lv, "要动手" if lv == "bad" else "待处理")}'
+        f'<b>{title}</b>{action}</div>'
+        f'<div class="meta"><span>{note}</span></div></div>'
+        for lv, title, note, action in todos) or ui.empty(
+            "没有待办 —— 所有申请都已处理，已登记的实例都在服务",
+            f'<a class="chip" href="{ctx.root}/admin?view=instances">看实例清单</a>')
+
+    port_used = len(ctx.entries)
+    kv_rows = [
+        ("申请状态分布", "　".join(f"{STATUS_CN.get(k, k)}={v}" for k, v in sorted(by.items()))
+         or "（无）"),
+        ("端口池", f"{ctx.registry_first}-{ctx.registry_last}，已用 {port_used}，"
+                   f"空闲 {ctx.registry_last - ctx.registry_first + 1 - port_used}"),
+        ("Club Log 呼号库", ui.esc(ctx.clublog) if ctx.clublog else "—"),
+    ]
+    cmd = ('<div class="card"><div class="cardhead"><b>需要 root 的运维命令</b></div>'
+           '<div class="meta"><span>新增/撤销实例后</span></div>'
+           + ui.copy_button("sudo /usr/local/sbin/gen_hub_routes.py && sudo systemctl reload nginx")
+           + '<div class="meta" style="margin-top:6px"><span>立即刷新呼号库</span></div>'
+           + ui.copy_button("sudo /usr/local/sbin/mrrc-portal-sync-clublog.sh")
+           + '</div>')
+
+    body = (stats + "<h2>需要你处理的</h2>" + todo_html
+            + "<h2>概览</h2>" + ui.kv(kv_rows) + cmd)
+    return Rendered(title="MRRC Portal — 总览", chrome=_head(ctx),
+                    live=live_region("overview", ctx, body))
 
 
-@register("applications", "MRRC Portal — 后台管理")
+@register("applications", "MRRC Portal — 申请")
 def view_applications(ctx: Ctx) -> Rendered:
-    def rows(statuses, actions):
-        out = []
-        for c, a in sorted(ctx.apps.items()):
-            if a["status"] not in statuses:
-                continue
-            out.append(trow(
-                ("呼号", f"<code>{html.escape(c)}</code>"),
-                ("状态", f"<span class='pill mute'>{html.escape(a['status'])}</span>"),
-                ("产品", html.escape(a.get('product') or '主产品')),
-                ("标签", html.escape(a.get('label') or '—')),
-                ("端口", str(a.get('port') or '—')),
-                ("依据", html.escape((a.get('evidence') or '')[:70])
-                 + (f"<br><small>登记口令: <code>{html.escape(a['enroll_secret'])}</code></small>"
-                    if a.get('enroll_secret') and a['status'] == 'granted' else '')),
-                ("动作", actions(c))))
-        return ''.join(out) or "<tr><td colspan=7>（无）</td></tr>"
+    groups: dict[str, list] = {gid: [] for gid, _t, _s in APP_GROUPS}
+    for a in ctx.apps.values():
+        for gid, _title, statuses in APP_GROUPS:
+            if a["status"] in statuses:
+                groups[gid].append(a)
+    for v in groups.values():
+        v.sort(key=lambda a: -(a.get("at") or 0))
 
-    body = "<h2>申请（全部状态）</h2><table class=stack><tr><th>呼号</th><th>状态</th><th>产品</th><th>标签</th><th>端口</th><th>依据</th><th>动作</th></tr>" \
-        + rows({"applied"}, lambda c: _act(ctx, "/verify", c, "核验通过", "<input type=hidden name=evidence value='人工核验通过'>") + _act(ctx, "/reject", c, "拒绝", "<input type=hidden name=reason value='材料不足'>")) \
-        + rows({"verified"}, lambda c: _act(ctx, "/grant", c, "分配入口") + _act(ctx, "/reject", c, "拒绝", "<input type=hidden name=reason value='核验后驳回'>")) \
-        + rows({"granted"}, lambda c: _act(ctx, "/revoke", c, "撤销", "<input type=hidden name=reason value='撤销'>")) \
-        + rows({"rejected", "revoked"}, lambda c: "") + "</table>"
-    return Rendered("MRRC Portal — 后台管理", chrome=_wrap(ctx, body), live="")
+    active = ctx.flt or "pending"
+    chips = [(f"{title} {len(groups[gid])}",
+              f"{ctx.root}/admin?view=applications&f={gid}", gid == active, None)
+             for gid, title, _s in APP_GROUPS]
+    chips.append(("全部", f"{ctx.root}/admin?view=applications&f=all", active == "all", None))
+    chrome = (_head(ctx, "把「规范化 → 查重 → 核验 → 分配」走完；"
+                         "呼号核验通过才会分配入口。")
+              + ui.toolbar(chips, search_html=(
+                  f'<form method="get" action="{ctx.root}/admin" class="search" data-tools>'
+                  f'<input type="hidden" name="view" value="applications">'
+                  f'<input name="q" value="{ui.esc(ctx.q)}" placeholder="搜索呼号…"></form>')))
+
+    HEADERS = ["呼号", "状态", "产品", "依据", "时间", "动作"]
+
+    def row(a) -> list:
+        c = a["callsign"]
+        status = a["status"]
+        shown = a.get("label") if status == "granted" and a.get("label") else c.upper()
+        cells = [
+            ("呼号", f"<code>{ui.esc(shown)}</code>"),
+            ("状态", ui.pill("mute", STATUS_CN.get(status, status))),
+            ("产品", ui.esc(a.get("product") or "主产品")),
+            ("依据", ui.esc((a.get("evidence") or "")[:70])),
+            ("时间", _ago_text(ctx.now, a.get("at"))),
+        ]
+        if status == "applied":
+            acts = (_post(ctx, "/admin/verify", c, "核验通过", pri=True)
+                    + _post(ctx, "/admin/reject", c, "拒绝", dgr=True))
+        elif status == "verified":
+            acts = (_post(ctx, "/admin/grant", c, "分配入口", pri=True)
+                    + _post(ctx, "/admin/reject", c, "拒绝", dgr=True))
+        elif status == "granted":
+            acts = _post(ctx, "/admin/revoke", c, "撤销入口", dgr=True)
+            if a.get("enroll_secret"):
+                acts = ui.copy_button(a["enroll_secret"], "复制登记口令") + acts
+        else:
+            acts = ""
+        cells.append(("动作", acts))
+        return cells
+
+    blocks = []
+    for gid, title, _s in APP_GROUPS:
+        if active not in (gid, "all"):
+            continue
+        rows = [row(a) for a in groups[gid]]
+        blocks.append(f"<h2>{ui.esc(title)}（{len(groups[gid])}）</h2>"
+                      + (ui.grid_table(HEADERS, rows, stack=True) if rows
+                         else ui.empty(f"没有{title}的申请",
+                                       f'<a class="chip" '
+                                       f'href="{ctx.root}/admin?view=applications&f=all">'
+                                       f'看全部</a>')))
+    return Rendered(title="MRRC Portal — 申请", chrome=chrome,
+                    live=live_region("applications", ctx, "".join(blocks)))
+
+
+def _post(ctx: Ctx, route: str, callsign: str, label: str, *, pri: bool = False,
+          dgr: bool = False) -> str:
+    """状态变更表单。**永远带 csrf**，永远是真 form（关掉 JS 也能提交）。
+
+    破坏性动作（reject/revoke）这里只发“阶段一”——**不带 confirm**。
+    服务端收到没带 confirm 的请求时回确认页，那一步才真正执行。
+    """
+    cls = ' class="pri"' if pri else (' class="dgr"' if dgr else '')
+    return (f'<form method="post" action="{ctx.root}{route}">'
+            f'<input type="hidden" name="csrf" value="{ui.esc(ctx.csrf)}">'
+            f'<input type="hidden" name="callsign" value="{ui.esc(callsign)}">'
+            f'<button{cls}>{ui.esc(label)}</button></form>')
+
+
+#: 确认页的文案。写在这里而不是拼在 app.py 里：它是界面，不是路由逻辑。
+CONFIRM_TITLES = {
+    "revoke": ("撤销 {call} 的入口？",
+               "注册表会少一行，访客立刻拿不到入口。撤销是长期的，重开要重新走完核验。"),
+    "reject": ("拒绝 {call} 的申请？",
+               "申请会被标记为已拒绝。若对方是合法持照者，需要重新申请。"),
+}
+
+
+def confirm_page(action: str, callsign: str, ctx: Ctx, *, reason_label: str = "原因") -> str:
+    """破坏性动作的第二阶段：带理由输入的确认表单（服务端渲染，JS 可有可无）。"""
+    title, body = CONFIRM_TITLES.get(action, (f"确认 {action}？", "此操作会改变状态。"))
+    return ui.confirm_form(f"{ctx.root}/admin/{action}",
+                           {"callsign": callsign, "view": "applications"},
+                           "确认执行", csrf=ctx.csrf, reason_label=reason_label,
+                           title=title.format(call=callsign.upper()), body=body)
 
 
 @register("system", "MRRC Portal — 后台管理")

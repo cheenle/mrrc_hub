@@ -170,7 +170,9 @@ def test_login_flow_and_csrf():
             st, page, _ = _post(op, base + "/admin/login", {"user": "ghost", "password": "wrong"})
             check(st == 401 and "不正确" in page, "不存在的用户同文案")
             st, page, _ = _post(op, base + "/admin/login", {"user": "ops", "password": "str0ng-pass"})
-            check(st == 200 and "后台管理" in page, "正确密码登录后跟到管理台")
+            # 落点判据：出现侧栏与登出入口 ⇒ 确实进了管理台而不是逗留在登录页。
+            check(st == 200 and 'class="side"' in page and "登出" in page,
+                  "正确密码登录后跟到管理台")
             # Cookie 属性直接从原始 Set-Cookie 头断言：http.cookiejar 不保留 HttpOnly。
             op_nf, _ = _opener(no_follow=True)
             st, _, hdr = _post(op_nf, base + "/admin/login",

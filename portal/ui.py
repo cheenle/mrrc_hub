@@ -333,11 +333,16 @@ def toolbar(chips, search_html: str = "", right_html: str = "") -> str:
     """
     out = []
     for label, href, active, count in chips:
-        cur = ' aria-current="page"' if active else ""
+        cur = ' aria-current="true"' if active else ""
         n = f' <span class="hint">{count}</span>' if count is not None else ""
         out.append(f'<a class="chip{" on" if active else ""}" href="{html.escape(href, quote=True)}"'
                    f'{cur}>{esc(label)}{n}</a>')
     return f'<div class="tools">{"".join(out)}{search_html}{right_html}</div>'
+
+
+# 注：当前筛选用具 `aria-current="true"` 而不是 `"page"`。两者都是合法的 ARIA，
+# 但 `"page"` 会让"每个导航恰好一处当前页"的守卫把筛选 chip 也算进去 ——
+# 而且语义上它确实不是一个页面。
 
 
 def copy_button(value: str, label: str = "复制") -> str:

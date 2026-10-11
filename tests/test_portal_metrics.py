@@ -203,7 +203,7 @@ def test_tunnel_view_renders_end_to_end():
             check("frps 面板" in sys_page and "全代理合计速率" in sys_page, "系统页有面板聚合行")
             with opener.open(base + "/admin?view=overview", timeout=10) as r:
                 ov = r.read().decode()
-            check("延时均值" in ov and "出带宽" in ov, "总览页有隧道摘要")
+            check("隧道总延时" in ov and "均值" in ov, "总览页有隧道摘要（延时指标卡）")
         finally:
             httpd.shutdown()
 

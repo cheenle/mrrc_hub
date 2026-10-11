@@ -7,7 +7,7 @@ POST /apply    规范化（BG1SB ≡ bg1sb）→ 查重（同呼号拒绝，不�
                应答里交付 **申请令牌**（应用在设置里存下它，凭它轮询 /status）
 POST /status   申请方凭申请令牌查自己那一条；批准后给出 label/端口/登记口令/frps 令牌
 POST /verify   人工核验通过（维护者 / 执照材料）
-POST /grant    分配标签与端口 → 写注册表 → 打印实例侧上线命令
+POST /grant    分配标签与端口 → 写注册表 → 给出下一步（v1.24.0 起应用自动接入；仅旧版产品才回脚本命令）
 POST /enroll   实例提交自签证书的公钥（凭一次性登记口令；校内证书名字必须等于入口名）
 POST /revoke   撤销并移除注册表条目（冒用被举报后走这里）
 ```
@@ -99,15 +99,17 @@ python3 -m portal.app --port 8890
 - `--metrics-interval 0` 关闭采集器（视图会说明未启用）；`--dry-run` 会打印账号文件、面板
   地址与采样间隔。
 
-## 授予之后还有一步（故意不自动做）
+## 授予之后
 
-`grant` 会写好注册表并打印实例侧命令，但**不会**重生成 nginx 路由 —— 那需要 root，
-属于部署动作：
+`grant` 写好注册表并给出下一步。**v1.24.0 起接入由应用自动完成**（客户侧每 30 秒自查一次），
+不再需要人工命令；只有旧版（非 `mrrc_modern`）产品才回落到脚本：
 
 ```bash
-sudo /usr/local/sbin/gen_hub_routes.py && sudo systemctl reload nginx
-sudo bash deploy/install_instance_tunnel.sh <标签> <端口>     # 在实例那台机器上
+sudo bash deploy/install_instance_tunnel.sh <标签> <端口>     # 仅旧版应用；v1.24.0 起应用自动接入
 ```
+
+nginx 路由与信任包也**不再需要人工重生成**：root 的 `mrrc-hub-routes.timer` 每 30 s 自动跑
+（V0.17 起，见 SDD/12 §12.9）。
 
 ## 有意为之的边界
 

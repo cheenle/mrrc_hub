@@ -38,8 +38,8 @@ sys.path.insert(0, str(ROOT))
 from portal import callsign as cs            # noqa: E402
 from portal import htpasswd as ht            # noqa: E402
 from portal import registry as reg           # noqa: E402
-from portal.app import (TUNNEL_DOWN, TUNNEL_HOLLOW, TUNNEL_PLAIN_HTTP,  # noqa: E402
-                        TUNNEL_SERVING, Portal, _tunnel_online, _tunnel_state,
+from portal.app import (TUNNEL_DOWN, TUNNEL_HOLLOW, TUNNEL_PILL, TUNNEL_PLAIN_HTTP,  # noqa: E402
+                        TUNNEL_SERVING, TUNNEL_TEXT, Portal, _tunnel_online, _tunnel_state,
                         _tunnel_states, make_handler)
 from portal.store import Store               # noqa: E402
 from portal.verify import (CallsignListVerifier, ClubLogVerifier,  # noqa: E402
@@ -275,12 +275,14 @@ def test_admin_ui_flow_with_sessions_and_csrf():
             # 申请一个库外呼号 → 待核验
             post("/apply", {"callsign": "BG1ZZZ"})
             status, page = get("/admin")
-            check(status == 200 and "后台管理" in page, "登录后进得去")
-            check("总览" in page and "注册表实例" in page, "默认进入总览视图")
+            # 落点判据用外壳特征（侧栏 + 登出）而不是旧标题：标题现在是视图名，
+            # 而"进得去管理台"这件事与具体是哪个视图无关。
+            check(status == 200 and 'class="side"' in page and "登出" in page, "登录后进得去")
+            check("总览" in page and "需要你处理的" in page, "默认进入总览视图")
             # 七个视图各自可渲染（导航走 GET `?view=`）
-            for view, needle in (("applications", "申请（全部状态）"), ("instances", "实例"),
+            for view, needle in (("applications", "待处理"), ("instances", "实例"),
                                  ("tunnel", "隧道"), ("system", "hub 主机"),
-                                 ("audit", "审计（最近"), ("clublog", "呼号库")):
+                                 ("audit", "审计"), ("clublog", "呼号库")):
                 st, vp = get(f"/admin?view={view}")
                 check(st == 200 and needle in vp, f"{view} 视图可渲染")
             st, ap = get("/admin?view=applications")
@@ -1060,6 +1062,123 @@ def test_pages_are_mobile_suitable():
                   "内联颜色字典 TUNNEL_COLOR 已被 CSS 类取代")
         finally:
             httpd.shutdown()
+
+
+# ── 视图层：直接拿假 Ctx 测，不起服务、不开端口、不等超时 ──────────────────
+# 这一组是「界面改版」的守卫。视图层是纯的（有 AST 检查守着），所以可以这样测。
+
+def _ctx(view="overview", **kw):
+    from portal import views as vs
+    base = dict(root="", csrf="tok", user="ops", now=time.time(),
+                tunnel_text=TUNNEL_TEXT, tunnel_pill=TUNNEL_PILL)
+    base.update(kw)
+    return vs.Ctx(view=view, **base)
+
+
+def test_overview_leads_with_a_todo_list():
+    """总览首屏必须回答"现在有没有事、我该做什么"。
+
+    没有这条守卫，总览很容易退化成"一堆好看的数字"（改版前就是这样：五行 kv，
+    没有一个告诉你该动手做什么）。
+    """
+    from portal import views as vs
+    ctx = _ctx("applications", apps={
+        "BG8XYZ": {"callsign": "BG8XYZ", "status": "applied", "evidence": "命中呼号库",
+                   "product": "", "label": None, "port": None, "at": time.time() - 7200,
+                   "enroll_secret": None},
+    }, entries=[("bg1sb", 18804), ("bg7zhs", 18805)],
+        states={18804: (TUNNEL_SERVING, "握手成功"),
+                18805: (TUNNEL_HOLLOW, "隧道在、后端无应答")},
+        services=[("mrrc-hub-routes.timer", "未安装", "not-found", "—", "—")],
+        cert_days="38", clublog="273047 条", clublog_path="/etc/mrrc-hub/callsigns.txt",
+        registry_first=18800, registry_last=18999)
+    r = vs.render("overview", ctx)
+    out = r.chrome + r.live
+    check("需要你处理" in out, "有待办清单")
+    check("BG8XYZ" in out, "待办里带呼号")
+    check("bg7zhs" in out and "后端无应答" in out, "待办里列出异常实例")
+    check("未安装" in out, "待办里列出没装的服务单元")
+    check("applied=" not in out, "不再把英文 slug 直接打给运维（P2）")
+    check("待你处理" in out, "首屏有「待你处理」指标")
+    check("data-live" in out and "hx-get" in out, "数据区接了自动刷新")
+
+
+def test_overview_says_so_when_there_is_nothing_to_do():
+    from portal import views as vs
+    ctx = _ctx("overview", entries=[("bg1sb", 18804)],
+               states={18804: (TUNNEL_SERVING, "握手成功")}, services=[],
+               cert_days="300", clublog="x", registry_first=18800, registry_last=18999)
+    out = vs.render("overview", ctx).live
+    check("没有待办" in out or "都在服务" in out, "无事可做时明说（而不是空白）")
+
+
+def test_applications_groups_and_defaults_to_pending():
+    """默认落在「待处理」并分组计数 —— 七种状态一锅端是改版前的 P3。"""
+    from portal import views as vs
+    apps = {
+        "BG8XYZ": {"callsign": "BG8XYZ", "status": "applied", "evidence": "命中呼号库",
+                   "product": "", "label": None, "port": None, "at": time.time(),
+                   "enroll_secret": None},
+        "BG3DEF": {"callsign": "BG3DEF", "status": "granted", "evidence": "人工",
+                   "product": "", "label": "bg3def", "port": 18808, "at": time.time(),
+                   "enroll_secret": "SECRET"},
+    }
+    # 默认只看「待处理」：所以要看「已授予」组得显式切过去 —— 这正是默认值的意义。
+    r = vs.render("applications", _ctx("applications", apps=apps))
+    out = r.chrome + r.live
+    check("待核验" in out, "默认落在「待核验」组")
+    check("已授予" in out and "18808" not in out, "默认不把已授予的条目混进来")
+    check('class="chip on"' in out, "默认选中一个筛选（不是「全部」）")
+    check("核验通过" in out, "待核验组有通过动作")
+
+    r_all = vs.render("applications", _ctx("applications", apps=apps, flt="all"))
+    out_all = r_all.chrome + r_all.live
+    check("待核验" in out_all and "已授予" in out_all, "切到全部时两组都在")
+    check("登记口令" in out_all, "已授予后给出登记口令")
+    check("撤销入口" in out_all, "已授予后可撤销")
+
+
+def test_destructive_page_forms_are_stage_one_only():
+    """撤销/拒绝在页面上必须只是"阶段一"：不带 confirm=yes。
+
+    真正的执行只能由服务端确认页上的表单发出 —— 那条路有 JS 时弹 dialog、
+    没 JS 时是一张普通页面，两条路走同一段代码，所以降级不会绕开确认。
+    """
+    from portal import views as vs
+    ctx = _ctx("applications", apps={
+        "BG2ABC": {"callsign": "BG2ABC", "status": "verified", "evidence": "x",
+                   "product": "", "label": None, "port": None, "at": time.time(),
+                   "enroll_secret": None},
+    })
+    out = vs.render("applications", ctx).chrome + vs.render("applications", ctx).live
+    check("/admin/reject" in out, "拒绝动作存在")
+    check("/admin/grant" in out, "分配入口动作存在")
+    for m in re.finditer(r"<form[^>]*method=post[^>]*>.*?</form>", out, re.S):
+        check("confirm" not in m.group(0), "页面上的表单不带 confirm 标记")
+
+
+def test_confirm_page_asks_for_a_reason():
+    from portal import views as vs
+    ctx = _ctx("applications")
+    out = vs.confirm_page("revoke", "bg1sb", ctx)
+    check('name="reason"' in out, "确认页要理由")
+    check('name="confirm" value="yes"' in out, "确认页带二次确认标记")
+    check('name="csrf" value="tok"' in out, "确认页带 csrf")
+    check("撤销" in out and "BG1SB" in out, "说清在撤销谁")
+
+
+def test_badges_report_what_needs_action():
+    from portal import views as vs
+    ctx = _ctx("overview", apps={
+        "BG8XYZ": {"callsign": "BG8XYZ", "status": "applied", "evidence": "", "product": "",
+                   "label": None, "port": None, "at": 0, "enroll_secret": None}},
+        entries=[("bg1sb", 18804), ("bg7zhs", 18805)],
+        states={18804: (TUNNEL_SERVING, ""), 18805: (TUNNEL_HOLLOW, "")},
+        services=[("frps", "active", "enabled", "—", "0")])
+    b = vs.badges(ctx)
+    check(b.get("applications") == 1, "申请待办数正确")
+    check(b.get("instances") == 1, "异常实例数正确")
+    check(b.get("system", 0) == 0, "没有系统问题时不出系统徽标")
 
 
 def main():

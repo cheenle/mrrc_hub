@@ -202,6 +202,27 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 
 用 `read` 循环而不是 `source`：env 文件含 `USB Audio Device` 这类带空格的值，`source` 会把它当命令执行。
 
+**2026-10-11 补正（实况，与上文"常驻服务"不符，后者指早期的 `com.mrrc.fleet-tunnel.<呼号>` 设计）**：
+现役桌面打包版（macOS `MRRC-Modern.app`）**没有独立的 frpc 常驻单元**，frpc 是**应用自己的子进程**：
+
+```
+MRRC-Modern-Launcher → MRRC-Modern-Server（--ssl-cert/--ssl-key 指向该实例的证书）
+                     → frpc -c ~/Library/Application Support/MRRC-Modern/fleet/frpc-<label>.toml
+```
+
+launchd 里只有一条 `application.net.vlsc.mrrc-modern.*`（即应用本身）。由此两条实况：
+
+1. **退出应用不一定回收隧道** —— 10-11 在 MacBook 上实测：AppleScript quit 只退了 Launcher，
+   `MRRC-Modern-Server` 与 `frpc` 成为孤儿（PPID=1）**继续占着远端端口**，须手动 kill
+   （是否同样见于菜单"退出"待复测）。它与 v1.25.4 修的"每启动一次漏一个 frpc"同类，
+   但出在**启动器→服务端**这一层。
+2. **证书重签后必须重启进程** —— TLS 上下文只在进程启动时构建一次，enroll/重签发生在其后，
+   进程会继续出示旧证书。实例侧动作：盒子 `systemctl restart mrrc-modern`；桌面版退出并重开应用。
+
+**源码运行另有两处实况**（10-11 bg1sb 实例）：frpc 只按 **`<repo>/fleet/frpc`** 查找，
+`~/Library/Application Support/MRRC-Modern/fleet/frpc` 在这条路径上**不被读取**；且 frpc 缺失时
+connect 返回 `tunnel_started: false` 而**页面不报错** —— 排查时先看进程与这一字段。
+
 ### 已知退化（有意接受，见 ch13）
 
 - **登录限流在隧道路径下退化为全局桶**：所有登录共享 `::ffff:127.0.0.1`（5 次失败 / 300 秒）。修法：边缘 `limit_req` 或实例信任 `X-Forwarded-For`（随下次发版）。用户已明确暂缓
@@ -217,6 +238,10 @@ nohup venv/bin/python server.py > /tmp/mrrc-src/server.log 2>&1 &
 | 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
 | 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
 | `curl -sI .../login` 得到 405 | **不是故障**。`-I` 发 HEAD，而登录页只接受 GET。用 `curl -s -o /dev/null -w '%{http_code}'` 拿状态码 |
+| **实例 502，且该端口上的代理名 ≠ 路由名**（端口被别的实例占着） | **先看 frps 代理表，再谈证书**：`curl -u <面板凭据> http://127.0.0.1:7100/api/proxy/tcp` 里 `remotePort` 对应的 `name` 是否为该呼号。**2026-10-11 实例**：bg7ifp 的 18803 被**已撤销 5 天**的 bg8aaa 占着（那台 MacBook 上的 `MRRC-Modern.app` 一直在跑），bg7ifp 每 ~33 s `port already used`、当日 885 次，入口 502 的真因是"hub 收到的是旧呼号证书"。根因是**设计缺口**：撤销不吊销 frpc token、frps 不校验名字与端口的归属、且所有实例共用同一 token（修法见 `docs/2026-10-11-instance-lifecycle-and-port-squatting.md` §5.1） |
+| **实例 502，隧道与代理名都正常** | **比对证书指纹**（决定性）：`echo \| openssl s_client -connect 127.0.0.1:<端口> 2>/dev/null \| openssl x509 -noout -subject -fingerprint -sha256` 对 `openssl x509 -in /etc/mrrc-hub/instance-certs/<呼号小写>.pem …`。不等 ⇒ 实例侧**进程没重启**（见上"实例侧运行"第 2 条），去那台机器重启 MRRC 服务/应用（ba4eg 10-11 一行为此） |
+| **实例 502，且 nginx 报 `peer closed connection in SSL handshake`** | 该实例**没开 TLS**（未配 `MRRC_SSL_CERT/KEY`）。hub 侧无法修，只能通知机主（2026-10-11：bg7kxr、bh7hcu 属此类） |
+| **审计/登记"少台数"或查不到某个呼号** | 读**活档** `/var/lib/mrrc-hub/portal/portal.json`；`/etc/mrrc-hub/portal/portal.json` 是 2026-10-02 起停笔的旧档（其中既无 bg8aaa 也无 bg7ifp）。"谁做的"看 audit 里的 `login_ok` + `user=… ip=…`（自动 `granted` 不带 actor） |
 
 ### 12.8.1 第二产品 `mrrc` 的接入现状（2026-09-30）
 

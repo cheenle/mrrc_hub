@@ -31,6 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -242,6 +243,15 @@ def test_enroll_requires_secret_and_matching_name():
             st, msg = post("/enroll", {"callsign": "BG6LH", "secret": secret, "cert": good})
             check(st == 200 and (cert_dir / "bg6lh.pem").exists(), "正确证书登记成功")
             check("gen_hub_routes" in msg, "返回下一步的 root 命令")
+            # 登记必须**留痕**：指纹是「换机」的唯一判据（同一呼号、一对新密钥），
+            # 而在此之前 /enroll 连一条审计都不写 —— 换机在 Portal 里完全不可见。
+            rec = stored(portal.store, "BG6LH")
+            check(len(rec.cert_fp) == 64, f"/enroll 记下证书指纹（得到 {rec.cert_fp[:12]!r}）")
+            check(rec.cert_enrolled_at > 0, "记下登记时刻")
+            check(rec.cert_source_ip == "127.0.0.1", f"记下来源 IP（得到 {rec.cert_source_ip!r}）")
+            check(any(e["event"] == "enroll" for e in portal.store.audit()),
+                  "登记写进审计（此前一条都没有）")
+            check("fingerprint" in msg and rec.cert_fp in msg, "响应里回的就是这张证书的指纹")
         finally:
             httpd.shutdown()
 
@@ -1084,8 +1094,10 @@ def test_pages_are_mobile_suitable():
 
 def _ctx(view="overview", **kw):
     from portal import views as vs
-    base = dict(root="", csrf="tok", user="ops", now=time.time(),
-                tunnel_text=TUNNEL_TEXT, tunnel_pill=TUNNEL_PILL)
+    # 标注 `dict[str, Any]`：`**kw` 解包让检查器把值推断成 str|float|dict，
+    # 而 Ctx 的每个字段类型都不同 —— 不标就会被报一串假错（运行时本来就没问题）。
+    base: dict[str, Any] = dict(root="", csrf="tok", user="ops", now=time.time(),
+                                tunnel_text=TUNNEL_TEXT, tunnel_pill=TUNNEL_PILL)
     base.update(kw)
     return vs.Ctx(view=view, **base)
 
@@ -1346,6 +1358,229 @@ def test_live_regions_are_fragments_and_carry_the_refresh_guard():
             httpd.shutdown()
 
 
+def test_store_records_certificate_rotation():
+    """换机 = 同一呼号、一对新密钥：store 侧必须留下「旧 → 新」那条记录（UC-H08）。
+
+    码的是**语义**而不是实现：同一张证书反复登记不算轮换（否则每次重连都变成一次
+    “换机”，审计里全是噪声），指纹变了才写 cert_rotated，并在 detail 里带上旧→新。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        st = Store(Path(td) / "portal.json")
+        st.apply("BG6LH")
+        st.mark_verified("BG6LH", "人工")
+        st.grant("BG6LH", "bg6lh", 18802)
+        st.record_cert("BG6LH", "a" * 64, source_ip="198.51.100.9")
+        first = stored(st, "BG6LH")
+        check(first.cert_fp == "a" * 64 and first.cert_source_ip == "198.51.100.9",
+              "第一次登记：指纹与来源 IP 都记下了")
+        n_before = len(st.audit())
+        st.record_cert("BG6LH", "a" * 64)                      # 同一张再登记（重连）
+        check(len(st.audit()) == n_before + 1, "同一张证书再登记：只写 enroll，不写轮换")
+        check(not any(e["event"] == "cert_rotated" for e in st.audit()), "没有轮换事件")
+        st.record_cert("BG6LH", "b" * 64)                      # 换了机
+        rotated = [e for e in st.audit() if e["event"] == "cert_rotated"]
+        check(len(rotated) == 1, "指纹变了 ⇒ 写一条 cert_rotated")
+        check("旧 " in rotated[0]["detail"] and "新 " in rotated[0]["detail"],
+              f"detail 里带旧→新（{rotated[0]['detail']}）")
+        check(stored(st, "BG6LH").cert_fp == "b" * 64, "store 里的指纹跟着更新")
+
+
+# ── 视图层：换机（UC-H08）在页面上必须看得见 ────────────────────────────────
+# 2026-10-16 的教训：列表说「在服务」，浏览器拿到 502 —— 因为「在服务」问的是“后面
+# 有没有活的应用”（探针走不校验的回环握手），而访客拿到的是 nginx 的应答（开着证书校验）。
+
+def _report(state=TUNNEL_SERVING, subject="CN=bg1sb.mrrc.vlsc.net", name_ok=True,
+            sha256="a" * 64, not_after="Dec 31 2026 GMT"):
+    """一份假探针报告（形状与 `app._probe` 的返回一致）。"""
+    return {"state": state, "detail": "200 OK", "status_line": "HTTP/1.0 200 OK",
+            "server": "uvicorn", "generation": "v1.27.0",
+            "cert": {"subject": subject, "issuer": subject, "not_after": not_after,
+                     "names": {subject}, "name_ok": name_ok, "sha256": sha256}}
+
+
+def test_instances_screen_stops_saying_ok_when_the_cert_name_differs():
+    """列表页必须把「入口开不了」算进异常，并给出下一步。"""
+    from portal import views as vs
+    ctx = _ctx("instances", entries=[("ba4eg", 18807), ("bg1sb", 18804)],
+               entries_full=[("ba4eg", 18807, ""), ("bg1sb", 18804, "")],
+               states={18807: (TUNNEL_SERVING, "200 OK"), 18804: (TUNNEL_SERVING, "200 OK")},
+               reports={"ba4eg": _report(subject="CN=localhost", name_ok=False),
+                        "bg1sb": _report()},
+               apps={"BA4EG": {"callsign": "BA4EG", "status": "granted", "label": "ba4eg",
+                               "port": 18807, "cert_fp": "b" * 64},
+                     "BG1SB": {"callsign": "BG1SB", "status": "granted", "label": "bg1sb",
+                               "port": 18804, "cert_fp": "a" * 64}})
+    r = vs.render("instances", ctx)
+    out = r.chrome + r.live
+    check("名字不符 ⇒ 502" in out, "列表页直接点出「名字不符 ⇒ 502」")
+    check("1 个入口开不了" in out, "异常计数按**入口**算（换机那种 502 会进来）")
+    check("MRRC_SSL_CERT" in out, "并给出下一步（查实例的 MRRC_SSL_CERT）")
+    check("名字相符" in out, "名字对的那台仍然说相符")
+
+    ctx_ok = _ctx("instances", entries=[("bg1sb", 18804)],
+                  entries_full=[("bg1sb", 18804, "")],
+                  states={18804: (TUNNEL_SERVING, "200 OK")},
+                  reports={"bg1sb": _report()},
+                  apps={"BG1SB": {"callsign": "BG1SB", "status": "granted", "label": "bg1sb",
+                                  "port": 18804, "cert_fp": "a" * 64}})
+    r_ok = vs.render("instances", ctx_ok)
+    out_ok = r_ok.chrome + r_ok.live
+    check("入口全部可开" in out_ok, "全部相符时说「入口全部可开」（否则哨兵就是常亮红灯）")
+
+
+def test_instance_count_never_contradicts_the_rows():
+    """表头计数与逐行结论必须**同源**：轻探与完整探是两轮，能背道而驰。
+
+    2026-10-16 部署后实测到过这个矛盾：表头「4 个在服务」，而 ba4eg 那行写着「服务中」
+    （轻探那轮它正好在重连）。页面自相矛盾比少报一个数更坏 —— 运维会开始不信它。
+    """
+    from portal import views as vs
+    ctx = _ctx("instances", entries=[("ba4eg", 18807), ("bg1sb", 18804)],
+               entries_full=[("ba4eg", 18807, ""), ("bg1sb", 18804, "")],
+               # 轻探那轮说两台都没起来；完整探那轮两台都在（且有报告）
+               states={18807: (TUNNEL_DOWN, "连不上"), 18804: (TUNNEL_DOWN, "连不上")},
+               reports={"ba4eg": _report(subject="CN=ba4eg.mrrc.vlsc.net"),
+                        "bg1sb": _report()},
+               apps={"BA4EG": {"callsign": "BA4EG", "status": "granted", "label": "ba4eg",
+                               "port": 18807, "cert_fp": ""},
+                     "BG1SB": {"callsign": "BG1SB", "status": "granted", "label": "bg1sb",
+                               "port": 18804, "cert_fp": ""}})
+    out = vs.render("instances", ctx)
+    html = out.chrome + out.live
+    check("2 个在服务" in html,
+          "有 reports 时计数以它为准（否则与行矛盾）："
+          + repr(html[html.find("个已登记"):][:44]))
+    check("0 个入口开不了" not in html, "不把两轮探测的差异算成入口故障")
+
+
+def test_instances_screen_shows_the_hub_side_pending_step():
+    """登记与「nginx 真的信任它」之间隔着两步手工操作：重跑生成器 + reload。"""
+    from portal import views as vs
+    ctx = _ctx("instances", entries=[("bg1sb", 18804)], entries_full=[("bg1sb", 18804, "")],
+               states={18804: (TUNNEL_SERVING, "200 OK")}, reports={"bg1sb": _report()},
+               trust={"missing": ["bg2bb"], "stale_reload": True,
+                      "newest_write": {"what": "实例证书 bg2bb.pem", "at": time.time()},
+                      "reload_at": time.time() - 600, "bundle_readable": True,
+                      "command": "sudo /usr/local/sbin/gen_hub_routes.py && sudo nginx -t "
+                                 "&& sudo systemctl reload nginx"})
+    r = vs.render("instances", ctx)
+    out = r.chrome + r.live
+    check("hub 侧还差一步" in out, "有漂移时页面顶部给一条待办")
+    check("gen_hub_routes" in out and "reload nginx" in out, "待办里带兜底命令")
+    check("mrrc-hub-routes.timer" in out and "systemctl status" in out,
+          "先指向定时器（它才是常规路径），命令只是兜底")
+    check("bg2bb" in out, "点名是哪个实例的证书没进信任包")
+
+    ctx_fine = _ctx("instances", entries=[("bg1sb", 18804)],
+                    entries_full=[("bg1sb", 18804, "")],
+                    states={18804: (TUNNEL_SERVING, "200 OK")}, reports={"bg1sb": _report()},
+                    trust={"missing": [], "stale_reload": False, "reload_at": time.time(),
+                           "bundle_readable": True, "command": "sudo ..."})
+    r_fine = vs.render("instances", ctx_fine)
+    check("hub 侧还差一步" not in r_fine.chrome + r_fine.live, "没事时不显示这条待办")
+
+
+def test_instance_detail_shows_certificate_identity():
+    """详情页一次说完四件事：登记的是哪张 / 实到的是哪张 / 信任包有没有 / nginx 加载没。
+
+    2026-10-16 那次排查花了半小时，正因为这四条事实散在四个地方（证书主体、hub 上的
+    instance-certs/、trust-bundle.pem、nginx worker 的启动时间）。
+    """
+    from portal import views as vs
+    enrolled, served = "b" * 64, "c" * 64
+    ctx = _ctx("instance", flt_label="ba4eg", entries=[("ba4eg", 18807)],
+               entries_full=[("ba4eg", 18807, "")],
+               states={18807: (TUNNEL_SERVING, "200 OK")},
+               reports={"ba4eg": _report(subject="CN=ba4eg.mrrc.vlsc.net", sha256=served)},
+               apps={"BA4EG": {"callsign": "BA4EG", "status": "granted", "label": "ba4eg",
+                               "port": 18807, "cert_fp": enrolled,
+                               "cert_enrolled_at": time.time() - 120,
+                               "cert_source_ip": "203.0.113.7"}},
+               trust={"missing": [], "retired": [], "no_cert": [], "stale_reload": False,
+                      "reload_at": time.time() - 300, "bundle_readable": True,
+                      "newest_write": {}, "command": "sudo /usr/local/sbin/gen_hub_routes.py"})
+    out = vs.render("instance", ctx).chrome
+    check("证书登记" in out and enrolled[:16] in out, "印出登记的指纹")
+    check("203.0.113.7" in out, "印出登记的来源 IP（换机取证要看它）")
+    check("不一致 ⇒ 换了机/重签后服务没重启" in out, "登记与实到不一致时给出结论")
+    check("在（生成器已并入）" in out, "说清信任包里有它")
+    check("已加载" in out, "说清 nginx 已加载这一版")
+    check("mrrc-hub-routes.timer" in out,
+          "说清这一步**本该自动**（timer）—— 不能叫运维去做一件已自动化的事")
+
+
+def test_backfill_seeds_history_without_pretending_it_is_an_enrollment():
+    """回填的语义：把**已有的历史事实**（证书文件里的指纹）补进库，而**不**伪装成一次登记。
+
+    三条都不许破：① 不写审计（审计只记真发生过的事）；② 不覆盖已有指纹；③ 补不回的东西
+    （登记时刻、来源 IP）留在空值，页面写明「历史回填」而不是编一个时间。
+    本用例不需要 openssl：指纹是 DER 的 SHA-256，而 PEM 的身体就是 DER 的 base64（纯标准库）。
+    """
+    import base64 as _b64
+
+    from portal import registry as _reg
+    from portal import trust as trust_mod
+    import portal.app as pa
+
+    def pem(tag):
+        der = (tag.encode() + b"\x30" * 20) * 3
+        body = _b64.encodebytes(der).decode().strip()
+        return f"-----BEGIN CERTIFICATE-----\n{body}\n-----END CERTIFICATE-----\n"
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        cert_dir = tmp / "instance-certs"
+        cert_dir.mkdir()
+        (cert_dir / "bg1aa.pem").write_text(pem("aa"), encoding="utf-8")
+        (tmp / "instances.tsv").write_text("bg1aa 18801\nbg2bb 18802\n", encoding="utf-8")
+        st = Store(tmp / "portal.json")
+        for cs_, label in (("BG1AA", "bg1aa"), ("BG2BB", "bg2bb")):
+            st.apply(cs_)
+            st.mark_verified(cs_, "人工")
+            st.grant(cs_, label, 18801 if label == "bg1aa" else 18802)
+        registry = _reg.Registry(tmp / "instances.tsv")
+        audit_before = len(st.audit())
+
+        rows = pa.backfill_cert_fingerprints(st, registry, cert_dir)
+        by_label = {r["label"]: r for r in rows}
+        want = trust_mod.fingerprint_of_pem(pem("aa"))
+        check(by_label["bg1aa"]["ok"] and by_label["bg1aa"]["fp"] == want,
+              f"有证书文件的实例指纹入账（得到 {by_label['bg1aa']}）")
+        check(not by_label["bg2bb"]["ok"] and "没有证书文件" in by_label["bg2bb"]["why"],
+              "没有证书文件的实例如实说没有，不编指纹")
+        seeded = stored(st, "BG1AA")
+        check(seeded.cert_fp == want, "store 里落下了指纹")
+        check(seeded.cert_enrolled_at == 0 and seeded.cert_source_ip == "",
+              "登记时刻与来源 IP 补不回来 ⇒ 留空（不编时间）")
+        check(len(st.audit()) == audit_before, "**不写审计**：回填不是一次登记事件")
+
+        # ② 不覆盖：真实登记过的指纹优先于文件快照
+        st.record_cert("BG1AA", "c" * 64, source_ip="203.0.113.9")
+        pa.backfill_cert_fingerprints(st, registry, cert_dir)
+        check(stored(st, "BG1AA").cert_fp == "c" * 64, "回填绝不覆盖已有指纹")
+        check(stored(st, "BG1AA").cert_source_ip == "203.0.113.9", "也不碰其它字段")
+
+        # ③ dry_run 不落盘
+        st2 = Store(tmp / "portal2.json")
+        st2.apply("BG1AA"); st2.mark_verified("BG1AA", "人工"); st2.grant("BG1AA", "bg1aa", 18801)
+        pa.backfill_cert_fingerprints(st2, registry, cert_dir, dry_run=True)
+        check(stored(st2, "BG1AA").cert_fp == "", "dry_run 只算不写")
+
+        # ④ 页面：有指纹、没登记时刻 ⇒ 必须写明是回填
+        from portal import views as vs
+        ctx = _ctx("instance", flt_label="bg1aa", entries=[("bg1aa", 18801)],
+                   entries_full=[("bg1aa", 18801, "")],
+                   states={18801: (TUNNEL_SERVING, "200 OK")},
+                   reports={"bg1aa": _report(subject="CN=bg1aa.mrrc.vlsc.net", sha256=want)},
+                   apps={"BG1AA": {"callsign": "BG1AA", "status": "granted", "label": "bg1aa",
+                                   "port": 18801, "cert_fp": want, "cert_enrolled_at": 0,
+                                   "cert_source_ip": ""}})
+        out = vs.render("instance", ctx).chrome
+        check("历史回填" in out, "页面写明是历史回填，而不是编一个登记时间")
+        check("一致" in out and "不一致" not in out.split("登记 ↔ 实到")[1][:80],
+              "回填之后指纹能立刻与实到比对（本用例两者相同）")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:
@@ -1355,7 +1590,7 @@ def main():
         for f in FAILS:
             print("   -", f)
         return 1
-    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门/隧道探测/注册表三列/证书事实/采集器降级/窄屏可用性")
+    print(f"✅ Portal 测试通过（{len(tests)} 组）：规范化/查重/核验前置/分配/撤销/审计/HTTP 令牌门/隧道探测/注册表三列/证书事实/采集器降级/窄屏可用性/证书登记留痕与轮换/入口判据（在服务 ≠ 入口可开）/hub 侧待重载待办")
     return 0
 
 

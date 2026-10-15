@@ -31,6 +31,9 @@ class Ctx:
     entries_full: list = field(default_factory=list)   # [(label, port, tlsname)]
     states: dict = field(default_factory=dict)         # {port: (state, detail)}
     reports: dict = field(default_factory=dict)        # {label: report}
+    #: hub 侧信任链的事实（登记证书在不在信任包、nginx 有没有重载新的一份）。
+    #: 采集在 app.py 的 `_trust_report()`，判据在 portal/trust.py（两边都是只读、不提权）。
+    trust: dict = field(default_factory=dict)
     # 系统
     resources: dict = field(default_factory=dict)
     services: list = field(default_factory=list)
@@ -228,10 +231,104 @@ def _level(ctx: Ctx, state: str) -> str:
     return {"ok": "", "warn": "warn", "bad": "bad"}.get(ctx.tunnel_pill.get(state, ""), "")
 
 
+#: 「入口能不能开」的判据。为什么不能只问 `_is_serving`：那一档回答的是「后面有没有活的
+#: 应用」——探针走的是**不校验**的回环握手（`app._probe` 的 `verify_mode=CERT_NONE`，那是有意的：
+#: 校验是 nginx 的事）。而访客拿到的是 **nginx** 的应答，那边还开着 `proxy_ssl_verify` +
+#: `proxy_ssl_name`（AD-H11 的一机一证）。两者在「实例在服务、但证书签给了别的名字」时给出
+#: 相反结论：探针说在服务，访客拿到 502（2026-10-16 换机实测：列表说“在服务”，入口 502）。
+ENTRY_OK, ENTRY_BAD, ENTRY_WARN, ENTRY_MUTE = "ok", "bad", "warn", "mute"
+
+#: 判据档位 → 表格里那几个字（颜色只是辅助，文字必须在）。
+ENTRY_CN = {ENTRY_OK: "可开", ENTRY_BAD: "开不了", ENTRY_WARN: "证书待生效"}
+
+
+def _apps_by_label(ctx: Ctx) -> dict:
+    """{label: 申请记录} —— 实例页按**标签**看世界（注册表里只有标签，store 按呼号存取）。"""
+    out = {}
+    for rec in (ctx.apps or {}).values():
+        label = str((rec or {}).get("label") or "").lower()
+        if label:
+            out[label] = rec
+    return out
+
+
+def _entry_verdict(ctx: Ctx, label: str, rep: dict, app: dict | None) -> tuple[str, str, str]:
+    """(档位, 表格里的短词, 下一步) —— 入口可用性，以及**该去修哪里**。
+
+    每一档都要能把运维推到修法上，而不是只报一个红色：
+      * 名字不符 ⇒ 实例在跑的证书不是入口名（查 `MRRC_SSL_CERT`、重启实例服务）
+      * 与登记的不一致 ⇒ 换机/重签后服务没重启（登记的是新证书，服务还在发旧的）
+      * 实例离线 ⇒ 隧道或后端不在，先看「隧道」那一列
+    """
+    cert = (rep or {}).get("cert") or {}
+    name_ok = cert.get("name_ok")
+    serving = _is_serving(ctx, (rep or {}).get("state", ""))
+    subject = str(cert.get("subject") or "—")
+    if name_ok is not None and not name_ok:
+        return (ENTRY_BAD, "名字不符 ⇒ 502",
+                f"证书名字不符：nginx 按 <code>{ui.esc(label)}.mrrc.vlsc.net</code> 校验，"
+                f"实例给的是 <code>{ui.esc(subject)}</code> —— 查实例的 "
+                f"<code>MRRC_SSL_CERT</code>，改完重启实例的 MRRC 服务")
+    if not serving:
+        return (ENTRY_BAD, "实例离线", "实例没在服务（隧道断或后端空）—— 入口自然也开不了")
+    enrolled_fp = str((app or {}).get("cert_fp") or "")
+    served_fp = str(cert.get("sha256") or "")
+    if enrolled_fp and served_fp and enrolled_fp != served_fp:
+        return (ENTRY_WARN, "与登记的不一致",
+                f"实例在跑的证书**不是**它登记的那张（登记 {ui.esc(enrolled_fp[:16])}… / "
+                f"实到 {ui.esc(served_fp[:16])}…）：换机或重签之后，实例的服务没重启，"
+                f"而 nginx 信的是新证书")
+    if name_ok:
+        return (ENTRY_OK, "名字相符", "证书名字相符，入口的这一跳是过的")
+    return (ENTRY_MUTE, "拿不到证书", "TLS 握手没成，拿不到上游证书（隧道不在或后端空）")
+
+
+def _entry_level(verdict_level: str) -> str:
+    """判据档位 → 卡片/表格的视觉级别（''|warn|bad）。"""
+    return {ENTRY_OK: "", ENTRY_BAD: "bad", ENTRY_WARN: "warn"}.get(verdict_level, "")
+
+
+def _trust_lines(ctx: Ctx) -> list:
+    """hub 侧信任链的**待办**（空列表 = 没事）。判据见 `portal/trust.py`。
+
+    措辞要点：重生成 + reload **自 V0.17 起是自动的**（`mrrc-hub-routes.timer` 每 30 秒，
+    内容哈希变了且 `nginx -t` 通过才 reload）。所以这些行报出来时，第一句应该是
+    “定时器没生效”，而不是叫运维去手跑命令 —— 后者只是兜底。
+    """
+    t = ctx.trust or {}
+    if not t:
+        return []
+    out = []
+    missing = t.get("missing") or []
+    if missing:
+        out.append(f"信任包落后于登记：<b>{len(missing)}</b> 个实例的证书不在里面"
+                   f"（{ui.esc('、'.join(missing[:4]))}" + ("…" if len(missing) > 4 else "") + "）")
+    if t.get("stale_reload"):
+        w = t.get("newest_write") or {}
+        when = (time.strftime("%m-%d %H:%M", time.localtime(w["at"])) if w.get("at") else "？")
+        waited = _int_or_none(t.get("stale_seconds")) or 0
+        out.append(f"生成器写下的东西 nginx **还没加载**（最近写入："
+                   f"{ui.esc(str(w.get('what') or '—'))}，{when}，**已等 {waited} 秒**）")
+    if not t.get("bundle_readable", True):
+        out.append("读不到信任包文件（路径不对或权限不足）—— 上面两条判据因此不可信")
+    if out:
+        timer = str(t.get("timer") or "mrrc-hub-routes.timer")
+        out.append(f"这两步本该由 <code>{ui.esc(timer)}</code>（每 30 秒）自动完成 —— 先看 "
+                   f"<code>{ui.esc(str(t.get('timer_status') or 'systemctl status ' + timer))}</code>"
+                   f"（常见原因：定时器停了，或 <code>nginx -t</code> 不过而它不敢 reload）。")
+    return out
+
+
 def _ago_text(now: float, then) -> str:
+    then = _num_or_none(then)
     if not then:
         return "时间未知"
-    d = max(0, int(now - then))
+    try:
+        d = max(0, int(now - then))
+    except (TypeError, ValueError, OverflowError):
+        # `then` 已被 `_num_or_none` 过滤过，剩下的只有 inf/nan 这种"能 parse 但不是时间"的
+        # 值（存储可以被手工改），以及调用方传错 now —— 两种都按"读不懂"处理。
+        return "时间未知"
     if d < 60:
         return "刚刚"
     if d < 3600:
@@ -246,6 +343,25 @@ def _int_or_none(value):
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _num_or_none(value):
+    """float 版的 `_int_or_none`。
+
+    为什么需要它：时间戳在存储里是带小数的浮点（`time.time()`），而且那份 JSON **可以被
+    手工改** —— 一个 `"12:30"` 就能让 `int()` 抛 ValueError，把整个页面变成 500。
+    读不懂就是读不懂，页面说"时间未知"，而不是拿猜的数充数。
+    """
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _event_cn(event) -> str:
+    """审计事件 slug → 中文名；未知的显示原样（总比一片空白强），空值给个破折号。"""
+    slug = str(event or "")
+    return ACTION_CN.get(slug) or slug or "—"
 
 
 def _todo_items(ctx: Ctx) -> list[tuple[str, str, str, str]]:
@@ -457,6 +573,8 @@ def _days_text(not_after: str) -> str:
 @register("instances", "MRRC Portal — 实例")
 def view_instances(ctx: Ctx) -> Rendered:
     rows, cards = [], []
+    apps_by_label = _apps_by_label(ctx)
+    verdicts = {}
     for label, port in sorted(ctx.entries):
         rep = ctx.reports.get(label, {})
         state = rep.get("state") or ctx.states.get(port, ("", ""))[0]
@@ -464,6 +582,13 @@ def view_instances(ctx: Ctx) -> Rendered:
         serving = _is_serving(ctx, state)
         state_pill = ui.pill(ctx.tunnel_pill.get(state, "mute"),
                              ctx.tunnel_text.get(state, state or "未探测"))
+        # 「入口」与「隧道」是**两件事**：前者要把 nginx 那一跳的证书校验也算进去。
+        # 只看隧道，就会出现 2026-10-16 那种“列表说在服务、浏览器 502”。
+        entry, entry_word, entry_note = _entry_verdict(ctx, label, rep, apps_by_label.get(label))
+        verdicts[label] = (entry, entry_word, entry_note)
+        entry_cell = ui.pill(entry, entry_word)
+        if entry in (ENTRY_BAD, ENTRY_WARN):
+            entry_cell += f'<div class="hint {"bad" if entry == ENTRY_BAD else ""}">{entry_note}</div>'
         days = _days_text((rep.get("cert") or {}).get("not_after", ""))
         detail_link = (f'<a class="chip" href="{ctx.root}/admin?view=instance&amp;label='
                        f'{ui.esc(label)}">详情</a>')
@@ -473,6 +598,7 @@ def view_instances(ctx: Ctx) -> Rendered:
             ("标签", f"<code>{ui.esc(label)}</code>"),
             ("端口", f'<span class="mono">{port}</span>'),
             ("隧道", state_pill),
+            ("入口", entry_cell),
             ("证书", f'<span class="mono">{ui.esc(days)}</span>' if days
              else '<span class="hint">—</span>'),
             ("应用", f'<span class="mono">{ui.esc(rep.get("generation") or "—")}</span>'),
@@ -480,25 +606,43 @@ def view_instances(ctx: Ctx) -> Rendered:
         ])
         # 卡片的第二行直接给下一步 —— "后端无应答"后面必须跟一句该怎么办，
         # 否则运维还得自己回忆 2026-10-03 那次事故的排查顺序。
+        # 入口的毛病优先说：它是**访客实际遇到的那个** 502，而隧道的毛病只在它之后。
         hint = ""
-        if detail and not serving:
+        if entry in (ENTRY_BAD, ENTRY_WARN):
+            hint = f'<div class="hint {"bad" if entry == ENTRY_BAD else ""}">{entry_note}</div>'
+        elif detail and not serving:
             hint = ('<div class="hint bad">隧道在、但实例应用没起 —— 请查实例机：应用是否在跑、'
                     '<code>localPort</code> 是否等于 <code>MRRC_WEB_PORT</code>、'
                     '<code>MRRC_WEB_HOST</code> 是否被改成了局域网 IP</div>')
         cards.append(ui.card(
-            head=f'<b><code>{ui.esc(label)}</code></b>{state_pill}',
+            head=f'<b><code>{ui.esc(label)}</code></b>{state_pill}'
+                 + ("" if entry == ENTRY_OK else ui.pill(entry, entry_word)),
             meta=(f'<span class="mono">{port}</span>'
                   f'<span>证书 {ui.esc(days) or "—"}</span>'
                   f'<span class="mono">{ui.esc(rep.get("generation") or "—")}</span>'),
             body=hint + f'<div class="tools" style="margin:9px 0 0">{detail_link}{entry_link}</div>',
-            level=_level(ctx, state)))
+            level=_entry_level(entry) or _level(ctx, state)))
 
-    serving_n = sum(1 for _l, p in ctx.entries
-                    if _is_serving(ctx, ctx.states.get(p, ("", ""))[0]))
-    abnormal = len(ctx.entries) - serving_n
+    def _serving_of(label: str, port) -> bool:
+        """「在服务」必须与**表格里那一行**同源。
+
+        `ctx.states`（轻探）与 `ctx.reports`（完整探）是**两轮**并发探测，中间隔着几秒 ——
+        一个正在重连的实例会让两者给出不同结果，于是表头与行自相矛盾
+        （2026-10-16 部署后实测：表头说「4 个在服务」，而 ba4eg 那行写着「服务中」）。
+        有 reports 就以它为准（行也是拿它渲染的）。
+        """
+        rep = ctx.reports.get(label)
+        if rep:
+            return _is_serving(ctx, rep.get("state", ""))
+        return _is_serving(ctx, ctx.states.get(port, ("", ""))[0])
+
+    serving_n = sum(1 for label, port in ctx.entries if _serving_of(label, port))
+    # 「异常」按**入口**算（隧道 + nginx 那一跳的证书校验）：只数隧道，换机后的 502
+    # 就不会进这个数字里 —— 而这一列存在的唯一理由就是让那种情况进来。
+    entry_bad = sum(1 for v in verdicts.values() if _entry_level(v[0]) in ("bad", "warn"))
     chrome = (_head(ctx, f"{len(ctx.entries)} 个已登记 · {serving_n} 个在服务 · "
-                         + (f'<b class="bad-tx">{abnormal} 个异常</b>' if abnormal
-                            else '<b class="ok-tx">没有异常</b>')
+                         + (f'<b class="bad-tx">{entry_bad} 个入口开不了</b>' if entry_bad
+                            else '<b class="ok-tx">入口全部可开</b>')
                          + f" · 探测每 {REFRESH_SECONDS.get('instances', 20)} 秒一轮")
               + ui.toolbar(
                   [("全部", f"{ctx.root}/admin?view=instances", True, len(ctx.entries))],
@@ -510,16 +654,29 @@ def view_instances(ctx: Ctx) -> Rendered:
         # 为什么不靠 CSS 把表格"捏"成卡片：卡片头部要把标签与状态徽章放在同一行，
         # 表格单元格做不到这件事而不引入空的定位格（那又会让"行格数=表头列数"的守卫失效）。
         body = ('<div class="only-desktop">'
-                + ui.grid_table(["标签", "端口", "隧道", "证书", "应用", "动作"], rows)
+                + ui.grid_table(["标签", "端口", "隧道", "入口", "证书", "应用", "动作"], rows)
                 + '</div><div class="only-mobile" data-mobile-cards>'
                 + "".join(cards) + '</div>')
     else:
         body = ui.empty("注册表为空 —— 还没有实例登记",
                         f'<a class="chip" href="{ctx.root}/admin?view=applications">去看申请</a>')
+    # hub 侧那两步（重生成 + reload）没生效时，**新的登记证书不会被信任**：入口照样 502，
+    # 而实例自己什么都做对不了。所以把它放到页面最上面 —— 但先说“本该自动”（timer），
+    # 手跑命令只是兜底：叫运维去做一件已经自动化的事，就是把文档写成戏法。
+    trust_lines = _trust_lines(ctx)
+    if trust_lines:
+        body = ui.banner(
+            "warn",
+            "hub 侧还差一步（本该自动完成）：<br>" + "<br>".join(trust_lines)
+            + f'<div class="hint">兜底命令（确认定时器真停了再用）：'
+              f'<code>{ui.esc(str((ctx.trust or {}).get("command") or ""))}</code></div>') + body
     body += ui.banner(
         "info",
         "「服务中」= 从 hub 回环向该端口完成 <b>TLS 握手</b>并拿到 HTTP 应答（任何状态码都算）。"
-        "仅仅「端口可连」<b>不算</b> —— frps 在本机接受连接，隧道在、后端空的时候照样连得上。")
+        "仅仅「端口可连」<b>不算</b> —— frps 在本机接受连接，隧道在、后端空的时候照样连得上。"
+        "<br>「入口」比它多一跳：访客拿到的是 <b>nginx</b> 的应答，而那边开着证书校验"
+        "（<code>proxy_ssl_verify</code> + <code>proxy_ssl_name</code>，AD-H11 一机一证）——"
+        "所以实例换机/重签后证书对不上时，它会「在服务」而入口 502。")
     return Rendered(title="MRRC Portal — 实例", chrome=chrome,
                     live=live_region("instances", ctx, body))
 
@@ -544,11 +701,67 @@ def view_instance(ctx: Ctx, label: str = "") -> Rendered:
         issuer = cert.get("issuer")
     state_pill = ui.pill(ctx.tunnel_pill.get(state, "mute"),
                          ctx.tunnel_text.get(state, state or "未探测"))
+    # ── 证书身份与 hub 侧收口 ────────────────────────────────────────
+    # 这一段是给"换机之后 502"准备的：**登记的是哪张 / 实例实际给的是哪张 / 信任包里
+    # 有没有它 / nginx 加载了没有** —— 四件事一次说完。2026-10-16 那次排查花了半小时，
+    # 正是因为这四条事实散在四个地方（详情页的证书主体、hub 上的 instance-certs/、
+    # trust-bundle.pem、nginx worker 的启动时间），而漏任何一条都看不出病在哪。
+    app = _apps_by_label(ctx).get(label.lower()) or {}
+    t = ctx.trust or {}
+    enrolled_fp = str(app.get("cert_fp") or "")
+    served_fp = str(cert.get("sha256") or "")
+    entry_lv, entry_word, entry_note = _entry_verdict(ctx, label, rep, app)
+    if not enrolled_fp:
+        enrolled_cell = '<span class="hint">从未登记（注册表里只是预留）</span>'
+    else:
+        when = (_ago_text(ctx.now, app.get("cert_enrolled_at"))
+                if app.get("cert_enrolled_at") else "时间未知")
+        src = (f' · 来自 <code>{ui.esc(str(app.get("cert_source_ip") or "—"))}</code>'
+               if app.get("cert_source_ip") else "")
+        # 有指纹、没登记时刻 = 这是从证书文件**回填**的历史记录。说清楚，
+        # 否则运维会把"时间未知"当成页面坏了。
+        hist = "" if app.get("cert_enrolled_at") else '<span class="hint">（历史回填）</span>'
+        enrolled_cell = (f'<code>{ui.esc(enrolled_fp[:16])}…</code> · {ui.esc(when)}{src}{hist}')
+    if not enrolled_fp or not served_fp:
+        match_cell = '<span class="hint">一端拿不到指纹，无法比对</span>'
+    elif enrolled_fp == served_fp:
+        match_cell = ui.pill("ok", "一致（实例在跑的就是登记的那张）")
+    else:
+        match_cell = ui.pill("bad", "不一致 ⇒ 换了机/重签后服务没重启")
+    missing = [m.lower() for m in (t.get("missing") or [])]
+    retired = [m.lower() for m in (t.get("retired") or [])]
+    no_cert = [m.lower() for m in (t.get("no_cert") or [])]
+    if label.lower() in no_cert:
+        bundle_cell = '<span class="hint">没有证书可并入（从未登记）</span>'
+    elif label.lower() in missing:
+        bundle_cell = ui.pill("bad", "不在 ⇒ 重跑生成器")
+    elif label.lower() in retired:
+        bundle_cell = ui.pill("mute", "未并入（不在注册表里）")
+    elif not t:
+        bundle_cell = '<span class="hint">拿不到（无法判断）</span>'
+    else:
+        bundle_cell = ui.pill("ok", "在（生成器已并入）")
+    if not t:
+        reload_cell = '<span class="hint">拿不到（无法判断）</span>'
+    elif t.get("stale_reload"):
+        w = t.get("newest_write") or {}
+        waited = _int_or_none(t.get("stale_seconds")) or 0
+        reload_cell = (ui.pill("bad", f"落后 {waited} 秒")
+                       + f'<div class="hint">最近写入：'
+                         f'{ui.esc(str(w.get("what") or "—"))}；'
+                         f'定时器没生效？查 <code>'
+                         f'{ui.esc(str(t.get("timer_status") or "systemctl status mrrc-hub-routes.timer"))}'
+                         f'</code></div>')
+    elif t.get("reload_at"):
+        reload_cell = ui.pill(
+            "ok", "已加载（" + time.strftime("%m-%d %H:%M", time.localtime(t["reload_at"])) + "）")
+    else:
+        reload_cell = '<span class="hint">无法判断（读不到 nginx worker）</span>'
     own_audit = [e for e in ctx.audit if (e.get("callsign") or "").upper() == label.upper()][:10]
     audit_html = ui.grid_table(
         ["时间", "事件", "操作者", "细节"],
         [[("时间", time.strftime("%Y-%m-%d %H:%M", time.localtime(e["at"]))),
-          ("事件", ui.esc(ACTION_CN.get(e["event"], e["event"]))),
+          ("事件", ui.esc(_event_cn(e["event"]))),
           ("操作者", f'<code>{ui.esc(e.get("actor") or "—")}</code>'),
           ("细节", ui.esc((e.get("detail") or "")[:90]))] for e in own_audit],
         stack=True) if own_audit else ui.empty("这个实例还没有审计记录")
@@ -567,6 +780,20 @@ def view_instance(ctx: Ctx, label: str = "") -> Rendered:
                   ("应用状态行", f'<code>{ui.esc(rep.get("status_line") or "—")}</code>'),
                   ("Server", ui.esc(rep.get("server") or "—")),
                   ("构建代号", f'<b>{ui.esc(rep.get("generation") or "—")}</b>'),
+              ])
+              + '<h2>证书身份与 hub 侧收口</h2>'
+              + f'<div class="hint">{entry_note}</div>'
+              + ui.kv([
+                  ("入口判据", ui.pill(entry_lv, entry_word)),
+                  ("证书登记", enrolled_cell),
+                  ("登记 ↔ 实到", match_cell),
+                  ("信任包", bundle_cell),
+                  ("nginx 重载", reload_cell),
+                  ("自动收口", f'<code>{ui.esc(str(t.get("timer") or "mrrc-hub-routes.timer"))}</code>'
+                              f'（每 30 秒：内容变了且 <code>nginx -t</code> 通过才 reload）'),
+                  ("兜底命令", f'<code>{ui.esc(str(t.get("command") or "") or "—")}</code>'
+                              + (ui.copy_button(str(t.get("command") or ""), "复制")
+                                 if t.get("command") else "")),
               ])
               + '<h2>入口</h2>'
               + f'<div class="tools"><a class="chip" href="https://{ui.esc(label)}.mrrc.vlsc.net/" '
@@ -610,7 +837,7 @@ def _help_card(ctx: Ctx, label: str) -> str:
         ("状态", mark),
         ("端口", f'<span class="mono">{record.get("port")}</span>'),
         ("客户口令", "客户自己持有 —— 门户不存、不显示、不转发"),
-        ("已连接", f'{int(record.get("connections") or 0)} 次'),
+        ("已连接", f'{_int_or_none(record.get("connections")) or 0} 次'),
     ]
     if state != "closed":
         rows.insert(2, ("到期", _ago_text(time.time(), (record.get("expires_at") or 0))))
@@ -847,7 +1074,7 @@ def view_system(ctx: Ctx) -> Rendered:
 #: 审计每页条数与筛选组。登录事件单独一组 —— "有没有异常登录"是运维最先问的问题。
 AUDIT_PAGE_SIZE = 50
 LOGIN_EVENTS = ("login_ok", "login_failed", "login_locked")
-ACTION_EVENTS = ("verify", "reject", "grant", "revoke", "enroll", "claim")
+ACTION_EVENTS = ("verify", "reject", "grant", "revoke", "enroll", "claim", "cert_rotated")
 AUDIT_FILTERS = (("all", "全部", None),
                  ("login", "登录事件", LOGIN_EVENTS),
                  ("action", "运维动作", ACTION_EVENTS))
@@ -855,6 +1082,7 @@ AUDIT_FILTERS = (("all", "全部", None),
 #: 事件 slug 的中文名。与 STATUS_CN 同理：英文 slug 不直接给运维看。
 ACTION_CN = {"apply": "提交申请", "verify": "核验通过", "reject": "拒绝", "grant": "分配入口",
              "revoke": "撤销入口", "enroll": "证书登记", "claim": "自助取回凭证",
+             "cert_rotated": "证书轮换（换机/重签）",
              "login_ok": "登录成功", "login_failed": "登录失败", "login_locked": "登录被锁"}
 
 
@@ -897,7 +1125,7 @@ def view_audit(ctx: Ctx) -> Rendered:
          else '<span class="hint">—</span>'),
         ("事件", ui.pill("bad" if e["event"] == "login_failed" else
                          "warn" if e["event"] == "login_locked" else "mute",
-                         ACTION_CN.get(e["event"], e["event"]))),
+                         _event_cn(e["event"]))),
         ("操作者", f'<code>{ui.esc(e.get("actor") or "—")}</code>'),
         ("细节", ui.esc((e.get("detail") or "")[:90])),
     ] for e in window]

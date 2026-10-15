@@ -66,6 +66,12 @@ class Application:
     label: str = ""
     port: int = 0
     enroll_secret: str = ""      # 一次性登记口令：实例凭它提交自签证书（见 app.py 的 /enroll）
+    # ---- 证书身份：换机（UC-H08「凭证生命周期可控（泄露或换机可止损）」）在 Portal 侧的唯一留痕 ----
+    #: 最近一次登记的证书指纹（DER SHA-256 全长的十六进制）。换机 = 同一个呼号一对新密钥，
+    #: 所以**指纹变了就是换机**；没有这个字段，这件事在 Portal 里是完全不可见的。
+    cert_fp: str = ""
+    cert_enrolled_at: float = 0.0
+    cert_source_ip: str = ""
     #: 申请方凭它查询自己这条申请的状态（应用在设置里申请后保存它；不进 URL，走 POST 体）。
     #: 它只够读**自己**这条申请，拿不到别人的，也改不了任何状态。
     request_token: str = ""
@@ -159,7 +165,14 @@ class Store:
         for callsign, raw in list(data["help"].items()):
             if raw.get("state") == HELP_CLOSED:
                 continue
-            last = float(raw.get("last_heartbeat") or raw.get("started_at") or 0)
+            last = raw.get("last_heartbeat") or raw.get("started_at") or 0
+            try:
+                last = float(last)
+            except (TypeError, ValueError):
+                # 存储被手工改坏（或旧格式）时**不判它过期**：这条记录是该端口的唯一占用者，
+                # 判早了就等于把这个端口发给下一个客户，而 frpc 那边还挂着它
+                # （2026-10-11 的端口互踩就是这么来的）。读不懂就留给人工看。
+                continue
             if now - last <= grace:
                 continue
             raw["state"] = HELP_CLOSED
@@ -230,6 +243,60 @@ class Store:
         return app
 
     # ---- 内部 ----
+    def record_cert(self, callsign: str, fingerprint: str, source_ip: str = "",
+                    actor: str = "") -> Application:
+        """记下一次证书登记（以及它是不是一次轮换）。
+
+        为什么要把指纹与审计写在**同一笔**里：换机是 UC-H08 里那个需要"可止损"的事件，
+        分开两次写就会出现"文件换了、审计没有"的窗口 —— 事后谁也说不清那次 502 是换机
+        还是别人动了手。指纹变了就写一条 `cert_rotated`（detail 里带旧→新），这才是
+        运维与取证要读的那条记录（此前的 `/enroll` 连 `enroll` 都不写）。
+        """
+        data = self._load()
+        current = data["applications"].get(callsign)
+        if not current:
+            raise KeyError(callsign)
+        app = Application(**current)
+        previous = app.cert_fp
+        app.cert_fp = fingerprint
+        app.cert_enrolled_at = time.time()
+        app.cert_source_ip = source_ip[:45]
+        app.updated_at = app.cert_enrolled_at
+        data["applications"][callsign] = asdict(app)
+        self._audit(data, callsign, "enroll",
+                    f"fp={fingerprint[:16] or '?'}" + (f" ip={source_ip[:45]}" if source_ip else ""),
+                    actor=actor)
+        if previous and previous != fingerprint:
+            self._audit(data, callsign, "cert_rotated",
+                        f"旧 {previous[:16]} → 新 {fingerprint[:16]}（换机/重签）", actor=actor)
+        self._save(data)
+        return app
+
+    def seed_cert_fingerprint(self, callsign: str, fingerprint: str) -> Application:
+        """回填**历史**指纹（不写审计，也绝不覆盖已有值）。
+
+        背景：`cert_fp` 是 2026-10-16 才引入的字段，在那之前 `/enroll` 什么都不记。
+        但证书文件本来就在 hub 上（`instance-certs/<标签>.pem`），而它的 DER SHA-256
+        与实例实到证书的指纹是同一个口径 —— 所以指纹可以**如实**补回来；
+        "何时登记、来自哪台机器"补不回来，因此 `cert_enrolled_at` 留在 0、来源 IP 留空，
+        页面会写明是回填（见 views 里那句「历史回填」）。
+
+        与 `record_cert` 的分工是刻意的：那个记的是"刚刚发生了一次登记"（要审计）；
+        这里只把一条**已经存在的历史事实**写进库 —— 审计只记真发生过的事。
+        """
+        data = self._load()
+        current = data["applications"].get(callsign)
+        if not current:
+            raise KeyError(callsign)
+        app = Application(**current)
+        if app.cert_fp:
+            return app
+        app.cert_fp = fingerprint
+        app.updated_at = time.time()
+        data["applications"][callsign] = asdict(app)
+        self._save(data)
+        return app
+
     def _transition(self, callsign: str, new_status: str, detail: str, allowed: set,
                     actor: str = "") -> Application:
         data = self._load()

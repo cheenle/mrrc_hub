@@ -218,6 +218,10 @@ launchd 里只有一条 `application.net.vlsc.mrrc-modern.*`（即应用本身�
    但出在**启动器→服务端**这一层。
 2. **证书重签后必须重启进程** —— TLS 上下文只在进程启动时构建一次，enroll/重签发生在其后，
    进程会继续出示旧证书。实例侧动作：盒子 `systemctl restart mrrc-modern`；桌面版退出并重开应用。
+   **2026-10-16（第三次复发，换机）：**同一呼号换了硬件 = 一对全新密钥，盒子签了新证书、也登记上来了，
+   但服务没重启，入口持续 502。与 10-11 同类——**判据早就写在本节，可它躺在文档里要人查**。
+   现已在 Portal 侧落地：实例列表新增「入口」列（名字/指纹不符当场报，并给下一步），
+   详情页一次说完"登记的指纹·时间·来源 IP / 登记↔实到 / 信任包 / nginx 重载"（见 §12.9）。
 
 **源码运行另有两处实况**（10-11 bg1sb 实例）：frpc 只按 **`<repo>/fleet/frpc`** 查找，
 `~/Library/Application Support/MRRC-Modern/fleet/frpc` 在这条路径上**不被读取**；且 frpc 缺失时
@@ -239,7 +243,8 @@ connect 返回 `tunnel_started: false` 而**页面不报错** —— 排查时�
 | 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
 | `curl -sI .../login` 得到 405 | **不是故障**。`-I` 发 HEAD，而登录页只接受 GET。用 `curl -s -o /dev/null -w '%{http_code}'` 拿状态码 |
 | **实例 502，且该端口上的代理名 ≠ 路由名**（端口被别的实例占着） | **先看 frps 代理表，再谈证书**：`curl -u <面板凭据> http://127.0.0.1:7100/api/proxy/tcp` 里 `remotePort` 对应的 `name` 是否为该呼号。**2026-10-11 实例**：bg7ifp 的 18803 被**已撤销 5 天**的 bg8aaa 占着（那台 MacBook 上的 `MRRC-Modern.app` 一直在跑），bg7ifp 每 ~33 s `port already used`、当日 885 次，入口 502 的真因是"hub 收到的是旧呼号证书"。根因是**设计缺口**：撤销不吊销 frpc token、frps 不校验名字与端口的归属、且所有实例共用同一 token（修法见 `docs/2026-10-11-instance-lifecycle-and-port-squatting.md` §5.1） |
-| **实例 502，隧道与代理名都正常** | **比对证书指纹**（决定性）：`echo \| openssl s_client -connect 127.0.0.1:<端口> 2>/dev/null \| openssl x509 -noout -subject -fingerprint -sha256` 对 `openssl x509 -in /etc/mrrc-hub/instance-certs/<呼号小写>.pem …`。不等 ⇒ 实例侧**进程没重启**（见上"实例侧运行"第 2 条），去那台机器重启 MRRC 服务/应用（ba4eg 10-11 一行为此） |
+| **实例 502，隧道与代理名都正常** | **比对证书指纹**（决定性）：`echo \| openssl s_client -connect 127.0.0.1:<端口> 2>/dev/null \| openssl x509 -noout -subject -fingerprint -sha256` 对 `openssl x509 -in /etc/mrrc-hub/instance-certs/<呼号小写>.pem …`。不等 ⇒ 实例侧**进程没重启**（见上"实例侧运行"第 2 条），去那台机器重启 MRRC 服务/应用（ba4eg 10-11 一行为此）。**2026-10-16 起先看 Portal**：实例列表的「入口」列与详情页的「证书身份与 hub 侧收口」已把这条判据（含登记来源 IP）直接摆出来，不必再手工比 |
+| **登记成功、证书名字也对，入口仍 502** | 先看 `systemctl status mrrc-hub-routes.timer`：**重生成 + reload 自 V0.17 起是自动的**（该定时器每 30 秒跑一次，**内容哈希变了且 `nginx -t` 通过**才 reload）——报“待重载”说明定时器停了、或 `nginx -t` 不过而它不敢 reload。判据：① 该证书是否逐字在 `trust-bundle.pem` 里（不在 ⇒ 生成器没跑）；② 注册表/证书文件的写入是否比 **nginx worker 的启动时刻**晚 90 秒以上（只晚几十秒是正常的，timer 还没轮到）。**别用 bundle 的 mtime 判**：定时器每 30 秒重写它一次（哪怕内容没变）。手工兜底（确认定时器真停了再用）：`sudo /usr/local/sbin/gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx`。Portal 已把①②直接摆在实例页（root 动作仍由运维执行） |
 | **实例 502，且 nginx 报 `peer closed connection in SSL handshake`** | 该实例**没开 TLS**（未配 `MRRC_SSL_CERT/KEY`）。hub 侧无法修，只能通知机主（2026-10-11：bg7kxr、bh7hcu 属此类） |
 | **审计/登记"少台数"或查不到某个呼号** | 读**活档** `/var/lib/mrrc-hub/portal/portal.json`；`/etc/mrrc-hub/portal/portal.json` 是 2026-10-02 起停笔的旧档（其中既无 bg8aaa 也无 bg7ifp）。"谁做的"看 audit 里的 `login_ok` + `user=… ip=…`（自动 `granted` 不带 actor） |
 

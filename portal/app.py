@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import html
 import json
@@ -35,6 +36,7 @@ from portal import callsign as cs          # noqa: E402
 from portal import htpasswd as hp          # noqa: E402
 from portal import metrics as metrics_mod   # noqa: E402
 from portal import registry as reg          # noqa: E402
+from portal import trust                    # noqa: E402
 from portal import ui                       # noqa: E402
 from portal.store import (HELP_CLOSED, HELP_MAX_MINUTES, HELP_OPEN,  # noqa: E402
                          HELP_PENDING, HelpSession, Store)
@@ -87,6 +89,8 @@ def _frps_token() -> str:
         return ""
 DEFAULT_CLUBLOG = os.environ.get("MRRC_PORTAL_CLUBLOG", "/var/lib/mrrc-hub/portal/clublog_users.json")
 DEFAULT_CERT_DIR = os.environ.get("MRRC_PORTAL_CERT_DIR", "/etc/mrrc-hub/instance-certs")
+DEFAULT_TRUST_BUNDLE = os.environ.get("MRRC_PORTAL_TRUST_BUNDLE",
+                                      "/etc/mrrc-hub/trust-bundle.pem")
 
 # 页面外壳与 www.vlsc.net 设计系统同 token（黑底 / 青 accent / Inter），
 # 但样式内联、不外链 CSS —— 门户自身保持零依赖，www 不可用时注册页仍完整可用。
@@ -513,9 +517,14 @@ def _cert_facts(der: bytes, expect: str = "", inform: str = "der") -> dict:
     用 openssl 解析而不是引第三方库 —— 与 `cert_names()` 同一个理由（stdlib 不能解析
     证书，而本服务刻意不引依赖）。expect 为空表示无法判断（注册表没给 tls_name）。
     """
-    out = {"subject": "—", "issuer": "—", "not_after": "—", "names": set(), "name_ok": None}
+    out = {"subject": "—", "issuer": "—", "not_after": "—", "names": set(), "name_ok": None,
+           "sha256": ""}
     if not der:
         return out
+    # 指纹不需要 openssl：握手给的 DER 直接哈希即可。它与 `trust.fingerprint_of_pem()`
+    # （登记时算的那一端）是同一个口径，于是「登记的是这张、实例实际给的是那张」可以
+    # 逐字节相等比较 —— 这正是换机后“新证书没被服务加载”的唯一直接证据。
+    out["sha256"] = hashlib.sha256(der).hexdigest()
     text = _run_der(["openssl", "x509", "-inform", inform, "-noout",
                      "-subject", "-issuer", "-enddate", "-ext", "subjectAltName"], der)
     for line in text.splitlines():
@@ -571,6 +580,32 @@ def _hub_cert_inventory(cert_dir=None) -> list:
     return out
 
 
+def _peek_context():
+    """看一眼上游证书用的握手上下文：**有意不校验**。
+
+    先把边界说清楚，因为守护者规则 `hub-tls-verify-off`（NFR-H021 / R-H8）会指着这里：
+    它管的是**访问者走的那条公网链路** —— 那条一直由 nginx 校验（`proxy_ssl_verify on`
+    + `proxy_ssl_name $mrrc_tls_name` + `/etc/mrrc-hub/trust-bundle.pem`，AD-H11 的一机一证），
+    从来没关过（它自己的 as-built 指认里就是 ✅）。
+
+    而这里只是 hub 回环上的一次**只读探针**（`127.0.0.1:<frps 端口>`），它要回答的正是
+    「实例交出来的证书是哪一张」—— **包括它交错的时候**。在这里校验，等于把要报告的那个
+    事实变成一个异常，然后只能显示"拿不到数据"：2026-10-16 换机那晚，详情页正是靠
+    "不校验地看一眼"才说出了「名字不符 ⇒ nginx 必 502」。
+
+    真正需要防的"关校验"是 nginx 那边，不是这里 —— 所以本仓不开放任何
+    “在数据链路上参数化关校验”的门，只留这一个只读入口。
+    """
+    import ssl
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # 顺序不能反：`PROTOCOL_TLS_CLIENT` 的 check_hostname 默认是 **True**，
+    # 在它还开着的时候设 `CERT_NONE` 会直接招 ValueError（重构时写反过一次，测试抓到）。
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def _app_generation(port, label: str, timeout: float = 2.5) -> str:
     """第 5 层：实例里那个应用的构建代号（`sw.js` 的 `CACHE = 'mrrc-vNN'`）。
 
@@ -590,9 +625,7 @@ def _app_generation(port, label: str, timeout: float = 2.5) -> str:
     except OSError:
         return "—"
     with contextlib.closing(raw):
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = _peek_context()
         try:
             tls = ctx.wrap_socket(raw, server_hostname=host_header)
         except (ssl.SSLError, OSError):
@@ -637,9 +670,7 @@ def _probe(port, label: str = "", tls_name: str = "", timeout: float = 2.5) -> d
 
     tls_err = ""
     with contextlib.closing(raw):
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx = _peek_context()          # 只读监视：校验是 nginx 那一跳的事，理由见 `_peek_context`
         try:
             tls = ctx.wrap_socket(raw, server_hostname=host_header)
         except (ssl.SSLError, OSError) as exc:
@@ -796,6 +827,61 @@ def _tunnel_online(port, label: str = "") -> bool:
     会互相遮蔽（同一个函数作用域），后人改动时很容易改错那一个。
     """
     return _tunnel_state(port, label)[0] == TUNNEL_SERVING
+
+
+def _trust_report() -> dict:
+    """hub 侧信任链的漂移事实（只读，判据见 `portal/trust.py` 的模块说明）。
+
+    为什么这件事必须由 Portal 说出来：登记（/enroll）与「nginx 真的信任它」之间隔着两步
+    **手工**操作（重跑生成器 + reload）。漏掉任一步，入口 502 而页面上一切照旧 ——
+    2026-10-16 换机那次正是如此：详情页早就写着「名字不符 ⇒ nginx 必 502」，
+    可**没人知道该去翻那个页面**。这里把它提到第一屏。
+    """
+    return trust.drift(DEFAULT_REGISTRY, DEFAULT_CERT_DIR, DEFAULT_TRUST_BUNDLE,
+                       trust.last_reload_time())
+
+
+def backfill_cert_fingerprints(store, registry, cert_dir, *, dry_run: bool = False) -> list[dict]:
+    """把 `instance-certs/` 里**已有的**证书指纹补进 store（一次性迁移）。
+
+    为什么需要它：`cert_fp` 是 2026-10-16 才有的字段。在那之前登记的实例库里一片空白，
+    于是详情页只能显示"从未登记"，而**登记 ↔ 实到**（换机后服务没重启的唯一直接证据）
+    无从比对 —— 证据就在 hub 上，只是没进库。
+
+    只动"没有指纹"的记录；已有指纹绝不覆盖（回填不得改写真发生过的事）。返回逐行结果
+    （给 CLI 打印，也给测试断言）。`dry_run=True` 只算不写。
+    """
+    rows = []
+    cert_dir = Path(cert_dir)
+    by_label = {str(rec.get("label") or "").lower(): callsign
+                for callsign, rec in store.bindings().items() if rec.get("label")}
+    for label, _port in registry.entries():
+        callsign = by_label.get(label.lower())
+        if not callsign:
+            continue                                    # 注册表里有、但未授予（不会登记过证书）
+        current = store.get(callsign)
+        if current is None or current.cert_fp:
+            continue                                    # 已有指纹：不动
+        path = cert_dir / f"{label.lower()}.pem"
+        if not path.is_file():
+            rows.append({"label": label, "callsign": callsign, "ok": False, "fp": "",
+                         "why": "没有证书文件（可能从未登记）"})
+            continue
+        try:
+            pem_text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            rows.append({"label": label, "callsign": callsign, "ok": False, "fp": "",
+                         "why": f"证书文件读不了：{exc}"})
+            continue
+        fp = trust.fingerprint_of_pem(pem_text)
+        if not fp:
+            rows.append({"label": label, "callsign": callsign, "ok": False, "fp": "",
+                         "why": "证书文件解析不出 DER"})
+            continue
+        if not dry_run:
+            store.seed_cert_fingerprint(callsign, fp)
+        rows.append({"label": label, "callsign": callsign, "ok": True, "fp": fp, "why": ""})
+    return rows
 
 
 def _clublog_info() -> str:
@@ -1044,13 +1130,12 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             entries_full = portal.registry.entries_full()
             # 呼号库查询：纯本地，用现有核验链问一次（**不联网**）。
             clublog_query = q.strip() if view == "clublog" else ""
-            clublog_hit = ""
-            if clublog_query:
-                try:
-                    outcome = build_verifier().verify(clublog_query)
-                except Exception:                                    # noqa: BLE001
-                    outcome = None
-                clublog_hit = _clublog_hit(outcome)
+            # 这里以前是 `build_verifier().verify(clublog_query)` —— `ChainVerifier` 只有
+            # `check()`，`verify()` 根本不存在 ⇒ 每次都抛 AttributeError 被下面那个裸 except
+            # 吃掉，于是 `_clublog_hit()` 拿到的是 None（而它要的是**查询串**）。两处错叠在
+            # 一起，效果是运维页的「呼号库查询」永远回一个空结果：命中也说没命中。
+            # `_clublog_hit()` 自己就问两个库（它要区分权威库/自建清单），并自带同一道兜底。
+            clublog_hit = _clublog_hit(clublog_query) if clublog_query else ""
             return vs.Ctx(
                 root=self._admin_root(),
                 csrf=session.csrf if session else "",
@@ -1065,6 +1150,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 help=_help_by_label(portal),
                 reports=_instance_reports(entries_full)
                 if view in ("instances", "instance") else {},
+                trust=_trust_report() if view in ("instances", "instance") else {},
                 resources=_host_resources() if view == "system" else {},
                 services=_service_states() if view == "system" else [],
                 net=_net_facts() if view == "system" else {},
@@ -1138,7 +1224,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             # 这是租户在**自己手机上**看的页面，所以卡片/表格都要窄屏友好。
             grants = list(portal.store.bindings().values())
             rows = [[("呼号", f"<code>{html.escape(a['callsign'])}</code>"),
-                     ("状态", ui.pill("ok", STATUS_CN.get(a['status'], a['status']))),
+                     ("状态", ui.pill("ok", STATUS_CN.get(a['status'] or "", a['status'] or ""))),
                      ("标签", html.escape(a['label'] or '—')),
                      ("端口", f'<span class="mono">{a["port"] or "—"}</span>')] for a in grants]
             granted = (ui.grid_table(["呼号", "状态", "标签", "端口"], rows, stack=True)
@@ -1337,11 +1423,18 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                         tmp.unlink(missing_ok=True)
                         return self._send(400, {"error": f"证书名字不符：期望 {expected}，实得 {sorted(names) or '解析失败'}"})
                     tmp.replace(cert_dir / f"{app.label}.pem")
-                    portal.store._load  # noqa: B018  (仅表明状态未变；审计见下)
+                    # 留痕：指纹 + 审计（同一笔写入）。此处以前只有一行 `portal.store._load`
+                    # 占位（"仅表明状态未变；审计见下"）——审计从未落下，于是**换机在 Portal
+                    # 里完全不可见**：新密钥顶掉旧密钥这件事，事后一条记录都查不到。
+                    fingerprint = trust.fingerprint_of_pem(pem)
+                    portal.store.record_cert(callsign, fingerprint,
+                                             source_ip=(self.client_address[0] if self.client_address else ""))
                     return self._send(200, {
                         "callsign": callsign, "cert": str(cert_dir / f"{app.label}.pem"),
                         "names": sorted(names),
-                        "next_step": "sudo /usr/local/sbin/gen_hub_routes.py && sudo nginx -t && sudo systemctl reload nginx",
+                        "fingerprint": fingerprint,
+                        "next_step": ("sudo /usr/local/sbin/gen_hub_routes.py && sudo nginx -t "
+                                      "&& sudo systemctl reload nginx"),
                     })
                 if route not in ("/verify", "/reject", "/grant", "/revoke", "/help/revoke"):
                     return self._send(404, {"error": "not found"})
@@ -1432,7 +1525,21 @@ def main(argv=None) -> int:
     ap.add_argument("--base-path", default=os.environ.get("MRRC_PORTAL_BASE", ""),
                     help="挂载前缀，如 /mrrc_portal（默认空 = 挂在根）")
     ap.add_argument("--dry-run", action="store_true", help="只加载配置并自检，不监听")
+    ap.add_argument("--backfill-cert-fingerprints", action="store_true",
+                    help="一次性迁移：把 instance-certs/ 里已有的证书指纹补进 store，然后退出"
+                         "（不写审计；已有指纹不覆盖）")
     args = ap.parse_args(argv)
+
+    if args.backfill_cert_fingerprints:
+        # 运维迁移入口：跑在 hub 上（`mrrcportal` 能读证书目录）。只写 store，不起服务。
+        rows = backfill_cert_fingerprints(Store(args.store), reg.Registry(args.registry),
+                                         DEFAULT_CERT_DIR)
+        done = [r for r in rows if r["ok"]]
+        for r in rows:
+            print(f"{'补入' if r['ok'] else '跳过'} {r['label']:18s} "
+                  + (f"{r['fp'][:16]}…" if r["ok"] else f"（{r['why']}）"))
+        print(f"共 {len(done)} 份指纹入{args.store}；注册表 {len(reg.Registry(args.registry).entries())} 条")
+        return 0
 
     token = Path(args.token_file).read_text(encoding="utf-8").strip() if Path(args.token_file).exists() else ""
     users = hp.UsersFile(args.users_file)

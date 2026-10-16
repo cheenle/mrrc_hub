@@ -29,7 +29,10 @@ from portal.app import Portal, make_handler       # noqa: E402
 from portal.store import Store                    # noqa: E402
 from portal.verify import CallsignListVerifier    # noqa: E402
 
-VIEWS = ("overview", "applications", "instances", "tunnel", "system", "audit", "clublog")
+VIEWS = (("overview", ""), ("applications", ""), ("instances", ""), ("tunnel", ""),
+         ("system", ""), ("audit", ""), ("clublog", ""),
+         # 实例详情是 2026-10-11 改版新增的第 8 个视图（此前漏抓）
+         ("instance", "&label=bg1sb"))
 
 FIXED_STATES = {
     18804: (app_mod.TUNNEL_SERVING, "握手成功，拿到 HTTP 200"),
@@ -67,11 +70,29 @@ class _StubSampler:
                 "nic": {"rx_bps": 4096.0, "tx_bps": 1024.0}, "interval": 30.0}
 
 
+class _StubProbes:
+    """探测快照的确定性桩。
+
+    视图自 V0.36 起只读 `ProbeCache.snapshot()`（页面渲染**不再探测**），所以钉住这个快照
+    就等于钉住了页面看到的一切隧道/证书事实 —— `_tunnel_states` / `_instance_reports`
+    已不在请求路径上，给它们打补丁影响不到页面了。
+    """
+
+    def __init__(self, states, reports, interval=20.0, age=3.0):
+        self._states, self._reports = states, reports
+        self.interval, self.age = interval, age
+
+    def snapshot(self):
+        return {"at": 0.0, "age": self.age, "probing": False,
+                "states": dict(self._states), "reports": dict(self._reports),
+                "latency": {}, "interval": self.interval}
+
+
 def _patch_collectors(register):
     """把易变事实换成确定性桩；返回恢复函数。"""
     originals = {name: getattr(app_mod, name) for name in (
         "_host_resources", "_service_states", "_net_facts", "_hub_cert_inventory",
-        "_cert_days", "_clublog_info", "_tunnel_states", "_instance_reports")}
+        "_cert_days", "_clublog_info")}
     app_mod._host_resources = lambda: {
         "load": "0.31 0.28 0.25", "cpu": "1 核", "mem": "可用 900 MB / 共 1914 MB（47% 可用）",
         "disk": "/ 可用 7000 MB / 共 13721 MB（已用 51%）", "uptime": "42 天 3 小时", "python": "3.13.0"}
@@ -84,9 +105,6 @@ def _patch_collectors(register):
         ("bg1sb.pem", "bg1sb.mrrc.vlsc.net", "Nov 18 00:00:00 2026 GMT", 38)]
     app_mod._cert_days = lambda path=None: "38"
     app_mod._clublog_info = lambda: "273047 条 · 最后同步 2026-10-11 04:30"
-    app_mod._tunnel_states = lambda entries, timeout=2.5: {p: FIXED_STATES[p] for _l, p in entries
-                                                           if p in FIXED_STATES}
-    app_mod._instance_reports = lambda entries_full, timeout=2.5: dict(FIXED_REPORTS)
     register(originals)
 
     def restore():
@@ -127,15 +145,16 @@ def main() -> int:
         restore = _patch_collectors(lambda o: None)
         try:
             httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
-                portal, token="tok", users=ht.UsersFile(users), sampler=_StubSampler()))
+                portal, token="tok", users=ht.UsersFile(users), sampler=_StubSampler(),
+                probes=_StubProbes(FIXED_STATES, FIXED_REPORTS)))
             threading.Thread(target=httpd.serve_forever, daemon=True).start()
             base = f"http://127.0.0.1:{httpd.server_address[1]}"
             jar = http.cookiejar.CookieJar()
             opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
             opener.open(base + "/admin/login", data=urllib.parse.urlencode(
                 {"user": "ops", "password": "pw-123456789"}).encode(), timeout=10).read()
-            for view in VIEWS:
-                with opener.open(base + f"/admin?view={view}", timeout=30) as r:
+            for view, extra in VIEWS:
+                with opener.open(base + f"/admin?view={view}{extra}", timeout=30) as r:
                     html_text = r.read().decode()
                 # 去掉纯粹的运行时刻（页面上唯一的时间戳来源）
                 html_text = _strip_volatile(html_text)

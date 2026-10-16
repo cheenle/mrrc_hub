@@ -85,6 +85,128 @@ class FrpsPanel:
         return None, "面板应答既不是代理列表也不是 {proxies:[…]}（版本差异）"
 
 
+class ProbeCache:
+    """实例探测的后台缓存：后台一轮并发探测，所有页面共享 —— 渲染永不探测。
+
+    **为什么需要它（2026-10-16 现场实测）**：`/admin` 的每一次渲染都在请求线程里探全部
+    实例，而实例视图还要探**两轮**（轻探 + 完整探）。经隧道的一次 TLS 握手在慢实例上要
+    1–3 s（bg7kxr 1.7 s / bg7ifp 1.0 s，实测），1 vCPU 的 hub 上 8 路并发的余量也就那么
+    多 ⇒ 页面 **4–11 s**，而 instances 页每 20 s 自动刷新一次，等于把探测变成常态负载。
+    运维看到的正是「后台打开要等十秒」。
+
+    现在的分工：后台线程每 interval 秒探一轮（并发），页面只读快照，并**如实报出数据龄**
+    —— 诚实降级照旧：还没探过就说「探测进行中」，过期就说过期，绝不拿旧数据冒充刚探的。
+    顺带消掉一类自相矛盾：表头计数与逐行结论从此来自**同一轮**（此前两轮可以背道而驰）。
+
+    `probe` 是注入的：`(port, label, tls_name) -> (report, latency_ms|None)`，只在本模块
+    的 `tick()` 里被调用一次（每实例每轮一次），因此单测不必起真隧道。
+    """
+
+    def __init__(self, entries, probe, *, interval: float = 20.0, workers: int = 8,
+                 clock=time.time):
+        self._entries = entries          # () -> [(label, port, tls_name)]
+        self._probe = probe              # (port, label, tls_name) -> (report, latency_ms|None)
+        self.interval = max(1.0, interval)          # 调用方（argparse/测试）已给数值；不在这里解析
+        self._workers = max(1, workers)
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._at: float | None = None
+        self._reports: dict = {}
+        self._ports: dict = {}
+        self._latency: dict = {}
+
+    # ---- 采集 ----
+    def _one(self, item):
+        label, port, tls = item
+        try:
+            report, latency = self._probe(port, label, tls)
+        except Exception as exc:                       # noqa: BLE001 — 采集器不许把服务带崩
+            return label, {"state": "", "detail": f"探测异常：{exc}"}, None
+        return label, report, latency
+
+    def tick(self) -> None:
+        """一轮：并发探全部实例，然后整份换掉快照（读者永远看到自洽的一份）。"""
+        from concurrent.futures import ThreadPoolExecutor
+
+        items = [tuple(item) for item in self._entries()]
+        reports: dict = {}
+        latency: dict = {}
+        if items:
+            with ThreadPoolExecutor(max_workers=min(self._workers, len(items))) as pool:
+                for label, report, ms in pool.map(self._one, items):
+                    reports[label] = report
+                    if ms is not None:
+                        latency[label] = ms
+        with self._lock:
+            self._reports, self._latency = reports, latency
+            self._ports = {label: port for label, port, _tls in items}
+            self._at = self._clock()
+
+    # ---- 读取 ----
+    def snapshot(self) -> dict:
+        """当前快照。**除首次且没有后台线程之外，绝不在这里探测。**
+
+        没有后台线程（单测、单发脚本、`--dry-run` 之外的一次性调用）时，首轮现探一次，
+        此后都读这份快照 —— 于是「页面不探测」这条契约在两种装配下都成立。
+        """
+        with self._lock:
+            at, reports, latency, ports = self._at, self._reports, self._latency, self._ports
+        if at is None and self._thread is None:
+            self.tick()
+            with self._lock:
+                at, reports, latency, ports = (self._at, self._reports, self._latency,
+                                               self._ports)
+        now = self._clock()
+        return {
+            "at": at,
+            "age": (now - at) if at is not None else None,
+            "probing": at is None,
+            "reports": dict(reports),
+            "states": {ports[label]: (rep.get("state", ""), rep.get("detail", ""))
+                       for label, rep in reports.items() if label in ports},
+            "latency": dict(latency),
+            "interval": self.interval,
+        }
+
+    def latest(self, port, label: str = "") -> tuple:
+        """采样器用的**只读**视图：`(状态, 说明, 延时 ms)` —— 读快照，不探测。
+
+        采样器原先自己一轮**串行**探测（14 台 ≈8 s / 30 s），与页面各探一轮；现在两边
+        共用这一轮，hub 上的探测次数直接减半，且延时与页面显示的是同一个数。
+        没探到过的实例给空状态（视图按「未探测」渲染）—— 不冒充 `down`，那会让运维
+        去查一个并不存在的故障。
+        """
+        snap = self.snapshot()
+        report = snap["reports"].get(label) if label else None
+        if report is None:
+            state, detail = snap["states"].get(port, ("", "尚未探测"))
+        else:
+            state, detail = report.get("state", ""), report.get("detail", "")
+        return state, detail, snap["latency"].get(label)
+
+    # ---- 线程 ----
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+
+        def loop():
+            while True:
+                try:
+                    self.tick()
+                except Exception:            # noqa: BLE001 — 一轮失败不带走线程：
+                    pass                     # 快照留在上一轮（数据龄会一直涨，使用者看得见）
+                if self._stop.wait(self.interval):
+                    break
+
+        self._thread = threading.Thread(target=loop, name="portal-probes", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
 class Sampler:
     """后台采样线程：面板取数（差分算速率）+ 隧道探测计时（复用 app 的探测函数）。"""
 

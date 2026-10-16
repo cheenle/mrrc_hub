@@ -34,6 +34,11 @@ class Ctx:
     #: hub 侧信任链的事实（登记证书在不在信任包、nginx 有没有重载新的一份）。
     #: 采集在 app.py 的 `_trust_report()`，判据在 portal/trust.py（两边都是只读、不提权）。
     trust: dict = field(default_factory=dict)
+    #: 探测快照的数据龄与轮询间隔（`metrics.ProbeCache`）。渲染层只读它、**不探测**：
+    #: 2026-10-16 那次 4–11 s 的页面就是因为每次渲染都在请求线程里探全部实例。
+    #: `probe_interval == 0` 表示没有快照可报（单视图渲染/未装配）—— 此时不出声。
+    probe_age: float | None = None
+    probe_interval: float = 0.0
     # 系统
     resources: dict = field(default_factory=dict)
     services: list = field(default_factory=list)
@@ -224,6 +229,18 @@ def _is_serving(ctx: Ctx, state: str) -> bool:
     （循环）；而且状态语义的权威本来就在探针那边。
     """
     return ctx.tunnel_pill.get(state) == "ok"
+
+
+def _probe_note(ctx: Ctx) -> str:
+    """「 · 数据 N 秒前」这一小段（含分隔符）。没装配快照就不出声。
+
+    首轮还没回来就直说 —— 拿空数据冒充刚探的是编数据（诚实降级照旧）。
+    """
+    if not ctx.probe_interval:
+        return ""
+    if ctx.probe_age is None:
+        return " · 探测进行中（首轮还没回来）"
+    return f" · 数据 {ctx.probe_age:.0f} 秒前"
 
 
 def _level(ctx: Ctx, state: str) -> str:
@@ -643,7 +660,8 @@ def view_instances(ctx: Ctx) -> Rendered:
     chrome = (_head(ctx, f"{len(ctx.entries)} 个已登记 · {serving_n} 个在服务 · "
                          + (f'<b class="bad-tx">{entry_bad} 个入口开不了</b>' if entry_bad
                             else '<b class="ok-tx">入口全部可开</b>')
-                         + f" · 探测每 {REFRESH_SECONDS.get('instances', 20)} 秒一轮")
+                         + f" · 探测每 {REFRESH_SECONDS.get('instances', 20)} 秒一轮"
+                         + _probe_note(ctx))
               + ui.toolbar(
                   [("全部", f"{ctx.root}/admin?view=instances", True, len(ctx.entries))],
                   search_html=(f'<form method="get" action="{ctx.root}/admin" class="search" '
@@ -768,7 +786,8 @@ def view_instance(ctx: Ctx, label: str = "") -> Rendered:
 
     chrome = (f'<h1><code>{ui.esc(label)}</code></h1>'
               + f'<div class="hint">{ui.esc(label)}.mrrc.vlsc.net · 端口 '
-                f'<span class="mono">{_port_of(ctx, label)}</span> · ' + state_pill + '</div>'
+                f'<span class="mono">{_port_of(ctx, label)}</span> · ' + state_pill
+              + _probe_note(ctx) + '</div>'
               + (ui.banner("ok", ui.esc(ctx.msg)) if ctx.msg else "")
               + '<h2>隧道与实例里的应用</h2>'
               + ui.kv([

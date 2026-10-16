@@ -773,19 +773,33 @@ def _tunnel_state(port, label: str = "", timeout: float = 2.5):
     return rep["state"], rep["detail"]
 
 
-def _probe_timed(port, label: str = "", timeout: float = 2.5) -> tuple:
-    """采样器用的探测：复用四态判据，顺带把端到端耗时量出来。
+def _probe_full_timed(port, label: str = "", tls_name: str = "", timeout: float = 2.5) -> tuple:
+    """`_probe` 的计时包装：→ (报告, 端到端毫秒|None)。
+
+    返回**完整报告**而不是只回状态，因为后台探测缓存（`metrics.ProbeCache`）一轮就要
+    同时喂饱两个视图（轻探那份 states 与完整报告 reports）—— 一轮探测出两份事实，
+    表头计数与逐行结论就不可能再互相矛盾（那件事在 2026-10-16 实测到过）。
 
     延时只在握手真正完成（serving）时给值 —— 连不上的等待时间不是网络延时，
     把它当延时展示是编数据（诚实降级原则）。
     """
     start = time.monotonic()
     try:
-        state, detail = _tunnel_state(port, label, timeout)
+        rep = _probe(port, label, tls_name, timeout)
     except Exception as exc:                          # noqa: BLE001 — 采集器不许把服务带崩
-        return TUNNEL_DOWN, f"探测异常：{exc}", None
+        return ({"state": "", "detail": f"探测异常：{exc}"}, None)
     elapsed = (time.monotonic() - start) * 1000.0
-    return state, detail, (elapsed if state == TUNNEL_SERVING else None)
+    return rep, (elapsed if rep.get("state") == TUNNEL_SERVING else None)
+
+
+def _probe_timed(port, label: str = "", timeout: float = 2.5) -> tuple:
+    """采样器用的三元组视图：(状态, 说明, 毫秒)。
+
+    生产路径上采样器读的是后台缓存的快照（`ProbeCache.latest`），不再自己探；
+    这个函数留给测试与单发调用，语义与缓存那一路一致。
+    """
+    rep, ms = _probe_full_timed(port, label, "", timeout)
+    return rep.get("state", ""), rep.get("detail", ""), ms
 
 
 def _tunnel_states(entries, timeout: float = 2.5) -> dict:
@@ -926,6 +940,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                  sessions: SessionStore | None = None,
                  guard: LoginGuard | None = None,
                  sampler=None,
+                 probes=None,
                  cookie_secure: str = "auto"):
     """base 是挂载前缀（如 `/mrrc_portal`），空串表示挂在根。
 
@@ -935,11 +950,18 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
     下都指向正确位置 —— 不必为每个挂载点各配一份 base。
 
     认证装配（默认值让旧调用点不受影响）：`users` 是账号文件；`sessions`/`guard`
-    是内存态会话与登录锁定；`sampler` 是隧道指标采集器（None = 视图显示未启用）。
+    是内存态会话与登录锁定；`sampler` 是隧道指标采集器（None = 视图显示未启用）；
+    `probes` 是实例探测缓存（None = 就地建一份，首轮之后只读快照）。
     """
     base = ("/" + base.strip("/")) if base and base.strip("/") else ""
     session_store: SessionStore = sessions if sessions is not None else SessionStore()
     login_guard: LoginGuard = guard if guard is not None else LoginGuard()
+    if probes is None:
+        # 生产由 main() 注入一份**后台线程**的缓存（main 会 start 它）；没有线程时
+        # ProbeCache 首轮现探一次、此后只读快照 —— 于是不管哪种装配，渲染都不重复探测。
+        probes = metrics_mod.ProbeCache(
+            entries=lambda: portal.registry.entries_full(),
+            probe=lambda port, label, tls: _probe_full_timed(port, label, tls))
     class Handler(BaseHTTPRequestHandler):
         server_version = "MRRC-Portal/1.0"
 
@@ -1123,11 +1145,14 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
             """装配一次渲染需要的**全部**事实。这是唯一的采集点（视图层不许自己采）。
 
             采集量按视图裁剪：只有实例页要跑 TLS 探测，只有系统页要读主机事实 ——
-            否则「换个 tab」也要把每个实例都探一遍。
+            否则「换个 tab」也要把每个实例都探一遍。**探测本身是后台一轮快照**
+            （`ProbeCache`）：这里只读，绝不现探 —— 那是 2026-10-16 现场 4–11 s 页面的根因。
             """
             _, session = self._session()
             entries = portal.registry.entries()
             entries_full = portal.registry.entries_full()
+            # 一份快照同时给出「轻探」（states）与「完整探」（reports）—— 同源。
+            snapshot = probes.snapshot()
             # 呼号库查询：纯本地，用现有核验链问一次（**不联网**）。
             clublog_query = q.strip() if view == "clublog" else ""
             # 这里以前是 `build_verifier().verify(clublog_query)` —— `ChainVerifier` 只有
@@ -1146,10 +1171,11 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 audit=list(reversed(portal.store.audit())),
                 entries=entries,
                 entries_full=entries_full,
-                states=_tunnel_states(entries),
+                states=snapshot["states"],
                 help=_help_by_label(portal),
-                reports=_instance_reports(entries_full)
-                if view in ("instances", "instance") else {},
+                reports=snapshot["reports"] if view in ("instances", "instance") else {},
+                probe_age=snapshot["age"],
+                probe_interval=snapshot["interval"],
                 trust=_trust_report() if view in ("instances", "instance") else {},
                 resources=_host_resources() if view == "system" else {},
                 services=_service_states() if view == "system" else [],
@@ -1524,6 +1550,8 @@ def main(argv=None) -> int:
                     help="每实例保留的样本数（默认 30s × 120 ≈ 1 小时）")
     ap.add_argument("--base-path", default=os.environ.get("MRRC_PORTAL_BASE", ""),
                     help="挂载前缀，如 /mrrc_portal（默认空 = 挂在根）")
+    ap.add_argument("--probe-interval", type=float, default=20.0,
+                    help="实例探测的后台轮询间隔（秒）；页面只读这一轮的快照，不在请求里探")
     ap.add_argument("--dry-run", action="store_true", help="只加载配置并自检，不监听")
     ap.add_argument("--backfill-cert-fingerprints", action="store_true",
                     help="一次性迁移：把 instance-certs/ 里已有的证书指纹补进 store，然后退出"
@@ -1556,18 +1584,25 @@ def main(argv=None) -> int:
         print(f"注册表现有条目: {len(portal.registry.entries())} | 占用端口: {sorted(portal.registry.used_ports())[:5]}")
         return 0
     base = ("/" + args.base_path.strip("/")) if args.base_path.strip("/") else ""
+    # 探测缓存：**唯一**的探测者，后台一轮并发；页面与采样器都只读它。
+    # 这就是 2026-10-16 「后台打开要等十秒」的正解：那次每次渲染都在请求线程里探全部实例。
+    probes = metrics_mod.ProbeCache(
+        entries=lambda: portal.registry.entries_full(),
+        probe=lambda port, label, tls: _probe_full_timed(port, label, tls),
+        interval=args.probe_interval)
+    probes.start()
     sampler = None
     if args.metrics_interval > 0:
         sampler = metrics_mod.Sampler(
             entries=lambda: portal.registry.entries(),
-            probe=lambda port, label: _probe_timed(port, label),
+            probe=lambda port, label: probes.latest(port, label),   # 只读快照，不另探一轮
             panel=metrics_mod.FrpsPanel(args.frps_api_url, args.frps_credentials),
             interval=args.metrics_interval, history=args.metrics_history)
         sampler.start()
     httpd = ThreadingHTTPServer((args.host, args.port), make_handler(
         portal, token, base, users=users,
         sessions=SessionStore(args.session_idle_hours * 3600, args.session_max_hours * 3600),
-        guard=LoginGuard(), cookie_secure=args.cookie_secure, sampler=sampler))
+        guard=LoginGuard(), cookie_secure=args.cookie_secure, sampler=sampler, probes=probes))
     print(f"Portal 监听 http://{args.host}:{args.port}{base or '/'} （注册表 {args.registry}）", flush=True)
     try:
         httpd.serve_forever()

@@ -40,11 +40,12 @@
         <ul class="nav-links">
           <li><a href="index.html">概览</a></li>
           <li><a href="start.html">接入</a></li>
-          <li><a href="use.html">使用与分享</a></li>
+          <li><a href="use.html">使用</a></li>
+          <li><a href="maintain.html">维护</a></li>
           <li>
             <a href="trouble.html" class="active" aria-current="page">排障</a>
           </li>
-          <li><a href="design.html">设计与实现</a></li>
+          <li><a href="design.html">设计</a></li>
           <li>
             <a
               href="https://github.com/cheenle/mrrc_hub"
@@ -102,8 +103,9 @@
                 <tr>
                   <td>浏览器打不开</td>
                   <td>
-                    地址里<b>不需要端口</b>（V0.21 起入口与其他服务同在 443）。历史写法是
-                    <code>:9988</code> / <code>:8899</code>。别用明文端口拼 <code>https://</code>。
+                    地址里<b>不需要端口</b>（入口与门户、站点同在 443）。如果书签还带着
+                    <code>:9988</code> / <code>:8899</code> 或旧的海外边缘路径，那些入口已取消，换回
+                    <code>https://&lt;呼号&gt;.mrrc.vlsc.net/</code>。
                   </td>
                 </tr>
                 <tr>
@@ -160,14 +162,33 @@
                   </td>
                 </tr>
                 <tr>
-                  <td>（历史）海外边缘入口时通时不通</td>
+                  <td>换机 / 重签证书之后 502</td>
                   <td>
-                    <b>已复现的现网问题</b>（2026-10-01）：6 次请求中 3 次 20
-                    秒无响应。改用主路。详见<a
-                      href="use.html#entries"
-                      style="color: var(--accent)"
-                      >使用与分享 · 三个入口</a
+                    本机看起来一切正常，但入口一直 502。原因几乎总是<b>只换了证书文件、没重启进程</b>
+                    —— 证书是启动时读进内存的。盒子
+                    <code>systemctl restart mrrc-modern</code>，桌面版退出应用再打开。判据与清单见
+                    <a href="maintain.html#rotate" style="color: var(--accent)"
+                      >维护 · 换机与迁移</a
                     >。
+                  </td>
+                </tr>
+                <tr>
+                  <td>入口串台 / 时好时坏（旧实例没下线）</td>
+                  <td>
+                    撤销过的旧机器仍在运行，可能占住门户后来分配给别人的隧道端口，表现为别人的入口时通时断。两件事一起做：旧机器上<b>停服务并确认 frpc 进程真的退出</b>（macOS 退出应用曾留下孤儿进程），必要时请维护者查 frps
+                    上的代理名与端口归属。见
+                    <a href="maintain.html#retire" style="color: var(--accent)"
+                      >维护 · 退出与撤销</a
+                    >。
+                  </td>
+                </tr>
+                <tr>
+                  <td>入口返回 502 / 404 / 无响应（先分清哪一层）</td>
+                  <td>
+                    <b>404</b> = Hub
+                    不认这个呼号（注册表没有，或已被撤销）；<b>502</b> =
+                    隧道不在、服务没起，或证书没被信任；<b>无响应/超时</b> =
+                    这一跳根本没到 Hub。按下面「怎么区分是哪一层」对号入座。
                   </td>
                 </tr>
                 <tr>
@@ -197,14 +218,15 @@
                   <td>重启电脑后连不上</td>
                   <td>
                     <b>隧道会自动回来，电台服务不会。</b>按<a href="start.html#restart" style="color: var(--accent)"
-                      >接入四步 · 重启之后</a
+                      >接入 · 重启之后</a
                     >手动起服务。
                   </td>
                 </tr>
                 <tr>
                   <td>换 Wi-Fi / 切 5G 后掉线</td>
                   <td>
-                    隧道会自动重连，通常几秒内恢复。但“TCP 未断”那种掉线（拔网线、换 Wi-Fi）只有当实例侧开启了会话心跳闸门（默认关闭）才会立刻回到接收；否则请确认电台已停发。
+                    隧道会自动重连，通常几秒内恢复。「TCP
+                    还活着但对端已失联」那种掉线（拔网线、换 Wi-Fi）由实例侧的会话心跳闸门兜底：经应用「接入云端」上线的实例<b>会自动设为 5 秒</b>，手动配置的默认关闭。不放心就确认电台已停发。
                   </td>
                 </tr>
               </tbody>
@@ -309,9 +331,16 @@ curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net/ap
                   <td><b>角色或鉴权</b> —— 看 4001 / 4003。</td>
                 </tr>
                 <tr>
-                  <td>（历史）主路正常、边缘路时通时不通</td>
+                  <td>换机/重签证书后：局域网正常、公网 502</td>
                   <td>
-                    <b>边缘 → Hub 这一跳</b> —— 已复现的现网问题，用主路。
+                    <b>进程没重启</b> —— 证书是启动时读的，重启即可；也可能是新证书尚未进 Hub
+                    的信任包（30 秒内自动完成）。
+                  </td>
+                </tr>
+                <tr>
+                  <td>公网时通时断、或串到别人的入口</td>
+                  <td>
+                    <b>端口被旧实例占用</b> —— 旧机器没真正下线（撤销不切断隧道）。停掉旧机器的服务与隧道进程。
                   </td>
                 </tr>
               </tbody>
@@ -327,13 +356,17 @@ curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net/ap
 
         <p class="hub-note">
           还是解决不了 →
+          <a href="maintain.html#help" style="color: var(--accent)"
+            >让维护者进来看一眼（远程协助）</a
+          >，或
           <a
             href="https://github.com/cheenle/mrrc_hub/issues"
             style="color: var(--accent)"
             >提 issue</a
           >，附上隧道日志与 <code>api/health</code>的状态码。
           <br />
-          本页事实基线：2026-10-01 现场取证。表中「已复现」的条目均来自当次实测。
+          本页事实基线：2026-10-16 现场复核；症状条目均来自真实发生过的问题（含 2026-10-11
+          实例生命周期取证）。
         </p>
       </div>
     </main>
@@ -353,8 +386,9 @@ curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net/ap
             <h4>文档</h4>
             <ul>
               <li><a href="index.html">概览</a></li>
-              <li><a href="start.html">接入四步</a></li>
+              <li><a href="start.html">接入</a></li>
               <li><a href="use.html">使用与分享</a></li>
+              <li><a href="maintain.html">维护与生命周期</a></li>
               <li><a href="trouble.html">排障</a></li>
               <li><a href="design.html">设计与层层实现</a></li>
             </ul>
@@ -386,7 +420,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://&lt;呼号&gt;.mrrc.vlsc.net/ap
         <div class="footer-bottom">
           <p>© 2026 MRRC Cloud Hub · BG1SB</p>
           <p>
-            事实基线：2026-10-01 现场取证 · 运营事实以
+            事实基线：2026-10-16 现场复核 · 运营事实以
             <code>SDD/12 §12.8</code>为准
           </p>
         </div>

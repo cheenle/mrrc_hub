@@ -11,15 +11,17 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `index.html` | 概览：四条主张、30 秒数据路径、能力现状表、该从哪开始 |
-| `start.html` | 接入四步：前提自检 → 注册 → 装隧道 → 验证 → 重启之后 |
-| `use.html` | 使用与分享：三个入口怎么选、两把口令两个角色、怎么分享、已知退化 |
+| `index.html` | 首页：系统地图（电台站接线拓扑）+ 双轨入口（我要接入 / 我在用）+ 能力现状表 |
+| `start.html` | 接入：前提自检 → 选路径（盒子 / 电脑）→ 注册 → 装隧道或开箱 → 验证 → 重启之后 |
+| `use.html` | 使用与分享：入口怎么选、两把口令两个角色、怎么分享、已知退化 |
+| `maintain.html` | 维护与生命周期：换机·迁移、撤销·退出、远程协助、版本升级 |
 | `trouble.html` | 排障：症状对照表、两条诊断命令、四跳分诊、日志位置 |
 | `design.html` | **工程侧唯一一页**：六层职责与边界、关键决策、安全不变量、现状与目标态 |
+| `images/station-topology.{svg,png}` | 电台站接线拓扑（自 `mrrc_modern/website/images/` 复制，SVG 头部有来源注记）。**改图先改上游**，再复拷 |
 | `css/octen.css` | **上游设计系统，原样复制，永不 fork** |
 | `css/hub.css` | 本站新增组件。上游之外的一切样式都在这里 —— 保证差异是一眼可见的单一文件 |
 | `js/hub.js` | 渐进增强：移动菜单、目录高亮、代码复制。无框架 |
-| global-nav.js（热链） | 每页末尾从 `https://www.vlsc.net/js/global-nav.js?v=8` 加载：全局顶 nav、回到顶部、滚动进度条、GA4（带 vlsc.net 域守卫）。与 www 各子站同源，**不复制进本仓** |
+| global-nav.js（热链） | 每页末尾从 `https://www.vlsc.net/js/global-nav.js?v=9` 加载：全局顶 nav、回到顶部、滚动进度条、GA4（带 vlsc.net 域守卫）。与 www 各子站同源，**不复制进本仓** |
 | `deploy.sh` | 幂等发布脚本。**只写不执行**，上线由人决定 |
 | `../.pi-lens.json` | 把 `css/octen.css` 排除出自动格式化 —— 见下方「必须钉住的两个文件」 |
 | `../biome.json` | 把本站的缩进风格钉成 2 空格（与上游 `octen.css` 一致），并双保险地禁用对 `octen.css` 的格式化 |
@@ -56,7 +58,7 @@ SHA-256 完全一致）。**不要在这里改它。**
 
 | 站点内容 | 事实源 |
 | --- | --- |
-| 入口 URL、端口、TLS 入口数量 | 现网 nginx 实际配置；`SDD/12 §12.8` |
+| 入口 URL、端口、TLS 入口数量 | 现网 nginx 实际配置；`SDD/12 §12.8`；本次基线 `docs/2026-10-16-site-recheck.md` |
 | ~~边缘入口的路径前缀、大小写规范~~ | **已随 V0.21 取消**（现网只有一台机器的 443） |
 | 证书签发方式与有效期 | 现网证书文件 + `SDD/05 NFR-H030` |
 | 实例侧行为（口令、角色、数据通道、PTT） | `mrrc_modern` 源码 + `mrrc_modern/SDD/` |
@@ -65,9 +67,13 @@ SHA-256 完全一致）。**不要在这里改它。**
 | 排障条目 | `SDD/12 §12.7 §12.8`、`deploy/README.md` |
 | 运营事实（主机、注册表、运维命令） | `SDD/12 §12.8` |
 | Portal 自助入口与核验流程 | `SDD/12 §12.9`、`portal/README.md`；现网 `https://portal.mrrc.vlsc.net/` |
-| 实例证书链（一机一证、信任包、逐实例校验） | `SDD/12 §12.8`「实例证书链」；现网 `/etc/mrrc-hub/trust-bundle.pem` + 注册表第三列 |
+| 实例证书链（一机一证、信任包、逐实例校验） | `SDD/12 §12.8`「实例证书链」；现网 `/etc/mrrc-hub/trust-bundle.pem` + 注册表第三列（**可选**，缺省 = 自己的入口名 `<标签>.mrrc.vlsc.net`，见 `deploy/gen_hub_routes.py` L129-148） |
 | 实例安装器（自取 frpc、校验哈希、三平台常驻） | `deploy/install_instance_tunnel.{sh,ps1}` 头部注释；`SDD/12 §12.8`「实例开通链」 |
-| 实例侧版本与能力 | `mrrc_modern/CHANGELOG.md`（当前权威：v1.25.4）+ 其 `SDD/` |
+| 实例侧版本与能力 | `mrrc_modern/CHANGELOG.md`（本次基线：**v1.27.0**）+ 其 `SDD/` |
+| 远程协助（客户发起、限时、客户持凭据） | `mrrc_modern/help_session.py` 头注 + `static/support.html`「远程协助」段；portal 侧端点见 `mrrc_hub` 提交 `f79ec93` |
+| 换机与信任重载判据 | `portal/trust.py` + `hub` 提交 `93b1b22`（指纹 / 登记↔实到 / 待重载） |
+| 实例生命周期（撤销≠吊销、退出留孤儿） | `docs/2026-10-11-instance-lifecycle-and-port-squatting.md`、`SDD/12 §12.8` |
+| 电台站接线拓扑图 | `mrrc_modern/website/images/station-topology.svg` @ `defacb6`（本站为副本，来源注记在 SVG 头部） |
 
 Portal 自助页（`portal/app.py` 内置的三个页面）与本站同设计令牌（黑底 / 青 accent /
 同款表格与按钮观感），样式**内联**、不外链 CSS —— Portal 保持零第三方依赖，
@@ -124,7 +130,7 @@ bash deploy.sh          # 会先跑金规则闸门，再问一次确认
 发布后仍需**人工确认**：
 
 ```bash
-for p in "" index start use trouble design; do
+for p in "" index start use maintain trouble design; do
   curl -s -o /dev/null -w "/$p.html → %{http_code}\n" "https://www.vlsc.net/mrrc_hub/$p.html"
 done
 ```
@@ -197,10 +203,12 @@ PY
 # ③ 上游样式表未被意外改动（两行哈希必须相同）
 shasum -a 256 css/octen.css ../../mrrc_modern/website/css/octen.css
 
-# ④ 现网入口仍符合站点描述（页面里写的就是这些期望值）
-curl -s -o /dev/null -w "主路 /login    → %{http_code}（期望 200）\n" https://bg1sb.mrrc.vlsc.net/login
-curl -s -o /dev/null -w "主路 /api/health → %{http_code}（期望 401）\n" https://bg1sb.mrrc.vlsc.net/api/health
-curl -s -o /dev/null -w "→ %{http_code}（期望 200）\n" https://bg1sb.mrrc.vlsc.net/login
+# ④ 站点与门户的门面（不依赖任何实例的隧道是否在线）
+curl -s -o /dev/null -w "站点 → %{http_code}（期望 200）\n" https://www.vlsc.net/mrrc_hub/
+curl -s -o /dev/null -w "门户 → %{http_code}（期望 200）\n" https://portal.mrrc.vlsc.net/
+# 实例入口只在实例在线时有意义：隧道不在线时报 502，那不是站点问题
+# （2026-10-16 复核时 bg1sb 的隧道不在线 → 502；ba4eg 在线 → 200）
+curl -s -o /dev/null -w "示例实例 /login → %{http_code}（在线期望 200）\n" https://ba4eg.mrrc.vlsc.net/login
 
 # ⑤ 仓库 SDD 约束
 python3 ../.agents/skills/sdd-guardian/harness/sdd_context.py check --staged
@@ -218,7 +226,7 @@ python3 ../.agents/skills/sdd-guardian/harness/sdd_context.py check --staged
 | （历史）海外边缘入口 `www → hub:9988` 这一跳间歇性失败（2026-10-01 实测 6 次中 3 次 20 s 无响应） | **已随 V0.21 一并取消**（该路径整体删除）；当年已定位到 www 到 Hub 那一跳；已排除本地链路、www 静态服务、www 上另一条代理腿、Hub 侧 SNI/Host 组合 | `use.html#entries`、`design.html#status`、`trouble.html#symptoms` |
 | 登录限流在隧道路径下退化为全局桶 | 已决定暂缓 | `use.html#gaps` |
 | `deploy/*.sh` 与现网漂移（重跑会让现网退化） | 已记录未修。**X1 已升级为高危**：`deploy_hub_routes.sh` 还会抹掉逐实例校验与信任包 | `deploy/README.md` 的「⚠️ 脚本与现网漂移」 |
-| 实例证书链**机制就位、尚未施用**（现网 `bg1sb` 仍用 `radio.vlsc.net`） | 待迁移 | `index.html`、`design.html#status`、`SDD/12 §12.8` |
+| 实例证书链：**逐实例校验名已在用**（`mrrc-hub-map.conf` 为 14 个在册实例生成 `<标签>.mrrc.vlsc.net`；注册表第三列缺省即此值）。2026-10-16 复核时 `bg1sb` 隧道不在线（502），其证书名待实例上线后复测 | 基本就位 | `index.html`、`design.html#status`、`SDD/12 §12.8` |
 | 安装器仍是仓内脚本，无公开发布的安装包下载 | 待做 | `start.html`、`index.html` |
 | 隧道层 PTT 半开释放未做（实例侧已有） | 待做 | `index.html`、`design.html#status` |
 

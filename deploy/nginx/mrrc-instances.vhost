@@ -1,0 +1,60 @@
+# Managed by mrrc_hub/deploy/deploy_hub_routes.sh — edits are overwritten.
+#
+# ONE vhost for every instance. The alternative (a server block per instance) is
+# what B2 did and what made adding an instance a centre-side nginx edit; here the
+# per-instance fact is only the loopback port in the generated map.
+#
+# TLS 是 hub 的通配证书，现网由 DNS-01 签发的真 Let's Encrypt 证书（每日续期）；
+# `deploy/mrrc-hub-cert.sh` 是唯一入口。
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net$;
+
+    ssl_certificate     /etc/mrrc-hub/tls/fullchain.pem;
+    ssl_certificate_key /etc/mrrc-hub/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # Query strings are never logged here (AD-H07 / NFR-H014).
+    access_log /var/log/nginx/mrrc-hub.access.log hub_safe;
+
+    # nginx 默认只压 text/html，而实例自己不发 Content-Encoding ⇒ 不加这几行，
+    # opus_wasm.js（534 KB）、ft710_ui.js（94 KB）等都是原样过隧道。
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 256;
+    gzip_proxied any;
+    gzip_types text/css application/javascript text/plain application/json image/svg+xml;
+
+    location / {
+        include /etc/nginx/snippets/mrrc-hub-upstream.conf;
+
+        # 这里刻意不加 Cache-Control：该路径会返回带 no-store 的敏感响应
+        # （首启口令窗口等），覆盖它比不优化更糟。HTML 的 no-cache 由实例侧发。
+        proxy_buffering off;
+    }
+
+    # 静态资源：唯一的缓存路径。正则 location 优先于 location /。
+    # 判定按 URI 扩展名（Content-Type 要等响应回来才知道，而 proxy_cache
+    # 是否启用是 location 级的）。
+    location ~* \.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|wasm|wav|mp3|m4a)$ {
+        include /etc/nginx/snippets/mrrc-hub-upstream.conf;
+
+        proxy_buffering on;
+
+        proxy_cache mrrc_assets;
+        proxy_cache_key "$mrrc_instance$uri$is_args$args";   # 实例 + URI + query，跨实例不串味
+        proxy_cache_valid 200 1h;              # 只列 200：302/307/401 永不落盘
+        proxy_cache_revalidate on;             # 过期后用 If-Modified-Since 回源复验
+        proxy_cache_lock on;                   # 冷缓存并发只放一个回源
+        proxy_cache_lock_timeout 5s;
+        proxy_cache_background_update on;      # 过期条目先在后台更新
+        proxy_cache_use_stale updating error timeout http_500 http_502 http_503 http_504;
+        proxy_cache_bypass $mrrc_client_nocache;   # 硬刷新 → 回源
+
+        proxy_hide_header Cache-Control;       # 只发一份，避免与实例侧重复
+        add_header Cache-Control $mrrc_asset_cc always;
+        add_header X-Cache-Status $upstream_cache_status always;
+    }
+}

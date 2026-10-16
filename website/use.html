@@ -124,9 +124,8 @@
           <div class="hub-callout">
             <span class="hub-callout-title">历史入口（已取消）</span>
             <p>
-              早期还有 <code>:9988</code> / <code>:8899</code> 两个端口，以及一条经
-              <code>www.vlsc.net/mrrc_modern/&lt;呼号大写&gt;/</code>
-              的海外边缘路径。它们已随单机化整体删除：一条路径指向同一台机器上的同一个 nginx，多留一套只会多一处会坏的地方。旧书签请换成上面的公网入口。
+              早期还有 <code>:9988</code> / <code>:8899</code>两个端口，以及一条经
+              <code>www.vlsc.net/mrrc_modern/&lt;呼号大写&gt;/</code>的海外边缘路径。它们已随单机化整体删除：一条路径指向同一台机器上的同一个 nginx，多留一套只会多一处会坏的地方。旧书签请换成上面的公网入口。
             </p>
           </div>
         </section>
@@ -303,8 +302,7 @@
                     <span
                       style="color: var(--text-secondary); font-size: 0.85rem"
                     >
-                      Hub 侧的撤销<b>不会切断机器上的隧道</b>：旧实例继续在线甚至可能占住别人的端口。
-                      停止使用要两边都做（本机停服务 + 维护者撤销），macOS
+                      Hub 侧的撤销<b>不会切断机器上的隧道</b>：旧实例继续在线甚至可能占住别人的端口。停止使用要两边都做（本机停服务 + 维护者撤销），macOS
                       上「退出应用」还可能留下孤儿的 frpc 进程。见
                       <a href="maintain.html#retire" style="color: var(--accent)"
                         >维护 · 退出与撤销</a

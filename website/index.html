@@ -81,16 +81,15 @@
             <span class="gradient">挂到云端</span>
           </h1>
           <p class="hero-subtitle">
-            你的 MRRC Modern 继续跑在自己家里，电台、电脑、天线都不动。
-            不需要公网 IP、不需要端口映射、不需要动路由器 —— 实例主动出站连上
-            Hub， 你就能从任何地方用浏览器操作同一台电台。
+            你的 MRRC Modern 继续跑在自己家里，电台、电脑、天线都不动。不需要公网 IP、不需要端口映射、不需要动路由器 —— 实例主动出站连上
+            Hub，你就能从任何地方用浏览器操作同一台电台。
           </p>
           <div class="hero-actions">
             <a href="start.html" class="btn btn-primary btn-large">
               <i class="fas fa-rocket"></i> 开始接入
             </a>
             <a href="design.html" class="btn btn-secondary btn-large">
-              <i class="fas fa-layer-group"></i> 看设计与实现
+              <i class="fas fa-layer-group"></i>看设计与实现
             </a>
             <a
               href="https://github.com/cheenle/mrrc_hub"
@@ -98,13 +97,13 @@
               target="_blank"
               rel="noopener"
             >
-              <i class="fab fa-github"></i> 源码
+              <i class="fab fa-github"></i>源码
             </a>
           </div>
           <div class="hero-stats">
             <div class="stat-item">
               <span class="stat-value">118–168 ms</span>
-              <span class="stat-label">公网往返实测</span>
+              <span class="stat-label">公网往返实测 · 迁港前</span>
             </div>
             <div class="stat-item">
               <span class="stat-value">5</span>
@@ -115,7 +114,7 @@
               <span class="stat-label">客户侧入站端口</span>
             </div>
             <div class="stat-item">
-              <span class="stat-value">Layer 0–7</span>
+              <span class="stat-value">Layer 0 + 1–8</span>
               <span class="stat-label">PTT 本地释放层</span>
             </div>
           </div>
@@ -137,7 +136,7 @@
               <h3>客户侧零入站</h3>
               <p>
                 你的电脑只<b>出站</b>一条常驻连接。没有公网
-                IP、没有端口映射、没有 UPnP， 甚至不需要知道自己的公网地址 ——
+                IP、没有端口映射、没有 UPnP，甚至不需要知道自己的公网地址 ——
                 家庭宽带、4G/5G、公司网都能跑。
               </p>
             </div>
@@ -147,16 +146,14 @@
               <p>
                 入口就是
                 <code>&lt;呼号&gt;.mrrc.vlsc.net</code
-                >。呼号既是租户名，也是账号标识，
-                不用再维护另一套用户名体系。大小写不敏感。
+                >。呼号既是租户名，也是账号标识，不用再维护另一套用户名体系。大小写不敏感。
               </p>
             </div>
             <div class="feature-card animate">
               <div class="icon"><i class="fas fa-hand"></i></div>
               <h3>PTT 释放永远在本地</h3>
               <p>
-                Hub 只是一条通道，<b>从不写下 PTT</b>。断线、掉网、半开连接，
-                一律由电台所在的那台机器强制回 RX —— 不依赖云端租约超时。
+                Hub 只是一条通道，<b>从不写下 PTT</b>。断线、掉网、半开连接，一律由电台所在的那台机器强制回 RX —— 不依赖云端租约超时。
               </p>
             </div>
             <div class="feature-card animate">
@@ -164,7 +161,7 @@
               <h3>逐跳校验证书</h3>
               <p>
                 整条链路端到端 TLS：浏览器到 Hub 用真证书，Hub
-                到你的实例也<b>校验证书</b>。 没有哪一跳是靠"关掉校验"换来的。
+                到你的实例也<b>校验证书</b>。没有哪一跳是靠「关掉校验」换来的。
               </p>
             </div>
           </div>
@@ -286,8 +283,7 @@
                   <td>
                     Hub 侧：nginx 日志不记查询串、hub 不经手拼串。<b
                       >实例侧已随之发布</b
-                    >（mrrc_modern <b>v1.25.4</b>：令牌走 Cookie / Bearer，
-                    旧的「查询串拼串」形式仅作兼容保留并告警 —— 其决定 AD-024）——
+                    >（mrrc_modern <b>v1.25.4</b>：令牌走 Cookie / Bearer，旧的「查询串拼串」形式仅作兼容保留并告警 —— 其决定 AD-024）——
                     同源 WS 本可只靠 Cookie
                   </td>
                 </tr>
@@ -299,10 +295,8 @@
                   </td>
                   <td>
                     拔网线这类"TCP
-                    还活着但对面已失联"的情形：实例侧已有可开的心跳闸门
-                    （默认关闭，Hub 模式建议 3–5
-                    s）；<b>隧道层的主动关流还没做</b>。
-                    在此之前靠实例本地多层释放兜底。
+                    还活着但对面已失联"的情形：实例侧已有可开的心跳闸门（默认关闭，Hub 模式建议 3–5
+                    s）；<b>隧道层的主动关流还没做</b>。在此之前靠实例本地多层释放兜底。
                   </td>
                 </tr>
                 <tr>
@@ -311,9 +305,7 @@
                   <td>
                     <code>https://portal.mrrc.vlsc.net</code>（通配证书覆盖，<code
                       >/apply</code
-                    >
-                    按来源 IP 限流）。命中呼号库自动核验，库外转人工；
-                    核验通过后运维授予并写入注册表。见<a
+                    >按来源 IP 限流）。命中呼号库自动核验，库外转人工；核验通过后运维授予并写入注册表。见<a
                       href="start.html#register"
                       style="color: var(--accent)"
                       >接入 · 注册</a
@@ -326,9 +318,8 @@
                   <td>
                     每个实例一张签给自己入口名的自签证书，公钥被 Hub
                     <b>钉在信任包里</b>、按名字校验 ——
-                    校验始终是开着的，自签靠"钉住它"通过， 不是靠关掉
-                    verification。
-                    <b>注意：现网当前实例尚未迁到这条链</b>（仍用旧证书名）。
+                    校验始终是开着的，自签靠「钉住它」通过，不是靠关掉
+                    verification。<b>注意：现网当前实例尚未迁到这条链</b>（仍用旧证书名）。
                   </td>
                 </tr>
                 <tr>
@@ -446,8 +437,8 @@
         <div class="footer-bottom">
           <p>© 2026 MRRC Cloud Hub · BG1SB</p>
           <p>
-            事实基线：2026-10-01 现场取证 · 运营事实以
-            <code>SDD/12 §12.8</code> 为准
+            事实基线：2026-10-01 现场取证 / 2026-10-06 复核 · 运营事实以
+            <code>SDD/12 §12.8</code>为准
           </p>
         </div>
       </div>

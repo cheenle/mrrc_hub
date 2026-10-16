@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="把 MRRC Modern 实例接入 MRRC Cloud Hub 的四步：前提自检、呼号注册、安装隧道、验证入口。含可直接复制的命令与期望输出。"
+      content="把 MRRC Modern 接入 MRRC Cloud Hub：前提自检、选路径（W103D 盒子或电脑）、呼号申请与注册、建立隧道、验证入口。含可直接复制的命令与期望输出。"
     />
     <meta name="author" content="BG1SB" />
     <meta name="theme-color" content="#000000" />
-    <title>接入四步 · MRRC Cloud Hub</title>
+    <title>接入 · MRRC Cloud Hub</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -42,9 +42,10 @@
           <li>
             <a href="start.html" class="active" aria-current="page">接入</a>
           </li>
-          <li><a href="use.html">使用与分享</a></li>
+          <li><a href="use.html">使用</a></li>
+          <li><a href="maintain.html">维护</a></li>
           <li><a href="trouble.html">排障</a></li>
-          <li><a href="design.html">设计与实现</a></li>
+          <li><a href="design.html">设计</a></li>
           <li>
             <a
               href="https://github.com/cheenle/mrrc_hub"
@@ -70,9 +71,10 @@
     </nav>
 
     <header class="hub-hero">
-      <h1>接入四步</h1>
+      <h1>从零到通</h1>
       <p>
-        前提自检 → 自助申请 → 装隧道 → 验证。全程只在本机执行，不需要动路由器，也不需要公网 IP。
+        前提自检 → 选路径 → 申请注册 → 接入 → 验证。新版本的 MRRC Modern
+        在应用里就能走完，不需要动路由器，也不需要公网 IP。
       </p>
     </header>
 
@@ -81,10 +83,11 @@
         <h4>本页</h4>
         <ul>
           <li><a href="#precheck">1 · 前提自检</a></li>
-          <li><a href="#register">2 · 注册</a></li>
-          <li><a href="#tunnel">3 · 装隧道</a></li>
-          <li><a href="#verify">4 · 验证</a></li>
-          <li><a href="#restart">5 · 重启之后</a></li>
+          <li><a href="#path">2 · 选路径</a></li>
+          <li><a href="#register">3 · 申请与注册</a></li>
+          <li><a href="#tunnel">4 · 建立隧道</a></li>
+          <li><a href="#verify">5 · 验证</a></li>
+          <li><a href="#restart">6 · 重启之后</a></li>
         </ul>
       </nav>
 
@@ -146,26 +149,83 @@
               </table>
             </div>
             <div class="hub-callout warn">
-              <span class="hub-callout-title">三个端口是不同的事</span>
+              <span class="hub-callout-title">两个端口不是一回事</span>
               <p>
                 隧道控制口是
-                <code>tunnel.mrrc.vlsc.net:8989</code>（你的电脑连出去）；入口是
-                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>（浏览器连进来）。<b>它们都要出站可达</b>，但只有前者是接入时必须打通的。
+                <code>tunnel.mrrc.vlsc.net:8989</code>（你的机器连出去，接入时必须打通）；入口是
+                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>（浏览器连进来，443，不需要你开放任何入站端口）。
               </p>
             </div>
           </li>
 
+          <li id="path">
+            <h3>选路径：盒子还是电脑</h3>
+            <p>
+              两条路的终点完全一样 —— 一个跑着 MRRC Modern、挂着隧道的实例；区别只在这台机器是什么、要不要常开。
+            </p>
+            <div class="hub-tracks">
+              <div class="hub-track pri">
+                <h3>
+                  <i class="fas fa-box" style="color: var(--accent)"></i>
+                  W103D 盒子
+                </h3>
+                <p>
+                  百元级的常开小盒子，镜像里已经装好 MRRC Modern
+                  与隧道客户端。适合想让电台一直在线、又不想占一台电脑的人。
+                </p>
+                <ul>
+                  <li>开箱 → 网线/配网 → 在盒子的页面上把电台配好</li>
+                  <li>在应用里「接入云端」走同一套申请流程</li>
+                  <li>完整步骤（含踩过的坑）在 MRRC Modern 的 W103D 指南里</li>
+                </ul>
+                <a
+                  href="https://www.vlsc.net/mrrc_modern/zh/w103d.html"
+                  class="btn btn-secondary"
+                  style="margin-top: 1.25rem"
+                >
+                  <i class="fas fa-book"></i> W103D 完整指南
+                </a>
+              </div>
+              <div class="hub-track">
+                <h3>
+                  <i class="fas fa-desktop" style="color: var(--accent)"></i>
+                  电脑（macOS / Windows / Linux）
+                </h3>
+                <p>
+                  已经用打包版 MRRC Modern
+                  在局域网里跑通的那台机器。装好隧道后，它在公网上就是同一个实例。
+                </p>
+                <ul>
+                  <li>新版本（v1.24.0 起）在应用里点几下就完成，见第 3–4 步</li>
+                  <li>旧版本用仓库里的安装器脚本，见第 4 步的备选路径</li>
+                  <li>机器关机=离线；入口会 502，隧道不自作主张</li>
+                </ul>
+              </div>
+            </div>
+          </li>
+
           <li id="register">
-            <h3>注册：拿到你的名字与端口</h3>
+            <h3>申请与注册：拿到你的名字</h3>
             <p>
               呼号是你在 Hub
-              上的身份。注册完成后你会得到三样东西，后面两步都要用。
+              上的身份。入口名、证书名、隧道归属都由它派生，所以这一步先走完，再谈接入。
             </p>
 
             <div class="hub-callout ok">
               <span class="hub-callout-title">
-                <span class="hub-badge live">今天可用</span>自助申请（公网入口已上线）
+                <span class="hub-badge live">推荐路径</span>在应用里申请（v1.24.0 起）
               </span>
+              <p>
+                打开 MRRC Modern 的<b>「设置 → 接入云端（Cloud Hub）」</b>，填呼号与联系方式（可选）提交即可。
+                运维批准一到，<b>应用会自己完成剩下的全部动作</b>：签一张签给
+                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>的自签证书、向 Hub
+                登记公钥（私钥不出本机）、写好自己的隧道配置、启动隧道，并把会话心跳设为
+                5 秒。你不需要复制任何口令或粘贴任何命令。
+              </p>
+            </div>
+
+            <div class="hub-callout">
+              <span class="hub-callout-title">也可以直接走门户</span>
               <p>
                 打开
                 <code>https://portal.mrrc.vlsc.net/</code
@@ -186,9 +246,8 @@
                 </li>
               </ul>
               <p>
-                核验通过后，运维走第四步<b>分配</b>：把呼号标签与隧道端口写进注册表，然后把三样东西发给你：<b>呼号标签</b>（入口就是
-                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>）、<b>隧道端口</b>（形如
-                <code>188xx</code>）、<b>隧道凭证</b>（别贴进公开场合）。拿到这三样，进第 3 步装隧道。
+                核验通过后由运维<b>分配</b>：把呼号标签与隧道端口写进注册表。拿到批准后，回到应用里连接即可（旧版产品会给你标签、端口与隧道凭证，走第
+                4 步的手动路径）。
               </p>
             </div>
 
@@ -223,10 +282,22 @@
           </li>
 
           <li id="tunnel">
-            <h3>装隧道</h3>
+            <h3>建立隧道</h3>
             <p>
-              隧道把你自己机器上的电台服务，接到 Hub
-              上属于你呼号的那个回环端口。你的电脑只连出去，不开放任何入站端口。
+              隧道把你机器上的电台服务，接到 Hub
+              上属于你呼号的那个回环端口。你的机器<b>只连出去</b>，不开放任何入站端口。
+            </p>
+
+            <div class="hub-callout ok">
+              <span class="hub-callout-title">应用内接入（推荐）</span>
+              <p>
+                「设置 → 接入云端（Cloud Hub）」提交申请后，批准一到应用自动建隧道
+                —— macOS 与 Windows 的打包版、盒子的出厂镜像都走这条路，不需要终端。
+              </p>
+            </div>
+
+            <p>
+              <b>备选：手动脚本</b>（旧版产品、无界面环境，或你想自己控制每个细节）：
             </p>
 
             <div class="hub-code">
@@ -362,9 +433,8 @@ curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net/api/health     # 期望 401</code>
                     <td>MRRC 服务</td>
                     <td>
                       <b>看你装的是哪个版本：</b><br />
-                      · <b>打包版（当前 v1.25.4）</b>—— 按正常应用安装，已带 Hub
-                      前置能力（路径前缀 / 令牌不进 URL / 会话遥测 / PTT
-                      活性闸门）。<br />
+                      · <b>打包版（当前 v1.27.0）</b>—— 按正常应用安装，随应用启动；Hub
+                      接入写下的心跳阈值与证书都在启动时生效。<br />
                       · <b>源码运行</b> ——
                       非常驻，重启后要手动起（下面就这个情况）。
                     </td>
@@ -390,6 +460,17 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
                 <code>USB Audio Device</code>这类<b>带空格的值</b>。<code>source</code>会把值里的词当命令去执行；上面这个循环才是正确的加载方式。这不是风格问题，是会真的报错。
               </p>
             </div>
+
+            <div class="hub-callout warn">
+              <span class="hub-callout-title">重签证书之后，必须重启进程</span>
+              <p>
+                证书是在<b>启动时读进内存</b>的：换机器、重装、重签证书之后，如果只替换了文件而不重启
+                MRRC 服务，入口会一直是 502，而本机看起来一切正常。换机的完整清单见
+                <a href="maintain.html#rotate" style="color: var(--accent)"
+                  >维护 · 换机与证书</a
+                >。
+              </p>
+            </div>
           </li>
         </ol>
 
@@ -400,10 +481,12 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
           >
           · 连不上 →
           <a href="trouble.html" style="color: var(--accent)">排障</a> ·
-          想知道每一层为什么这么设计 →
+          换机器/退出/叫人来修 →
+          <a href="maintain.html" style="color: var(--accent)">维护与生命周期</a>
+          · 想知道每一层为什么这么设计 →
           <a href="design.html" style="color: var(--accent)">设计与层层实现</a>
           <br />
-          本页事实基线：2026-10-01 现场取证。命令与期望输出均在现网实例上实测。
+          本页事实基线：2026-10-16 现场复核；命令与期望输出均在现网实例上实测过。
         </p>
       </div>
     </main>
@@ -423,8 +506,9 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
             <h4>文档</h4>
             <ul>
               <li><a href="index.html">概览</a></li>
-              <li><a href="start.html">接入四步</a></li>
+              <li><a href="start.html">接入</a></li>
               <li><a href="use.html">使用与分享</a></li>
+              <li><a href="maintain.html">维护与生命周期</a></li>
               <li><a href="trouble.html">排障</a></li>
               <li><a href="design.html">设计与层层实现</a></li>
             </ul>
@@ -456,7 +540,7 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
         <div class="footer-bottom">
           <p>© 2026 MRRC Cloud Hub · BG1SB</p>
           <p>
-            事实基线：2026-10-01 现场取证 · 运营事实以
+            事实基线：2026-10-16 现场复核 · 运营事实以
             <code>SDD/12 §12.8</code>为准
           </p>
         </div>

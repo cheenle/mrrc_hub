@@ -40,11 +40,12 @@
         <ul class="nav-links">
           <li><a href="index.html">概览</a></li>
           <li><a href="start.html">接入</a></li>
-          <li><a href="use.html">使用与分享</a></li>
+          <li><a href="use.html">使用</a></li>
+          <li><a href="maintain.html">维护</a></li>
           <li><a href="trouble.html">排障</a></li>
           <li>
             <a href="design.html" class="active" aria-current="page"
-              >设计与实现</a
+              >设计</a
             >
           </li>
           <li>
@@ -96,7 +97,7 @@
         <section id="layers">
           <h2>分层</h2>
           <p>
-            整条链路只有一件事在流动：<b>把浏览器的一个动作，送到那台具体的电台上，再把结果送回来</b>。下面六层是这件事在物理上的六个落点。
+            整条链路只有一件事在流动：<b>把浏览器的一个动作，送到那台具体的电台上，再把结果送回来</b>。下面五层是这件事在物理上的五个落点；证书、身份与门户横穿所有层，单独列为一条。
           </p>
           <div class="hub-stack">
             <div class="hub-layer">
@@ -145,16 +146,6 @@
             <div class="hub-layer">
               <div class="hub-layer-id">L4</div>
               <div class="hub-layer-body">
-                <strong>海外边缘</strong>
-                <span
-                  ><code>www.vlsc.net</code>的 443 路径入口。标准端口 + 真证书
-                  + 前缀透明。定位是<b>退化路</b>，不是主路。</span
-                >
-              </div>
-            </div>
-            <div class="hub-layer">
-              <div class="hub-layer-id">L5</div>
-              <div class="hub-layer-body">
                 <strong>客户端</strong>
                 <span
                   >浏览器 / PWA / 原生 App。负责展示与交互，<b
@@ -169,7 +160,7 @@
               <div class="hub-layer-body">
                 <strong>证书 · 身份 · 审计 · 遥测</strong>
                 <span>贯穿所有层，不属于任何一层：通配证书（DNS-01
-                  签发、每日自动续期）、呼号即租户名与账号标识、访问日志只记路径不记查询串、会话并发遥测。
+                  签发、每日自动续期）、呼号即租户名与账号标识、门户（申请/核验/授予/撤销、远程协助端点与信任判据）、访问日志只记路径不记查询串、会话并发遥测。
                 </span>
               </div>
             </div>
@@ -216,15 +207,14 @@
               </div>
             </div>
             <div class="arch-card">
-              <span class="label">L4 海外边缘（已取消）</span>
-              <div class="endpoint">443 路径代理</div>
+              <span class="label">横切 · 门户与身份</span>
+              <div class="endpoint">呼号自助 Portal</div>
               <div class="dir">
-                反代整条会话（含全部数据通道），并告知实例当前路径前缀
+                申请 → 核验 → 授予 → 登记（enroll）→ 撤销；远程协助的端口分配、心跳与强制结束
               </div>
               <div class="payload">
-                <b>不做什么：</b>不是主路。多一跳海外，音频与 PTT 延迟明显增加。
-                <br /><br />
-                <b>失效表现：</b><code>502</code>，或<b>间歇性无响应</b>（2026-10-01 已复现，见现状一节）。
+                <b>不做什么：</b>不接触你的会话凭据；不保管协助口令（请求结构里就没有这个字段）；核验通过之前不写注册表。 <br /><br />
+                <b>失效表现：</b>注册/状态查询不可用；已接入的实例不受影响（门户不在数据路径上）。
               </div>
             </div>
           </div>
@@ -297,6 +287,20 @@
                   </td>
                 </tr>
                 <tr>
+                  <td><code>AD-H11</code><br />一实例一证</td>
+                  <td>逐实例证书校验名（目标态是设备 mTLS）</td>
+                  <td>
+                    共享静态 token 一旦泄露就是全 fleet 泄露；先把逐实例的校验名与信任包做绝，隧道自身的设备证书留到阶段 2，是有意分两步走。
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>AD-H13</code><br />复用而不新建</td>
+                  <td>遥测、升级、诊断都复用产品侧既有实现</td>
+                  <td>
+                    为 Hub 单造一套升级/诊断通道，等于把同一件事维护两遍，两边会先分叉再打架。
+                  </td>
+                </tr>
+                <tr>
                   <td><code>AD-H15</code><br />呼号即身份</td>
                   <td>租户名 = 呼号；入口 = 呼号.域名</td>
                   <td>
@@ -364,7 +368,7 @@
                 <tr>
                   <td>数据通道透明转发</td>
                   <td><span class="hub-badge live">已跑通</span></td>
-                  <td>五条通道的握手、长连接与关闭语义，与直连一致</td>
+                  <td>控制 / 频谱 / 收音频 / 发音频四路固定，天调（ATR-1000）可选；握手、长连接与关闭语义与直连一致</td>
                 </tr>
                 <tr>
                   <td>逐跳证书校验</td>
@@ -403,7 +407,7 @@
                     <span class="hub-badge todo">隧道层待做</span>
                   </td>
                   <td>
-                    「TCP 还活着但对端已失联」的情形（拔网线、NAT 掉表）。实例侧已有可开的心跳闸门（默认关闭，Hub 模式建议 3–5 s）；<b>隧道层的主动关流还没做</b> ——
+                    「TCP 还活着但对端已失联」的情形（拔网线、NAT 掉表）。实例侧已有心跳闸门：经应用「接入云端」上线的实例<b>自动设为 5 秒</b>，手动配置默认关闭；<b>隧道层的主动关流还没做</b> ——
                     在此之前释放靠实例本地多层兜底，会慢一些。
                   </td>
                 </tr>
@@ -415,8 +419,16 @@
                     HTTP），服务为
                     <code>mrrc-portal.service</code>，本体只绑回环；对外经
                     nginx 暴露为
-                    <code>https://portal.mrrc.vlsc.net</code>并在该层限流。授予后
-                    由 30 s 的 <code>mrrc-hub-routes.timer</code>自动重生成路由与信任包；需人工的只有 <code>/admin</code>里那一步核验与批准。
+                    <code>https://portal.mrrc.vlsc.net</code>并在该层限流。自助取回凭证、换机后的证书指纹判据、远程协助的端口分配与强制结束都在这里；授予后
+                    由 30 s 的 <code>mrrc-hub-routes.timer</code>自动重生成路由与信任包；需人工的只有核验与批准那一步。
+                  </td>
+                </tr>
+                <tr>
+                  <td>远程协助通道（客户发起）</td>
+                  <td><span class="hub-badge live">已实现</span></td>
+                  <td>
+                    实例侧 <code>help_session.py</code>：本机生成凭据、只监听回环，经隧道开一条限时 SSH；门户负责端口分配、心跳与强制结束。凭据不落盘、不进日志、结构上不进门户请求体。v1.26.0
+                    起随产品发布。
                   </td>
                 </tr>
                 <tr>
@@ -425,8 +437,8 @@
                   <td>
                     <code>make_instance_cert.sh</code>签一张<b>签给实例自己入口名</b>的自签证书，公钥钉进
                     <code>trust-bundle.pem</code>，nginx 按
-                    <code>$mrrc_tls_name</code>逐实例校验 —— 校验始终开着，自签靠「钉住它」通过。<b>现网当前实例尚未迁到这条链</b>（注册表第三列仍为旧的
-                    <code>radio.vlsc.net</code>）。
+                    <code>$mrrc_tls_name</code>逐实例校验 —— 校验始终开着，自签靠「钉住它」通过。2026-10-16
+                    复核：在册实例的校验名已逐台生成（注册表第三列可选，缺省即自己的入口名）；换机/重签之后由路由 timer 自动收录。
                   </td>
                 </tr>
                 <tr>
@@ -492,7 +504,7 @@
           <div class="hub-callout ok">
             <span class="hub-callout-title">文档与现网不一致时以现网为准</span>
             <p>
-              本页所有事实来自 2026-10-01 现场取证、2026-10-06 复核
+              本页所有事实来自 2026-10-01 现场取证、2026-10-16 复核
               对现网实际配置、证书与注册表的现场读取。如果你发现页面说的和实际不符，<b>是页面该改</b> —— 欢迎提 issue
               指出。
             </p>
@@ -502,11 +514,13 @@
         <p class="hub-note">
           ← 回到 <a href="index.html" style="color: var(--accent)">概览</a> ·
           照做走一遍
-          <a href="start.html" style="color: var(--accent)">接入四步</a> ·
+          <a href="start.html" style="color: var(--accent)">接入</a> ·
+          换机/退出/远程协助
+          <a href="maintain.html" style="color: var(--accent)">维护</a> ·
           遇到问题 <a href="trouble.html" style="color: var(--accent)">排障</a>
           <br />
-          本页事实基线：2026-10-01 现场取证、2026-10-06 复核（现网 nginx
-          配置、证书有效期、注册表内容、入口可用性实测）。
+          本页事实基线：2026-10-01 现场取证 / 2026-10-16 复核（现网 nginx
+          配置、证书有效期、注册表与信任包、延迟实测）。
         </p>
       </div>
     </main>
@@ -526,8 +540,9 @@
             <h4>文档</h4>
             <ul>
               <li><a href="index.html">概览</a></li>
-              <li><a href="start.html">接入四步</a></li>
+              <li><a href="start.html">接入</a></li>
               <li><a href="use.html">使用与分享</a></li>
+              <li><a href="maintain.html">维护与生命周期</a></li>
               <li><a href="trouble.html">排障</a></li>
               <li><a href="design.html">设计与层层实现</a></li>
             </ul>
@@ -559,7 +574,7 @@
         <div class="footer-bottom">
           <p>© 2026 MRRC Cloud Hub · BG1SB</p>
           <p>
-            事实基线：2026-10-01 现场取证 / 2026-10-06 复核 · 运营事实以
+            事实基线：2026-10-01 现场取证 / 2026-10-16 复核 · 运营事实以
             <code>SDD/12 §12.8</code>为准
           </p>
         </div>

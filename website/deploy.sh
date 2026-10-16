@@ -54,8 +54,9 @@ echo ""
 
 echo "检查必需文件..."
 REQUIRED_FILES=(
-	index.html start.html use.html trouble.html design.html
+	index.html start.html use.html maintain.html trouble.html design.html
 	css/octen.css css/hub.css js/hub.js README.md
+	images/station-topology.svg
 )
 for f in "${REQUIRED_FILES[@]}"; do
 	if [[ ! -f "$f" ]]; then
@@ -171,7 +172,7 @@ rm -f "\$TARBALL"
 echo ""
 echo "发布完成。逐页实测："
 echo "  /          → \$(curl -s -o /dev/null -w '%{http_code}' "$SITE_URL/")"
-for p in index start use trouble design; do
+for p in index start use maintain trouble design; do
 	echo "  /\$p.html → \$(curl -s -o /dev/null -w '%{http_code}' "$SITE_URL/\$p.html")"
 done
 EOF

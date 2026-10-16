@@ -357,3 +357,46 @@ clublog.org 刷新，与 RumLogNG 同源）。Portal **直接采用同一套规�
 `command="cat .../clublog_users.json"`，因此它**只能读这一个文件**，拿不到 shell（已实测：
 请求执行 `id` 仍只返回 JSON）。同步脚本还带**规模校验门**（<10 万条即拒绝替换），
 避免把好索引换成空索引。
+
+## 12.10 实例入口的静态资源：gzip + 边缘缓存（2026-10-17）
+
+**触发**：运维反映 `https://ba4eg.mrrc.vlsc.net/` 「每次加载都很慢」。
+
+**实况（现场实测）**：实例侧（`mrrc_modern` 的 `serve_static`）只发 `ETag`/`Last-Modified`，
+不发 `Cache-Control`，也不实现条件请求 —— 带 `If-None-Match` 或 `If-Modified-Since` 仍返回
+**200 与完整 body**（`opus_wasm.js` 534,520 B，实测复核）。而 hub 边缘的 `gzip_types` 是
+nginx 默认值（只有 `text/html`），所以 JS/CSS **原样过隧道**。首屏 13 个引用合计 816 KB；
+hub 访问日志里同一浏览器反复出现 `GET /modules/opus_wasm.js 200 534520`。
+
+**边缘做三件事**（配置在 `deploy/nginx/`，`deploy/deploy_hub_routes.sh` 安装）：
+
+| 项 | 值 |
+| --- | --- |
+| gzip | `text/css` `application/javascript` `application/json` `image/svg+xml`（vhost server 级） |
+| 资源缓存 | `proxy_cache` 1 小时、`max_size=1g`、落 `/var/lib/nginx/cache-mrrc`、键 `实例+URI+query`；`proxy_cache_valid 200 1h`（**只缓存 200**）、`proxy_cache_revalidate`、`proxy_cache_lock`、`proxy_cache_background_update`、`proxy_cache_use_stale updating` |
+| 响应头 | `map $status`：200/304 → `Cache-Control: public, max-age=3600`；其余 → 不发 |
+
+**三条不变量（改这一块之前先读）**：
+
+1. **只缓存 200**。未登录取静态件会拿到重定向（302/307）；它一旦带上 `max-age`，
+   已登录用户也会在一小时内反复被打回登录页 —— 缓存按 URI 分键、不区分 Cookie，
+   所以"缓存一个 307"就是"把登录页固化成整个 TTL"。
+2. **硬刷新必须穿透**。`Cache-Control: no-cache` 的请求由
+   `proxy_cache_bypass $mrrc_client_nocache` 回源；普通重新加载的 `max-age=0` 仍走缓存。
+3. **两个 location 共用同一份上游定义**（`/etc/nginx/snippets/mrrc-hub-upstream.conf`）。
+   漏抄一处 `proxy_ssl_verify` 就是 NFR-H021 被悄悄关掉而 `nginx -t` 与页面都正常 ——
+   这也是 X1 漂移的形态，故 `tests/test_hub_vhost_template.py` 钉住"每个 location 都必须
+   include 它"。
+
+**刻意接受的取舍**：未登录的请求也能从边缘拿到静态件（缓存不按 Cookie 分键）。那些文件
+随安装包公开、不含密钥；换来的是"登录之后的一切都不再穿隧道"。**不做** HTML 的边缘缓存
+（`/` 的响应取决于 Cookie：未登录重定向、已登录 200）。
+
+**实例侧（产品侧）的对偶**：`mrrc_modern` 的 `serve_static` 发同样的两个常量（文档类
+`no-cache`、其余 1 小时），并对条件请求答 304，有扩展名的缺失路径返回 404（不再回落
+40 KB 的 `index.html`）。边缘管公网路径，实例管局域网直连与 B2/B3 退化路径。
+
+**验收**：`deploy/verify_hub_cache.sh <标签> --token <mrrc_auth 值>`（8 条断言）。
+2026-10-17 在 ba4eg 上实测：改动前 3 passed / 5 failed（恰好落在"没缓存头、没命中、
+没 304、没 BYPASS、没 gzip"），改动后 8 passed / 0 failed；`opus_wasm.js` 传输
+534,520 B → 170,402 B。

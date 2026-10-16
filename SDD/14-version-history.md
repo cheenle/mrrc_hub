@@ -2,6 +2,35 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.37 — 2026-10-17 — 实例入口：静态资源 gzip + 边缘缓存；X1 漂移收口
+
+**触发**：运维反映 `https://ba4eg.mrrc.vlsc.net/` 「每次加载都很慢」，要求"正常访问不必
+每次都重新加载大静态文件，但要能强制刷新"。
+
+**根因三条（现场实测，非推测）**：实例侧不发 `Cache-Control`、不实现条件请求
+（带 `If-None-Match` 仍返回 200 与完整 534 KB）、hub 边缘只压 `text/html`（JS/CSS 原样过隧道）。
+
+**改了什么**：
+
+- `deploy/nginx/` 三份配置入库（vhost、上游片段、缓存与两个 `map`），
+  `deploy_hub_routes.sh` 由"转义 heredoc 拼配置"改为**安装这三份真文件**，
+  并在 `nginx -t` 失败时从备份还原 —— 配置藏在 heredoc 里正是现网与仓库漂移的成因。
+- **X1 漂移收口**（`deploy/README.md` X1 行原计划"只记录不改"）：`proxy_ssl_name`
+  改回逐实例的 `$mrrc_tls_name`、vhost 文件名改回现网的 `mrrc-instances`、
+  自签注释随模板改掉。上游定义收成一处片段、两个 location 共用，
+  `tests/test_hub_vhost_template.py` 钉住"每个 location 都必须 include 它"与
+  "只缓存 200、只有 200/304 带缓存头"。重跑脚本不再是破坏性操作（实测重跑后
+  `nginx -t` 通过、在线实例无 502）。
+- `deploy/verify_hub_cache.sh`：8 条边缘验收断言，含"302 不落盘"与"硬刷新穿透"。
+
+**影响**：新增 NFR 面的取舍记在 `12 §12.10`（只缓存 200、硬刷新穿透、两 location 共用上游、
+未登录可拿静态件）；不触碰 NFR-H021 的校验强度（片段里校验仍为 on、逐实例）。
+
+**验证**：ba4eg 上改动前 3/8 通过（失败项恰好是"没缓存头、没命中、没 304、没 BYPASS、没 gzip"），
+改动后 8/8；`opus_wasm.js` 534,520 B → 170,402 B；未登录取冷资源得 302 且其后带 Cookie
+的请求仍拿到 200（证明重定向没落盘）。产品侧对偶改动见 `mrrc_modern`（同一套值的
+`Cache-Control` + 304 + 有扩展名缺失件 404）。
+
 ## V0.36 — 2026-10-16 — Portal 页面不再在请求里探测：4–11 s → 约 10 ms
 
 **触发**：运维反映 `https://portal.mrrc.vlsc.net/admin?view=instance&label=bg7kxr` 「访问非常慢」。

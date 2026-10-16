@@ -2,7 +2,7 @@
 
 > **状态（2026-10-01 复核）：阶段 1 已部署并在真实公网验证通过。** 本目录的脚本是那一次的落地工具。
 > 下面「未部署」的叙述是当时的现场记录，保留供追溯。
-> **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」—— 其中 X1 会让现网退化（X2/X3 已随 V0.21 失去对象，存史）。**
+> **重跑任何脚本前，先读下面的「⚠️ 脚本与现网漂移」。X1 已于 2026-10-17 收口（校验名与配置模板都进了仓库），X2/X3 已随 V0.21 失去对象，存史。**
 
 ## 注册表第三列：上游 TLS 校验名（老实例会被它绊住）
 
@@ -55,21 +55,58 @@ upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL hands
 ## ⚠️ 脚本与现网漂移（2026-10-01 取证，2026-10-02 按 V0.21 复核）
 
 **仓库脚本落后于现网**。2026-10-01 记的是三条；V0.21 删掉海外边缘那条反代路径之后，**X2 / X3 已失去对象**
-（保留为记录，不删行），X1 里原先的三项倒退有两项已对齐、只剩两处仍是活的漂移。
-重跑 `deploy_hub_routes.sh` 仍会让现网退化，**务必先对齐再跑**：
+（保留为记录，不删行），X1 里原先的三项倒退有两项已对齐、最后一处已于 2026-10-17 收口：
 
 | # | 漂移 | 后果 |
 | --- | --- | --- |
-| **X1**（**仍是活的**） | **已对齐的两项**：脚本现在只生成**一个** `listen 443 ssl` 的 vhost（`8899` / `9988` 两个口已随 V0.21 取消，无处可退），并且已经写入 `proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem`。**仍漂移的两处**（读脚本取证）：① `proxy_ssl_name` 用的是写死的 `${MRRC_UPSTREAM_SSL_NAME:-radio.vlsc.net}`（第 24、88 行），**不引用 `gen_hub_routes.py` 生成的 `$mrrc_tls_name`**；② vhost 头部注释仍写 `currently self-signed: a trusted one needs DNS-01`（第 58–59 行），而现网是真 Let's Encrypt（DNS-01 已跑通并每日续期） | 重跑会把逐实例的**校验名压平成 `radio.vlsc.net`** ⇒ 凡按自己入口名 `<标签>.mrrc.vlsc.net` 签证的实例立即 502（`bg1sb` 的第三列本来就写着 `radio.vlsc.net`，反而不受影响）。信任包这一项不再倒退；`$mrrc_tls_name` 的 map 仍会被生成（脚本第 49 行会跑生成器），只是 vhost 不再引用它。② 属注释误导，不影响运行 |
+| **X1**（**2026-10-17 已收口**） | 三项倒退全部对齐：① 只生成**一个** `listen 443 ssl` 的 vhost（`8899` / `9988` 两个口已随 V0.21 取消）；② 写入 `proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem`；③ **校验名改回逐实例的 `$mrrc_tls_name`**，且配置不再用转义 heredoc 拼 —— 上游定义收进 `deploy/nginx/mrrc-hub-upstream.conf` 一处，vhost 与资源 location 都 `include` 它，脚本只做安装。vhost 头部那句「currently self-signed」也随模板一起改掉了 | 原风险：重跑会把逐实例校验名压平成 `radio.vlsc.net` ⇒ 凡按自己入口名 `<标签>.mrrc.vlsc.net` 签证的实例立即 502。现在重跑 `deploy_hub_routes.sh` 是安全的（2026-10-17 实测重跑一遍，`nginx -t` 通过、全部在线实例无 502），且 `tests/test_hub_vhost_template.py` 钉住「每个 location 都必须 include 上游片段、不得出现被关掉的校验」 |
 | **X3**（存史，**已失去对象**） | 原漂移：边缘 nginx 里指向 hub 的两处 `proxy_pass`（`/mrrc_modern/BG1SB/` 与 `/mrrc_portal/`）为 **hub 的 IPv4 字面量** `8.160.161.80`，不是脚本里的主机名 | **V0.21 删除了海外边缘那条反代路径**，这两处 `proxy_pass` 连同所在的 vhost 段一起不再存在 ⇒ 本条今天没有对象。**留档理由**：根因（裸主机名 + AAAA ⇒ nginx 无 `resolver` 时只在启动解析一次，于是选中不可达的 IPv6）与旧 hub 的 v6 不可达都还在记录里，而**新机器的 IPv6 可达性未取证**（搬迁后没人复测）；将来若再引入「主机名式 upstream」，同一条会再咬一次（见 `SDD/12 §12.8` 排障增补、`SDD/14` V0.19） |
 | **X2**（存史，**已失去对象**） | 原漂移：`deploy_www_edge.sh` 只实现 `redirect` / `proxy`（子域）两种模式；现网实际用的是**第三种** `path proxy`（Host 覆盖 + 路径大小写规范化 301 + `X-Forwarded-Prefix` + `proxy_redirect` 回写） | **V0.21 删除了边缘路径** ⇒ 现网已没有那段手工配置可供降级，整个脚本也就没有落点（脚本仍在仓内，两种模式的代码未动，可复核；当时 www 上的 `/tmp/deploy_www_edge.sh` 与仓库版本**仅空白差异**，说明那段配置是手工落的）。**留档理由**：那段 `path proxy` 从来没有脚本能复现 —— 将来若再需要「另一台机器上的路径入口」，得先把它写回脚本 |
 
-> **X1 现在是唯一需要防的一条**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
-> `proxy_ssl_name $mrrc_tls_name`）里，信任包那一半已经写回脚本，**校验名那一半仍是手工落的**。
-> 在 `proxy_ssl_name $mrrc_tls_name` 写回脚本之前，**不要重跑 `deploy_hub_routes.sh`**。
+> **X1 已收口（2026-10-17）**：per-instance 证书链（`make_instance_cert.sh` → `trust-bundle.pem` →
+> `proxy_ssl_name $mrrc_tls_name`）两半都在仓库里了 —— 信任包与校验名各一处，且都在
+> `deploy/nginx/mrrc-hub-upstream.conf` 这一个文件里。`deploy_hub_routes.sh` 可以放心重跑。
 > 参见 `SDD/12 §12.8 「实例证书链」`。
 
-**处置**：只记录，**不改脚本**（改部署脚本的风险与验证成本超出文档任务范围）。对齐留作独立变更。
+**处置**：X1 原计划「只记录、不改脚本」，2026-10-17 与静态资源缓存一并改了（改模板
+正是为了让「下次加一个 location」不再有漏抄校验设置的余地）。X2 / X3 继续留档不改。
+
+## 静态资源：gzip + 边缘缓存（2026-10-17）
+
+实例侧（`mrrc_modern`）只发 `ETag`/`Last-Modified`，不发 `Cache-Control`，也不实现条件
+请求 —— 实测带 `If-None-Match` 仍返回 200 与完整 534 KB。于是「每次加载都慢」由三件事叠成：
+不压缩（nginx 默认只压 `text/html`，JS/CSS 原样过隧道）、不缓存、重新校验必然全量重传。
+首屏静态件 816 KB → gzip 后 274 KB → 命中缓存后 0 B。
+
+边缘因此做三件事，配置都在 `deploy/nginx/`，由 `deploy_hub_routes.sh` 安装：
+
+| 项 | 值 | 位置 |
+| --- | --- | --- |
+| gzip | `text/css` `application/javascript` `application/json` `image/svg+xml` | vhost server 级 |
+| 资源缓存 | `proxy_cache` 1 小时（`keys_zone=mrrc_assets`，上限 1 G，落 `/var/lib/nginx/cache-mrrc`），**只缓存 200**，按 `实例+URI+query` 分键 | vhost 的静态资源 location |
+| 响应头 | 只有 200/304 才发 `Cache-Control: public, max-age=3600` | `deploy/nginx/mrrc-hub-cache.conf` 的 `map $status` |
+
+四条容易踩的：
+
+1. **307/404 不能被缓存**。未登录取静态件会拿到重定向；这个响应一旦带上 `max-age`，
+   已登录用户也会在一小时内反复被打回登录页。所以 `proxy_cache_valid` 只列 200，
+   且 `Cache-Control` 由 `map $status` 只在 200/304 上发（重定向只带 `X-Cache-Status` 这个诊断头）。
+2. **硬刷新要能穿透**。带 `Cache-Control: no-cache` 的请求由
+   `proxy_cache_bypass $mrrc_client_nocache` 直接回源；普通重新加载发的 `max-age=0` 仍走缓存 ——
+   否则每次 F5 都把整套静态件重新拉过隧道。
+3. **两个 location 必须用同一份上游定义**（`/etc/nginx/snippets/mrrc-hub-upstream.conf`）。
+   漏抄一处就是 NFR-H021 被悄悄关掉，而 `nginx -t` 与页面都正常。
+   `tests/test_hub_vhost_template.py` 钉住这一点。
+4. **未登录的请求能从边缘拿到静态件**（缓存按 URI 分键、不区分 Cookie）。这是刻意的取舍：
+   那些文件本来就随安装包公开、不含密钥；换来的是登录之后的一切都不再穿隧道。
+   若将来某类资源确实不能公开，就不要用扩展名把它放进这个 location。
+
+验收：`./verify_hub_cache.sh <标签> --token <mrrc_auth 值>`（8 条断言：未知实例 404、
+资源 200、缓存头、HIT、条件请求 304、硬刷新 BYPASS、gzip 体积、HTML 不进缓存）。
+
+回滚：恢复 vhost 备份，删掉 `/etc/nginx/conf.d/mrrc-hub-cache.conf`、
+`/etc/nginx/snippets/mrrc-hub-upstream.conf` 与 `/var/lib/nginx/cache-mrrc`，
+再 `nginx -t && systemctl reload nginx`。
 
 ## 已探明的事实（2026-09-30 实测，**指迁移前那台 `8.160.161.80`，仅作历史**）
 

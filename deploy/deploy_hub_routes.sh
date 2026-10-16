@@ -3,7 +3,11 @@
 #
 #   sudo ./deploy_hub_routes.sh
 #
-# Replaces the per-instance vhost with a single wildcard server block:
+# Installs ONE wildcard vhost for all instances, plus its two companions:
+#
+#   deploy/nginx/mrrc-instances.vhost       → /etc/nginx/sites-available/mrrc-instances
+#   deploy/nginx/mrrc-hub-upstream.conf     → /etc/nginx/snippets/   (hub → 实例那一跳的唯一定义)
+#   deploy/nginx/mrrc-hub-cache.conf        → /etc/nginx/conf.d/     (静态资源缓存区与两个 map)
 #
 #   <name>.mrrc.vlsc.net  →  https://127.0.0.1:<port>  (that instance's tunnel)
 #
@@ -12,16 +16,23 @@
 # a re-run — not an nginx edit per instance, which is what B2 did and what made
 # each new frontend asset a centre-side change.
 #
-# The hop into the tunnel is TLS-verified end to end: frps forwards raw TCP, so the
-# TLS session is between this nginx and the instance itself, verified by name
-# against the system CA store (the instance holds a real Let's Encrypt
-# certificate). No `proxy_ssl_verify off` — see hub SDD NFR-H021.
+# The hop into the tunnel is TLS-verified end to end, per instance, by the name in
+# `$mrrc_tls_name` against `/etc/mrrc-hub/trust-bundle.pem` (system CAs + each
+# instance's pinned certificate). 校验永远开着（NFR-H021）：这个片段存在的理由
+# 就是两个 location 不会有一处漏掉它 —— 而漏掉一处正是 X1 漂移的形态。
+#
+# The configuration itself lives in `deploy/nginx/` as real nginx files, NOT in
+# heredocs here: the previous heredoc form is how the deployed file drifted away
+# from the repo without anybody noticing.
 set -euo pipefail
 
 REGISTRY="/etc/mrrc-hub/instances.tsv"
 GENERATOR="/usr/local/sbin/gen_hub_routes.py"
-VHOST="/etc/nginx/sites-available/mrrc-hub"
-UPSTREAM_SSL_NAME="${MRRC_UPSTREAM_SSL_NAME:-radio.vlsc.net}"
+VHOST="/etc/nginx/sites-available/mrrc-instances" # 现网名；旧脚本写的 mrrc-hub 早已不是 sites-enabled 指向的那个
+SNIPPET="/etc/nginx/snippets/mrrc-hub-upstream.conf"
+CACHE_CONF="/etc/nginx/conf.d/mrrc-hub-cache.conf"
+CACHE_DIR="/var/lib/nginx/cache-mrrc"
+HERE="$(cd "$(dirname "$0")" && pwd)"
 
 [[ $EUID -eq 0 ]] || {
 	echo "must run as root (sudo)" >&2
@@ -45,75 +56,35 @@ EOF
 	echo "==> seeded $REGISTRY"
 fi
 
-install -m 0755 "$(dirname "$0")/gen_hub_routes.py" "$GENERATOR"
+install -m 0755 "$HERE/gen_hub_routes.py" "$GENERATOR"
 python3 "$GENERATOR"
 
-cat >"$VHOST" <<EOF
-# Managed by mrrc_hub/deploy/deploy_hub_routes.sh — edits are overwritten.
-#
-# ONE vhost for every instance. The alternative (a server block per instance) is
-# what B2 did and what made adding an instance a centre-side nginx edit; here the
-# per-instance fact is only the loopback port in the generated map.
-#
-# TLS is the hub's wildcard certificate (currently self-signed: a trusted one
-# needs DNS-01, i.e. DNS provider credentials — see deploy/README.md).
-# 一个 vhost 服务所有实例，且与其余服务同在 443（V0.21）。早先这里还有一个明文 8899 的
-# 301 跳转 vhost 与 9988 的 TLS vhost：容器合并到同一台机器后，多出来的端口只会分散
-# 排查面，且明文口在大陆地域本来就被途中改写（R-H13）。唯一保留的独立端口是隧道 8989。
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-    server_name ~^(?<mrrc_instance>[a-z0-9-]+)\.mrrc\.vlsc\.net\$;
+install -D -m 0644 "$HERE/nginx/mrrc-hub-upstream.conf" "$SNIPPET"
+install -D -m 0644 "$HERE/nginx/mrrc-hub-cache.conf" "$CACHE_CONF"
 
-    ssl_certificate     /etc/mrrc-hub/tls/fullchain.pem;
-    ssl_certificate_key /etc/mrrc-hub/tls/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
+# nginx 的 worker 是 www-data，缓存目录必须它可写（cache conf 里 use_temp_path=off，
+# 临时文件也落这里）。
+mkdir -p "$CACHE_DIR"
+chown www-data:www-data "$CACHE_DIR"
+chmod 0700 "$CACHE_DIR"
 
-    # Query strings are never logged here (AD-H07 / NFR-H014).
-    access_log /var/log/nginx/mrrc-hub.access.log hub_safe;
+BACKUP="$VHOST.bak.$(date +%Y%m%d%H%M%S)"
+cp -a "$VHOST" "$BACKUP" 2>/dev/null || true
+install -D -m 0644 "$HERE/nginx/mrrc-instances.vhost" "$VHOST"
 
-    location / {
-        # Unknown name → 404, never a guess at some other instance's tunnel.
-        if (\$mrrc_port = 0) {
-            return 404 "unknown instance\\n";
-        }
+# 配置坏了就退回上一版并再校验一次 —— 这台机器挂着全部实例，
+# 不能把它留在 nginx -t 失败的状态里。
+if ! nginx -t; then
+	echo "==> nginx -t failed — restoring $VHOST from $BACKUP" >&2
+	cp -a "$BACKUP" "$VHOST" 2>/dev/null || rm -f "$VHOST"
+	nginx -t
+	exit 1
+fi
 
-        proxy_pass https://127.0.0.1:\$mrrc_port;
-
-        # End-to-end TLS: frps forwards raw TCP, so this verification covers the
-        # instance's own certificate, not frp's.
-        proxy_ssl_verify on;
-        proxy_ssl_verify_depth 2;
-        proxy_ssl_name ${UPSTREAM_SSL_NAME};
-        proxy_ssl_server_name on;
-        # The trust bundle, not the system CAs alone: an instance presents its own self-signed
-        # certificate, which is pinned here (the generator merges those on top of the system
-        # set). Verifying against the system store only rejects every instance with error 18
-        # and turns the entry into a 502 that looks like a dead tunnel.
-        proxy_ssl_trusted_certificate /etc/mrrc-hub/trust-bundle.pem;
-        proxy_ssl_session_reuse on;
-
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        # MRRC runs five long-lived WebSocket endpoints.
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400;
-        proxy_buffering off;
-    }
-}
-EOF
-
-cp -a "$VHOST" "$VHOST.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
-nginx -t
 systemctl reload nginx
-echo "==> wildcard routing live"
+echo "==> wildcard routing live (cache + gzip)"
 echo
 echo "verify:"
-echo "  curl -sk  https://test1.mrrc.vlsc.net/api/health   # 401 (tunnel + instance)"
-echo "  curl -sk  https://nope.mrrc.vlsc.net/             # 404 (unknown instance)"
+echo "  ./verify_hub_cache.sh <标签> --token <mrrc_auth 值>   # 边缘缓存 8 条断言"
+echo "  curl -sk  https://<实例>.mrrc.vlsc.net/api/health    # 401 (tunnel + instance)"
+echo "  curl -sk  https://nope.mrrc.vlsc.net/                # 404 (unknown instance)"

@@ -26,10 +26,13 @@ set -euo pipefail
 
 SUBDOMAIN="${1:-}"
 if [[ -z "$SUBDOMAIN" ]]; then
-    echo "usage: sudo $0 <test-fqdn>   e.g. test1.mrrc.vlsc.net" >&2
-    exit 2
+	echo "usage: sudo $0 <test-fqdn>   e.g. test1.mrrc.vlsc.net" >&2
+	exit 2
 fi
-[[ $EUID -eq 0 ]] || { echo "must run as root (sudo)" >&2; exit 2; }
+[[ $EUID -eq 0 ]] || {
+	echo "must run as root (sudo)" >&2
+	exit 2
+}
 
 FRP_VERSION="0.71.0"
 FRP_SHA256_AMD64="84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
@@ -50,20 +53,29 @@ UPSTREAM_SSL_NAME="radio.vlsc.net"
 FRP_TCP_PORT="18888"
 
 case "$(uname -m)" in
-    x86_64)  FRP_ARCH="linux_amd64"; FRP_SHA256="$FRP_SHA256_AMD64" ;;
-    aarch64) FRP_ARCH="linux_arm64"; FRP_SHA256="$FRP_SHA256_ARM64" ;;
-    *) echo "unsupported arch $(uname -m)" >&2; exit 2 ;;
+x86_64)
+	FRP_ARCH="linux_amd64"
+	FRP_SHA256="$FRP_SHA256_AMD64"
+	;;
+aarch64)
+	FRP_ARCH="linux_arm64"
+	FRP_SHA256="$FRP_SHA256_ARM64"
+	;;
+*)
+	echo "unsupported arch $(uname -m)" >&2
+	exit 2
+	;;
 esac
 
 log() { printf '\n==> %s\n' "$*"; }
 
 log "preflight: ports $HTTP_PORT/$HTTPS_PORT/$FRP_TLS_PORT must be reachable (security group)"
 for p in "$HTTP_PORT" "$HTTPS_PORT" "$FRP_TLS_PORT"; do
-    if ss -tln "sport = :$p" 2>/dev/null | grep -q LISTEN; then
-        echo "    :$p already listening (likely a re-run)"
-    else
-        echo "    :$p idle — will bind"
-    fi
+	if ss -tln "sport = :$p" 2>/dev/null | grep -q LISTEN; then
+		echo "    :$p already listening (likely a re-run)"
+	else
+		echo "    :$p idle — will bind"
+	fi
 done
 echo "    If the security group still blocks these, nothing below is reachable"
 echo "    from the internet: open $HTTP_PORT/$HTTPS_PORT/$FRP_TLS_PORT first."
@@ -80,26 +92,26 @@ apt-get install -y -qq nginx certbot python3-certbot-nginx ca-certificates curl
 log "frps $FRP_VERSION (SHA-256 verified against the official checksums file)"
 TARBALL="frp_${FRP_VERSION}_${FRP_ARCH}.tar.gz"
 URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${TARBALL}"
-if [[ ! -x /usr/local/bin/frps ]] || [[ ! -f /etc/frp/.version ]] \
-        || [[ "$(cat /etc/frp/.version 2>/dev/null)" != "$FRP_VERSION" ]]; then
-    TMP="$(mktemp -d)"
-    trap 'rm -rf "$TMP"' EXIT
-    curl -fsSL -o "$TMP/$TARBALL" "$URL"
-    echo "${FRP_SHA256}  ${TARBALL}" >"$TMP/sha.txt"
-    ( cd "$TMP" && sha256sum -c sha.txt )
-    tar -xzf "$TMP/$TARBALL" -C "$TMP"
-    install -m 0755 "$TMP/frp_${FRP_VERSION}_${FRP_ARCH}/frps" /usr/local/bin/frps
-    install -m 0755 "$TMP/frp_${FRP_VERSION}_${FRP_ARCH}/frpc" /usr/local/bin/frpc
-    install -d -m 0755 /etc/frp
-    printf '%s' "$FRP_VERSION" >/etc/frp/.version
+if [[ ! -x /usr/local/bin/frps ]] || [[ ! -f /etc/frp/.version ]] ||
+	[[ "$(cat /etc/frp/.version 2>/dev/null)" != "$FRP_VERSION" ]]; then
+	TMP="$(mktemp -d)"
+	trap 'rm -rf "$TMP"' EXIT
+	curl -fsSL -o "$TMP/$TARBALL" "$URL"
+	echo "${FRP_SHA256}  ${TARBALL}" >"$TMP/sha.txt"
+	(cd "$TMP" && sha256sum -c sha.txt)
+	tar -xzf "$TMP/$TARBALL" -C "$TMP"
+	install -m 0755 "$TMP/frp_${FRP_VERSION}_${FRP_ARCH}/frps" /usr/local/bin/frps
+	install -m 0755 "$TMP/frp_${FRP_VERSION}_${FRP_ARCH}/frpc" /usr/local/bin/frpc
+	install -d -m 0755 /etc/frp
+	printf '%s' "$FRP_VERSION" >/etc/frp/.version
 else
-    echo "    already at $FRP_VERSION"
+	echo "    already at $FRP_VERSION"
 fi
 
 log "token (generated once, 0600, never printed into logs)"
 install -d -m 0750 /etc/frp
 if [[ ! -s /etc/frp/frps.token ]]; then
-    openssl rand -hex 32 >/etc/frp/frps.token   # openssl ships with the base image
+	openssl rand -hex 32 >/etc/frp/frps.token # openssl ships with the base image
 fi
 chmod 600 /etc/frp/frps.token
 
@@ -107,14 +119,14 @@ chmod 600 /etc/frp/frps.token
 # Loopback-only; the portal service account reads a 0640 copy, never frps' own files.
 install -d -m 0755 /etc/mrrc-hub
 if [[ ! -s /etc/mrrc-hub/frps-web.credentials ]]; then
-    printf 'portal:%s\n' "$(openssl rand -hex 24)" >/etc/mrrc-hub/frps-web.credentials
-    chmod 640 /etc/mrrc-hub/frps-web.credentials
-    if id -u mrrcportal >/dev/null 2>&1; then
-        chown root:mrrcportal /etc/mrrc-hub/frps-web.credentials
-    else
-        echo "⚠️ user mrrcportal does not exist: leaving panel credentials root:root;" >&2
-        echo "   the portal will honestly report '凭据不可读' until the account exists" >&2
-    fi
+	printf 'portal:%s\n' "$(openssl rand -hex 24)" >/etc/mrrc-hub/frps-web.credentials
+	chmod 640 /etc/mrrc-hub/frps-web.credentials
+	if id -u mrrcportal >/dev/null 2>&1; then
+		chown root:mrrcportal /etc/mrrc-hub/frps-web.credentials
+	else
+		echo "⚠️ user mrrcportal does not exist: leaving panel credentials root:root;" >&2
+		echo "   the portal will honestly report '凭据不可读' until the account exists" >&2
+	fi
 fi
 FRPS_WEB_USER="$(cut -d: -f1 /etc/mrrc-hub/frps-web.credentials)"
 FRPS_WEB_PW_QUOTED="\"$(cut -d: -f2- /etc/mrrc-hub/frps-web.credentials)\""
@@ -122,12 +134,12 @@ FRPS_WEB_PW_QUOTED="\"$(cut -d: -f2- /etc/mrrc-hub/frps-web.credentials)\""
 # An empty htpasswd file (never overwritten): the admin console has no accounts
 # until one is added, while the machine token still works.
 if [[ ! -e /etc/mrrc-hub/portal-users ]]; then
-    install -m 640 /dev/null /etc/mrrc-hub/portal-users
-    if id -u mrrcportal >/dev/null 2>&1; then
-        chown root:mrrcportal /etc/mrrc-hub/portal-users
-    fi
-    echo "==> created empty /etc/mrrc-hub/portal-users; add an account with:"
-    echo "    printf '%s:%s\\n' <user> \"\$(openssl passwd -apr1)\" | sudo tee -a /etc/mrrc-hub/portal-users"
+	install -m 640 /dev/null /etc/mrrc-hub/portal-users
+	if id -u mrrcportal >/dev/null 2>&1; then
+		chown root:mrrcportal /etc/mrrc-hub/portal-users
+	fi
+	echo "==> created empty /etc/mrrc-hub/portal-users; add an account with:"
+	echo "    printf '%s:%s\\n' <user> \"\$(openssl passwd -apr1)\" | sudo tee -a /etc/mrrc-hub/portal-users"
 fi
 
 log "frps.toml"
@@ -198,38 +210,38 @@ install -d -m 0750 /etc/letsencrypt
 CERT_CRT="/etc/mrrc-hub/tls/fullchain.pem"
 CERT_KEY="/etc/mrrc-hub/tls/privkey.pem"
 if [[ -s "/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem" ]]; then
-    echo "    using the Let's Encrypt certificate for ${SUBDOMAIN}"
-    CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
-    CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
+	echo "    using the Let's Encrypt certificate for ${SUBDOMAIN}"
+	CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
+	CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
 elif [[ -s /etc/mrrc-hub/aliyun.ini ]]; then
-    # DNS-01 is the only route to a publicly trusted certificate when 80/443 are
-    # closed - and the only route to a *wildcard*, which is what 200 instances
-    # will need. Credentials: an Aliyun RAM user limited to AliyunDNSFullAccess.
-    echo "    issuing via DNS-01 (Aliyun credentials found)"
-    apt-get install -y -qq python3-pip >/dev/null 2>&1 || true
-    pip3 install --quiet --break-system-packages certbot-dns-aliyun 2>/dev/null || true
-    certbot certonly --non-interactive --agree-tos \
-        --register-unsafely-without-email \
-        --dns-aliyun --dns-aliyun-credentials /etc/mrrc-hub/aliyun.ini \
-        -d "$SUBDOMAIN" --keep-until-expiring
-    CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
-    CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
+	# DNS-01 is the only route to a publicly trusted certificate when 80/443 are
+	# closed - and the only route to a *wildcard*, which is what 200 instances
+	# will need. Credentials: an Aliyun RAM user limited to AliyunDNSFullAccess.
+	echo "    issuing via DNS-01 (Aliyun credentials found)"
+	apt-get install -y -qq python3-pip >/dev/null 2>&1 || true
+	pip3 install --quiet --break-system-packages certbot-dns-aliyun 2>/dev/null || true
+	certbot certonly --non-interactive --agree-tos \
+		--register-unsafely-without-email \
+		--dns-aliyun --dns-aliyun-credentials /etc/mrrc-hub/aliyun.ini \
+		-d "$SUBDOMAIN" --keep-until-expiring
+	CERT_CRT="/etc/letsencrypt/live/${SUBDOMAIN}/fullchain.pem"
+	CERT_KEY="/etc/letsencrypt/live/${SUBDOMAIN}/privkey.pem"
 else
-    echo "    !! no DNS-01 credentials (/etc/mrrc-hub/aliyun.ini): generating a"
-    echo "    !! SELF-SIGNED certificate. Browsers will warn; this is a smoke test"
-    echo "    !! fixture, not a deployment. Steps to a real certificate:"
-    echo "    !!   1. create an Aliyun RAM user with AliyunDNSFullAccess"
-    echo "    !!   2. write /etc/mrrc-hub/aliyun.ini (chmod 600):"
-    echo "    !!        dns_aliyun_access_key = <id>"
-    echo "    !!        dns_aliyun_access_key_secret = <secret>"
-    echo "    !!   3. re-run this script - it then issues a real wildcard"
-    if [[ ! -s "$CERT_CRT" ]]; then
-        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-            -keyout "$CERT_KEY" -out "$CERT_CRT" \
-            -subj "/CN=${SUBDOMAIN}" \
-            -addext "subjectAltName=DNS:${SUBDOMAIN},DNS:*.mrrc.vlsc.net,DNS:*.vlsc.net" 2>/dev/null
-        chmod 600 "$CERT_KEY"
-    fi
+	echo "    !! no DNS-01 credentials (/etc/mrrc-hub/aliyun.ini): generating a"
+	echo "    !! SELF-SIGNED certificate. Browsers will warn; this is a smoke test"
+	echo "    !! fixture, not a deployment. Steps to a real certificate:"
+	echo "    !!   1. create an Aliyun RAM user with AliyunDNSFullAccess"
+	echo "    !!   2. write /etc/mrrc-hub/aliyun.ini (chmod 600):"
+	echo "    !!        dns_aliyun_access_key = <id>"
+	echo "    !!        dns_aliyun_access_key_secret = <secret>"
+	echo "    !!   3. re-run this script - it then issues a real wildcard"
+	if [[ ! -s "$CERT_CRT" ]]; then
+		openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+			-keyout "$CERT_KEY" -out "$CERT_CRT" \
+			-subj "/CN=${SUBDOMAIN}" \
+			-addext "subjectAltName=DNS:${SUBDOMAIN},DNS:*.mrrc.vlsc.net,DNS:*.vlsc.net" 2>/dev/null
+		chmod 600 "$CERT_KEY"
+	fi
 fi
 
 log "nginx: TLS vhost fronting the tunnel (upstream VERIFIED, not skipped)"
@@ -324,7 +336,7 @@ EOF
 install -m 755 "$SELF_DIR/mrrc-hub-routes.sh" /usr/local/sbin/mrrc-hub-routes.sh
 install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.service" /etc/systemd/system/mrrc-hub-routes.service
 install -m 644 "$SELF_DIR/systemd/mrrc-hub-routes.timer" /etc/systemd/system/mrrc-hub-routes.timer
-rm -f /etc/systemd/system/mrrc-hub-routes.path   # 早期版本用过 path 单元，会自激（见脚本注释）
+rm -f /etc/systemd/system/mrrc-hub-routes.path # 早期版本用过 path 单元，会自激（见脚本注释）
 systemctl daemon-reload
 systemctl enable --now mrrc-hub-routes.timer
 echo "routes auto-regeneration: enabled"

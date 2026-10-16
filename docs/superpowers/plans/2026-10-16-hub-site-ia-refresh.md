@@ -239,3 +239,16 @@ curl -s -o /dev/null -w "topology %{http_code}\n" https://www.vlsc.net/mrrc_hub/
 **2. 占位符扫描**：无 TODO/待定；每步都给了命令或明确段落清单。
 
 **3. 一致性**：页面文件名与导航六项在任务 2–7 中一致（`index/start/use/maintain/trouble/design`）；图片路径在任务 1、2、10 中一致（`images/station-topology.svg`）；`zh/w103d.html` 外链在任务 3、4 中一致。
+
+---
+
+## 执行记录（2026-10-16，全部完成）
+
+- **任务 0 取证** → `docs/2026-10-16-site-recheck.md`（注册表 14 行 / 信任包 134 / 证书至 12-29 / 连接往返 ≈85 ms / frps 0.71.0 / 实例侧 v1.27.0）
+- **任务 1 图片与 README** → `034181a`（拓扑图入库 + 文件清单与事实源映射）
+- **任务 2–7 六页** → `3bdc90c`（首页）· `efc28fe`（接入）· `1a2237a`（维护，新页）· `e9e1195`（使用）· `575bf5d`（排障）· `8ebde46`（设计）
+- **任务 8 闸门与规整** → `e7bb161`：金规则 clean；断链/标签/锚点 6 页通过；`octen.css` 与上游哈希一致；chinese-prose 修复 27 处标点空白
+- **任务 9 用户过目** → 用户确认「发布」
+- **任务 10 发布** → `bash deploy.sh --yes`：根路径 + 六页 + 两张拓扑图全部 200；`maintain.html` 补进 `deploy.sh` 的必需文件与逐页清单
+- **任务 11 提交与同步** → `21b4792`（`SDD/12 §12.8` 三处按现场回改）· `8e4cebc`（`SDD/14` V0.35 + deploy.sh）
+- **遗留**：远程协助通道还没有 SDD 决策条目（`SDD/08`/`SDD/12`），建议下一次 SDD 修订补登

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="MRRC Cloud Hub — 把你的 MRRC Modern 电台接入云端统一入口：实例主动出站、无需公网 IP、一个呼号一个入口、PTT 释放永远在电台本地。"
+      content="MRRC Cloud Hub — 把 MRRC Modern（电脑或 W103D 盒子）接入云端统一入口：实例主动出站、无需公网 IP、一个呼号一个入口、PTT 释放永远在电台本地。"
     />
     <meta name="author" content="BG1SB" />
     <meta name="theme-color" content="#000000" />
@@ -42,9 +42,10 @@
             <a href="index.html" class="active" aria-current="page">概览</a>
           </li>
           <li><a href="start.html">接入</a></li>
-          <li><a href="use.html">使用与分享</a></li>
+          <li><a href="use.html">使用</a></li>
+          <li><a href="maintain.html">维护</a></li>
           <li><a href="trouble.html">排障</a></li>
-          <li><a href="design.html">设计与实现</a></li>
+          <li><a href="design.html">设计</a></li>
           <li>
             <a
               href="https://github.com/cheenle/mrrc_hub"
@@ -74,15 +75,16 @@
         <div class="hero-content">
           <div class="hero-badge">
             <i class="fas fa-tower-broadcast"></i>
-            <span>MRRC Cloud Hub · 阶段 1 通路已在真实公网跑通</span>
+            <span>MRRC Cloud Hub · 多实例已在真实公网运行</span>
           </div>
           <h1 class="hero-title">
             把你的电台<br />
             <span class="gradient">挂到云端</span>
           </h1>
           <p class="hero-subtitle">
-            你的 MRRC Modern 继续跑在自己家里，电台、电脑、天线都不动。不需要公网 IP、不需要端口映射、不需要动路由器 —— 实例主动出站连上
-            Hub，你就能从任何地方用浏览器操作同一台电台。
+            你的 MRRC Modern 继续跑在自己家里（电脑或 W103D
+            盒子），电台、天线都不动。不需要公网 IP、不需要端口映射、不需要动路由器
+            —— 实例主动出站连上 Hub，你就能从任何地方用浏览器操作同一台电台。
           </p>
           <div class="hero-actions">
             <a href="start.html" class="btn btn-primary btn-large">
@@ -102,12 +104,12 @@
           </div>
           <div class="hero-stats">
             <div class="stat-item">
-              <span class="stat-value">118–168 ms</span>
-              <span class="stat-label">公网往返实测 · 迁港前</span>
+              <span class="stat-value">≈85 ms</span>
+              <span class="stat-label">公网连接往返（2026-10 实测）</span>
             </div>
             <div class="stat-item">
-              <span class="stat-value">5</span>
-              <span class="stat-label">个 WS 端点透明转发</span>
+              <span class="stat-value">4 + 1</span>
+              <span class="stat-label">个 WS 端点透明转发（含可选天调）</span>
             </div>
             <div class="stat-item">
               <span class="stat-value">0</span>
@@ -118,6 +120,42 @@
               <span class="stat-label">PTT 本地释放层</span>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="section" id="map">
+        <div class="container">
+          <div class="section-header">
+            <span class="section-label">Map</span>
+            <h2 class="section-title">一张图看懂电台站怎么上云</h2>
+            <p class="section-subtitle">
+              射频链在本地，一根 USB
+              进盒子；盒子再主动拨出一条隧道。局域网与公网两条进入方式，服务的是同一台电台。
+            </p>
+          </div>
+          <figure class="hub-figure">
+            <img
+              src="images/station-topology.svg"
+              alt="电台站接线拓扑：天线经 ATR-1000 天调接到 FT-710 电台，电台经一根 USB 接到 W103D 盒子（运行 MRRC Modern 服务端）；盒子向下分出两条路径 —— 局域网/路由器直连，以及主动拨出的 frp 隧道到 Cloud Hub，两条路径最终都通向手机或电脑。"
+              width="1600"
+              height="1180"
+              loading="lazy"
+            />
+            <figcaption>
+              绿线是盒子与天调之间的链路（天调自己不晓得你在哪个频率，是盒子一直在告诉它）；紫线是盒子主动拨出的
+              frp 隧道 —— 它不需要你在路由器上开任何入站端口。经 Cloud Hub
+              接入会自动启用 TX 心跳，远端会话失联即释放发射。
+            </figcaption>
+          </figure>
+          <p
+            class="hub-note"
+            style="text-align: center; border-top: 0; margin-top: 1rem"
+          >
+            想看清每一层各自负责什么、边界画在哪、失效时表现什么 ——
+            <a href="design.html" style="color: var(--accent)"
+              >看设计与层层实现 →</a
+            >
+          </p>
         </div>
       </section>
 
@@ -135,7 +173,7 @@
               <div class="icon"><i class="fas fa-door-closed"></i></div>
               <h3>客户侧零入站</h3>
               <p>
-                你的电脑只<b>出站</b>一条常驻连接。没有公网
+                你的电脑或盒子只<b>出站</b>一条常驻连接。没有公网
                 IP、没有端口映射、没有 UPnP，甚至不需要知道自己的公网地址 ——
                 家庭宽带、4G/5G、公司网都能跑。
               </p>
@@ -153,7 +191,10 @@
               <div class="icon"><i class="fas fa-hand"></i></div>
               <h3>PTT 释放永远在本地</h3>
               <p>
-                Hub 只是一条通道，<b>从不写下 PTT</b>。断线、掉网、半开连接，一律由电台所在的那台机器强制回 RX —— 不依赖云端租约超时。
+                Hub 只是一条通道，<b>从不写下 PTT</b>。断线、掉网，一律由电台所在的那台机器本地强制回
+                RX —— 不依赖云端租约超时。最难的「TCP
+                还活着但对端已失联」由实例侧的<b>会话心跳闸门</b>覆盖（Hub
+                模式下建议开启，默认关闭）。
               </p>
             </div>
             <div class="feature-card animate">
@@ -161,76 +202,47 @@
               <h3>逐跳校验证书</h3>
               <p>
                 整条链路端到端 TLS：浏览器到 Hub 用真证书，Hub
-                到你的实例也<b>校验证书</b>。没有哪一跳是靠「关掉校验」换来的。
+                到你的实例<b>按你自己的入口名逐台校验</b>。没有哪一跳是靠「关掉校验」换来的。
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="section">
+      <section class="section" id="tracks">
         <div class="container">
           <div class="section-header">
-            <span class="section-label">Data Path</span>
-            <h2 class="section-title">30 秒看懂信号走到哪</h2>
+            <span class="section-label">Start Here</span>
+            <h2 class="section-title">你要从哪一边开始</h2>
             <p class="section-subtitle">
-              从电台到你的浏览器，五跳。中间任何一跳都不需要你动路由器。
+              第一次接触就从左边走；已经在用 Hub 的，右边那三条路是给你准备的。
             </p>
           </div>
-          <div class="hub-stack">
-            <div class="hub-layer">
-              <div class="hub-layer-id">你的电台</div>
-              <div class="hub-layer-body">
-                <strong>FT-710 / IC-7300 / IC-7300MK2</strong>
-                <span>接在你自己的电脑上，位置、天线、电源都不用变。</span>
-              </div>
+          <div class="hub-tracks">
+            <div class="hub-track pri">
+              <h3><i class="fas fa-rocket" style="color: var(--accent)"></i> 我要接入</h3>
+              <p>
+                把已有的 MRRC Modern 挂上云端。前提只有一条：它已经能在局域网里用。
+              </p>
+              <ul>
+                <li>先看前提自检，再选路径：W103D 盒子或电脑</li>
+                <li>注册：门户核验后拿到你的呼号入口</li>
+                <li>装隧道（或开箱上电）→ 三条命令验通</li>
+              </ul>
+              <a href="start.html" class="btn btn-primary" style="margin-top: 1.25rem">
+                <i class="fas fa-rocket"></i> 开始接入
+              </a>
             </div>
-            <div class="hub-layer">
-              <div class="hub-layer-id">你的电脑</div>
-              <div class="hub-layer-body">
-                <strong>MRRC Modern · 本机 127.0.0.1:8888</strong>
-                <span
-                  >继续提供局域网访问。控制、音频、频谱、PTT
-                  安全释放全在这里。</span
-                >
-              </div>
-            </div>
-            <div class="hub-layer">
-              <div class="hub-layer-id">出站隧道</div>
-              <div class="hub-layer-body">
-                <strong>一条常驻出站连接</strong>
-                <span
-                  >几行命令装成开机自启服务。你不需要对外开放任何入站端口。</span
-                >
-              </div>
-            </div>
-            <div class="hub-layer">
-              <div class="hub-layer-id">Hub</div>
-              <div class="hub-layer-body">
-                <strong>统一入口 &lt;呼号&gt;.mrrc.vlsc.net</strong>
-                <span
-                  >真 Let's Encrypt
-                  通配证书，浏览器零警告。按呼号路由到你的隧道。</span
-                >
-              </div>
-            </div>
-            <div class="hub-layer">
-              <div class="hub-layer-id">你的浏览器</div>
-              <div class="hub-layer-body">
-                <strong>从任何地方打开同一个网址</strong>
-                <span>入口、门户与站点都在 443：任何能上网的网络都能用。</span>
-              </div>
+            <div class="hub-track">
+              <h3><i class="fas fa-toolbox" style="color: var(--accent)"></i> 我在用</h3>
+              <p>已经能远程开台了。日常怎么用、出事怎么查、换机器怎么办。</p>
+              <ul>
+                <li><a href="use.html">使用与分享</a>：两把口令两个角色、入口选择</li>
+                <li><a href="maintain.html">维护与生命周期</a>：换机、撤销退出、远程协助</li>
+                <li><a href="trouble.html">排障</a>：症状对照与四跳分诊</li>
+              </ul>
             </div>
           </div>
-          <p
-            class="hub-note"
-            style="text-align: center; border-top: 0; margin-top: 1rem"
-          >
-            想看清每一层各自负责什么、边界画在哪、失效时表现什么 ——
-            <a href="design.html" style="color: var(--accent)"
-              >看设计与层层实现 →</a
-            >
-          </p>
         </div>
       </section>
 
@@ -256,26 +268,34 @@
                 <tr>
                   <td>实例出站隧道</td>
                   <td><span class="hub-badge live">已跑通</span></td>
-                  <td>阶段 1 用成熟反向隧道验证通路；客户侧零入站</td>
+                  <td>
+                    客户侧零入站；电脑与 W103D
+                    盒子两种实例形态都适用，隧道是盒子/应用自己拨出的
+                  </td>
                 </tr>
                 <tr>
                   <td>通配子域入口 + 真证书</td>
                   <td><span class="hub-badge live">已跑通</span></td>
                   <td>
-                    <code>*.mrrc.vlsc.net</code>，Let's Encrypt，每日自动续期
+                    <code>*.mrrc.vlsc.net</code>，Let's
+                    Encrypt，每日自动续期（当前证书有效至 2026-12-29）
                   </td>
                 </tr>
                 <tr>
-                  <td>五个 WebSocket 端点透明转发</td>
+                  <td>WebSocket 端点透明转发</td>
                   <td><span class="hub-badge live">已跑通</span></td>
                   <td>
-                    控制、频谱、收音频、发音频、天调，握手与关闭语义和直连一致
+                    控制、频谱、收音频、发音频四路固定 + 天调（ATR-1000）可选，握手与关闭语义和直连一致
                   </td>
                 </tr>
                 <tr>
                   <td>逐跳证书校验</td>
                   <td><span class="hub-badge live">已开启</span></td>
-                  <td>没有一跳是靠关闭校验换来的</td>
+                  <td>
+                    Hub →
+                    实例按<b>各实例自己的入口名</b>校验，自签证书的公钥钉在信任包里通过校验 ——
+                    不是靠关掉 verification
+                  </td>
                 </tr>
                 <tr>
                   <td>会话凭据不进 URL</td>
@@ -283,8 +303,7 @@
                   <td>
                     Hub 侧：nginx 日志不记查询串、hub 不经手拼串。<b
                       >实例侧已随之发布</b
-                    >（mrrc_modern <b>v1.25.4</b>：令牌走 Cookie / Bearer，旧的「查询串拼串」形式仅作兼容保留并告警 —— 其决定 AD-024）——
-                    同源 WS 本可只靠 Cookie
+                    >（mrrc_modern <b>v1.25.4</b>：令牌走 Cookie / Bearer，旧的「查询串拼串」形式仅作兼容保留并告警 —— 其决定 AD-024）
                   </td>
                 </tr>
                 <tr>
@@ -294,8 +313,8 @@
                     <span class="hub-badge todo">隧道层待做</span>
                   </td>
                   <td>
-                    拔网线这类"TCP
-                    还活着但对面已失联"的情形：实例侧已有可开的心跳闸门（默认关闭，Hub 模式建议 3–5
+                    拔网线这类「TCP
+                    还活着但对面已失联」的情形：实例侧已有可开的心跳闸门（默认关闭，Hub 模式建议 3–5
                     s）；<b>隧道层的主动关流还没做</b>。在此之前靠实例本地多层释放兜底。
                   </td>
                 </tr>
@@ -305,7 +324,7 @@
                   <td>
                     <code>https://portal.mrrc.vlsc.net</code>（通配证书覆盖，<code
                       >/apply</code
-                    >按来源 IP 限流）。命中呼号库自动核验，库外转人工；核验通过后运维授予并写入注册表。见<a
+                    >按来源 IP 限流）。命中呼号库自动核验，库外转人工；核验通过后授予并写入注册表。见<a
                       href="start.html#register"
                       style="color: var(--accent)"
                       >接入 · 注册</a
@@ -313,13 +332,23 @@
                   </td>
                 </tr>
                 <tr>
-                  <td>实例证书链（hub → 实例这一跳的一机一证）</td>
-                  <td><span class="hub-badge live">机制就位</span></td>
+                  <td>远程协助（客户发起，限时可关）</td>
+                  <td><span class="hub-badge live">已实现</span></td>
+                  <td>
+                    应用里点一次「开启协助」，开通一条限时 SSH
+                    通道请维护者进来看；口令由你持有、不落盘、不写日志；你按停止、窗口到期、门户强制，三条路都能关。见<a
+                      href="maintain.html#help"
+                      style="color: var(--accent)"
+                      >维护 · 远程协助</a
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td>实例证书链（hub → 实例的一机一证）</td>
+                  <td><span class="hub-badge live">已在用</span></td>
                   <td>
                     每个实例一张签给自己入口名的自签证书，公钥被 Hub
-                    <b>钉在信任包里</b>、按名字校验 ——
-                    校验始终是开着的，自签靠「钉住它」通过，不是靠关掉
-                    verification。<b>注意：现网当前实例尚未迁到这条链</b>（仍用旧证书名）。
+                    <b>钉在信任包里</b>、按名字逐台校验（2026-10-16 复核：在册实例的校验名由路由生成器逐台生成）。
                   </td>
                 </tr>
                 <tr>
@@ -352,39 +381,37 @@
       <section class="section">
         <div class="container">
           <div class="section-header">
-            <span class="section-label">Next Step</span>
-            <h2 class="section-title">你该从哪开始</h2>
+            <span class="section-label">Prerequisite</span>
+            <h2 class="section-title">唯一的前置条件</h2>
           </div>
-          <div class="steps">
-            <div class="step">
-              <h4>还没装 MRRC Modern</h4>
-              <p>
-                先去产品站下载安装，把电台在局域网里跑通 ——
-                能登录、有音频、能发射。这是接入 Hub 的前提。
-              </p>
+          <div class="hub-callout info">
+            <span class="hub-callout-title">MRRC Modern 要能在局域网里用</span>
+            <p>
+              能登录、有音频、能发射 —— 这是接入
+              Hub 的前提，Hub 不替你做这件事。还没装的话先去产品站；想省一台常开电脑，可以看
+              W103D 盒子的完整指南。
+            </p>
+            <p style="margin-bottom: 0">
               <a
                 href="https://www.vlsc.net/mrrc_modern/"
                 class="btn btn-secondary"
-                style="margin-top: 1rem"
+                style="margin-right: 0.75rem"
               >
                 <i class="fas fa-download"></i> MRRC Modern 产品站
               </a>
-            </div>
-            <div class="step">
-              <h4>局域网已经能用</h4>
-              <p>
-                四步：前提自检 → 自助申请 → 装隧道 →
-                验证。每一步都有可以直接复制的命令和期望输出。
-              </p>
               <a
-                href="start.html"
-                class="btn btn-primary"
-                style="margin-top: 1rem"
+                href="https://www.vlsc.net/mrrc_modern/zh/w103d.html"
+                class="btn btn-secondary"
               >
-                <i class="fas fa-rocket"></i> 开始接入
+                <i class="fas fa-box"></i> W103D 盒子指南
               </a>
-            </div>
+            </p>
           </div>
+          <p class="hub-note">
+            本页事实基线：2026-10-16 现场复核（入口与证书、注册表、路由 timer、门户、frps
+            与延迟实测）。运营事实以 <code>SDD/12 §12.8</code> 为准；发现页面与现网不符，
+            就是页面该改。
+          </p>
         </div>
       </section>
     </main>
@@ -404,8 +431,9 @@
             <h4>文档</h4>
             <ul>
               <li><a href="index.html">概览</a></li>
-              <li><a href="start.html">接入四步</a></li>
+              <li><a href="start.html">接入</a></li>
               <li><a href="use.html">使用与分享</a></li>
+              <li><a href="maintain.html">维护与生命周期</a></li>
               <li><a href="trouble.html">排障</a></li>
               <li><a href="design.html">设计与层层实现</a></li>
             </ul>
@@ -437,7 +465,7 @@
         <div class="footer-bottom">
           <p>© 2026 MRRC Cloud Hub · BG1SB</p>
           <p>
-            事实基线：2026-10-01 现场取证 / 2026-10-06 复核 · 运营事实以
+            事实基线：2026-10-16 现场复核 · 运营事实以
             <code>SDD/12 §12.8</code>为准
           </p>
         </div>

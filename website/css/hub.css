@@ -446,6 +446,79 @@
 	}
 }
 
+/* ── 首页系统地图（拓扑图） ── */
+.hub-figure {
+	margin: 2rem 0;
+}
+.hub-figure img {
+	display: block;
+	width: 100%;
+	height: auto;
+	background: #0d0d0d;
+	border: 1px solid var(--border);
+	border-radius: 14px;
+}
+.hub-figure figcaption {
+	margin-top: 0.85rem;
+	font-size: 0.8125rem;
+	color: var(--text-muted);
+	line-height: 1.75;
+}
+
+/* ── 首页双轨入口（我要接入 / 我在用） ── */
+.hub-tracks {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 1.5rem;
+	margin: 2rem 0;
+}
+.hub-track {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	padding: 1.75rem;
+	display: flex;
+	flex-direction: column;
+}
+.hub-track.pri {
+	border-color: rgba(34, 211, 238, 0.35);
+}
+.hub-track h3 {
+	font-size: 1.15rem;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin-bottom: 0.6rem;
+}
+.hub-track p {
+	color: var(--text-secondary);
+	font-size: 0.92rem;
+	line-height: 1.7;
+}
+.hub-track ul {
+	list-style: none;
+	margin: 0.75rem 0 0;
+	padding: 0;
+}
+.hub-track ul li {
+	color: var(--text-secondary);
+	font-size: 0.875rem;
+	line-height: 1.7;
+	padding: 0.2rem 0;
+}
+.hub-track ul li::before {
+	content: "▸ ";
+	color: var(--accent);
+	font-size: 0.7rem;
+}
+.hub-track ul a {
+	color: var(--accent);
+}
+@media (max-width: 768px) {
+	.hub-tracks {
+		grid-template-columns: 1fr;
+	}
+}
+
 /* ── 表格：窄屏横向滚动 ── */
 .hub-table-wrap {
 	overflow-x: auto;

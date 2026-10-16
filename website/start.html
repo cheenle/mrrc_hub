@@ -114,7 +114,8 @@
                   <tr>
                     <td>局域网能打开</td>
                     <td>
-                      <code>http://&lt;你的内网IP&gt;:8888/</code>能出登录页。<br />
+                      <code>http://&lt;你的内网IP&gt;:8888/</code
+                      >能出登录页。<br />
                       默认端口 <code>8888</code>，默认监听所有网卡。
                     </td>
                   </tr>
@@ -134,7 +135,9 @@
                   <tr>
                     <td>知道设备</td>
                     <td>
-                      串口（如 <code>/dev/cu.usbserial-*</code>）与音频设备名（常见是 <code>USB Audio Device</code>）——
+                      串口（如
+                      <code>/dev/cu.usbserial-*</code>）与音频设备名（常见是
+                      <code>USB Audio Device</code>）——
                       装完之后如果配置变了，这两项是要改的地方。
                     </td>
                   </tr>
@@ -152,8 +155,10 @@
               <span class="hub-callout-title">两个端口不是一回事</span>
               <p>
                 隧道控制口是
-                <code>tunnel.mrrc.vlsc.net:8989</code>（你的机器连出去，接入时必须打通）；入口是
-                <code>&lt;呼号&gt;.mrrc.vlsc.net</code>（浏览器连进来，443，不需要你开放任何入站端口）。
+                <code>tunnel.mrrc.vlsc.net:8989</code
+                >（你的机器连出去，接入时必须打通）；入口是
+                <code>&lt;呼号&gt;.mrrc.vlsc.net</code
+                >（浏览器连进来，443，不需要你开放任何入站端口）。
               </p>
             </div>
           </li>
@@ -161,7 +166,8 @@
           <li id="path">
             <h3>选路径：盒子还是电脑</h3>
             <p>
-              两条路的终点完全一样 —— 一个跑着 MRRC Modern、挂着隧道的实例；区别只在这台机器是什么、要不要常开。
+              两条路的终点完全一样 —— 一个跑着 MRRC
+              Modern、挂着隧道的实例；区别只在这台机器是什么、要不要常开。
             </p>
             <div class="hub-tracks">
               <div class="hub-track pri">
@@ -213,10 +219,12 @@
 
             <div class="hub-callout ok">
               <span class="hub-callout-title">
-                <span class="hub-badge live">推荐路径</span>在应用里申请（v1.24.0 起）
+                <span class="hub-badge live">推荐路径</span
+                >在应用里申请（v1.24.0 起）
               </span>
               <p>
-                打开 MRRC Modern 的<b>「设置 → 接入云端（Cloud Hub）」</b>，填呼号与联系方式（可选）提交即可。运维批准一到，<b>应用会自己完成剩下的全部动作</b>：签一张签给
+                打开 MRRC Modern 的<b>「设置 → 接入云端（Cloud Hub）」</b
+                >，填呼号与联系方式（可选）提交即可。运维批准一到，<b>应用会自己完成剩下的全部动作</b>：签一张签给
                 <code>&lt;呼号&gt;.mrrc.vlsc.net</code>的自签证书、向 Hub
                 登记公钥（私钥不出本机）、写好自己的隧道配置、启动隧道，并把会话心跳设为
                 5 秒。你不需要复制任何口令或粘贴任何命令。
@@ -236,7 +244,8 @@
                   <code>bg1sb</code>视为同一个呼号，不会变成两个租户。
                 </li>
                 <li>
-                  <b>查重</b> —— 同一个呼号在同一时刻只能有一个归属人。已被绑定时走申诉/转移流程，<b>绝不静默覆盖</b>。
+                  <b>查重</b> ——
+                  同一个呼号在同一时刻只能有一个归属人。已被绑定时走申诉/转移流程，<b>绝不静默覆盖</b>。
                 </li>
                 <li>
                   <b>核验</b> —— 命中 Club Log 呼号库（27
@@ -290,13 +299,15 @@
             <div class="hub-callout ok">
               <span class="hub-callout-title">应用内接入（推荐）</span>
               <p>
-                「设置 → 接入云端（Cloud Hub）」提交申请后，批准一到应用自动建隧道
-                —— macOS 与 Windows 的打包版、盒子的出厂镜像都走这条路，不需要终端。
+                「设置 → 接入云端（Cloud
+                Hub）」提交申请后，批准一到应用自动建隧道 —— macOS 与 Windows
+                的打包版、盒子的出厂镜像都走这条路，不需要终端。
               </p>
             </div>
 
             <p>
-              <b>备选：手动脚本</b>（旧版产品、无界面环境，或你想自己控制每个细节）：
+              <b>备选：手动脚本</b
+              >（旧版产品、无界面环境，或你想自己控制每个细节）：
             </p>
 
             <div class="hub-code">
@@ -323,9 +334,9 @@ MRRC_HUB_TOKEN='&lt;隧道凭证&gt;' \
                     <td>frpc 从哪来</td>
                     <td>
                       安装器按三级优先选：① 安装包内嵌副本 → ② 系统
-                      <code>PATH</code>里已有的 → ③ 从 frp 官方 release
-                      下载并<b>校验 SHA-256</b>，不符即拒绝使用。版本与 Hub
-                      端<b>钉死对齐</b> ——
+                      <code>PATH</code>里已有的 → ③ 从 frp 官方 release 下载并<b
+                        >校验 SHA-256</b
+                      >，不符即拒绝使用。版本与 Hub 端<b>钉死对齐</b> ——
                       客户端比服务端新可能握手失败。缓存落在
                       <code>~/.local/share/mrrc-fleet</code>。
                     </td>
@@ -344,7 +355,8 @@ MRRC_HUB_TOKEN='&lt;隧道凭证&gt;' \
                     <td>Windows 额外做</td>
                     <td>
                       用内置的 openssl 给你的
-                      <code>&lt;呼号&gt;.mrrc.vlsc.net</code>签一张自签证书，并把证书路径与心跳阈值写成<b
+                      <code>&lt;呼号&gt;.mrrc.vlsc.net</code
+                      >签一张自签证书，并把证书路径与心跳阈值写成<b
                         >用户级环境变量</b
                       >
                       —— 应用下次启动即生效。<b>私钥不出本机</b>，只有公钥交给
@@ -354,21 +366,25 @@ MRRC_HUB_TOKEN='&lt;隧道凭证&gt;' \
                   <tr>
                     <td>它不做什么</td>
                     <td>
-                      <b>不管你的 MRRC 服务。</b>电台服务归你自己起。实例没起来时隧道照常在，访问会得到 502 —— 这是区分「隧道断了」和「电台服务没起」的关键。
+                      <b>不管你的 MRRC 服务。</b
+                      >电台服务归你自己起。实例没起来时隧道照常在，访问会得到
+                      502 —— 这是区分「隧道断了」和「电台服务没起」的关键。
                     </td>
                   </tr>
                   <tr>
                     <td>幂等 / 防冲突</td>
                     <td>
-                      macOS/Linux 版：已经有手工启动的隧道客户端在跑时会拒绝启动 ——
-                      两个客户端抢同一个名字会让入口反复抖动。Windows 版没有这道闸门，先停掉手工 frpc。
+                      macOS/Linux 版：已经有手工启动的隧道客户端在跑时会拒绝启动
+                      —— 两个客户端抢同一个名字会让入口反复抖动。Windows
+                      版没有这道闸门，先停掉手工 frpc。
                     </td>
                   </tr>
                   <tr>
                     <td>凭据处理</td>
                     <td>
                       凭据只落在
-                      <code>0600</code>配置文件里；不进命令行参数、不进世界可读的文件。
+                      <code>0600</code
+                      >配置文件里；不进命令行参数、不进世界可读的文件。
                     </td>
                   </tr>
                 </tbody>
@@ -378,7 +394,9 @@ MRRC_HUB_TOKEN='&lt;隧道凭证&gt;' \
             <div class="hub-callout">
               <span class="hub-callout-title">端口与凭证从哪来？</span>
               <p>
-                隧道端口由 Hub 侧权威分配（注册表里那行），你不能自己挑。核验通过、运维分配后，你会拿到标签、端口与凭证三样东西。没拿到就别猜 —— 填错的端口隧道会连上，但入口仍然 404。
+                隧道端口由 Hub
+                侧权威分配（注册表里那行），你不能自己挑。核验通过、运维分配后，你会拿到标签、端口与凭证三样东西。没拿到就别猜
+                —— 填错的端口隧道会连上，但入口仍然 404。
               </p>
             </div>
           </li>
@@ -401,7 +419,10 @@ curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net/api/health     # 期望 401</code>
             <div class="hub-callout ok">
               <span class="hub-callout-title">401 是好事</span>
               <p>
-                <code>/api/health</code>返回 <b>401</b>说明三层同时通了：隧道建立成功、Hub 按呼号找到了你的实例、实例的鉴权中间件在工作。如果它返回 200，反而说明鉴权没生效 —— 值得停下来查一下。
+                <code>/api/health</code>返回
+                <b>401</b>说明三层同时通了：隧道建立成功、Hub
+                按呼号找到了你的实例、实例的鉴权中间件在工作。如果它返回
+                200，反而说明鉴权没生效 —— 值得停下来查一下。
               </p>
             </div>
 
@@ -425,14 +446,16 @@ curl -s  https://&lt;呼号&gt;.mrrc.vlsc.net/api/health     # 期望 401</code>
                     <td>隧道</td>
                     <td>
                       <b>自动回来。</b>常驻服务带自重启（macOS LaunchAgent /
-                      Linux systemd --user / Windows 计划任务），重启、崩溃、换网络都会自己重连。
+                      Linux systemd --user / Windows
+                      计划任务），重启、崩溃、换网络都会自己重连。
                     </td>
                   </tr>
                   <tr>
                     <td>MRRC 服务</td>
                     <td>
                       <b>看你装的是哪个版本：</b><br />
-                      · <b>打包版（当前 v1.27.0）</b>—— 按正常应用安装，随应用启动；Hub
+                      · <b>打包版（当前 v1.27.0）</b>——
+                      按正常应用安装，随应用启动；Hub
                       接入写下的心跳阈值与证书都在启动时生效。<br />
                       · <b>源码运行</b> ——
                       非常驻，重启后要手动起（下面就这个情况）。
@@ -456,7 +479,8 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
               >
               <p>
                 环境文件里有
-                <code>USB Audio Device</code>这类<b>带空格的值</b>。<code>source</code>会把值里的词当命令去执行；上面这个循环才是正确的加载方式。这不是风格问题，是会真的报错。
+                <code>USB Audio Device</code
+                >这类<b>带空格的值</b>。<code>source</code>会把值里的词当命令去执行；上面这个循环才是正确的加载方式。这不是风格问题，是会真的报错。
               </p>
             </div>
 
@@ -464,7 +488,8 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
               <span class="hub-callout-title">重签证书之后，必须重启进程</span>
               <p>
                 证书是在<b>启动时读进内存</b>的：换机器、重装、重签证书之后，如果只替换了文件而不重启
-                MRRC 服务，入口会一直是 502，而本机看起来一切正常。换机的完整清单见
+                MRRC 服务，入口会一直是
+                502，而本机看起来一切正常。换机的完整清单见
                 <a href="maintain.html#rotate" style="color: var(--accent)"
                   >维护 · 换机与证书</a
                 >。
@@ -481,11 +506,14 @@ nohup venv/bin/python server.py &gt; /tmp/mrrc-src/server.log 2&gt;&amp;1 &amp;<
           · 连不上 →
           <a href="trouble.html" style="color: var(--accent)">排障</a> ·
           换机器/退出/叫人来修 →
-          <a href="maintain.html" style="color: var(--accent)">维护与生命周期</a>
+          <a href="maintain.html" style="color: var(--accent)"
+            >维护与生命周期</a
+          >
           · 想知道每一层为什么这么设计 →
           <a href="design.html" style="color: var(--accent)">设计与层层实现</a>
           <br />
-          本页事实基线：2026-10-16 现场复核；命令与期望输出均在现网实例上实测过。
+          本页事实基线：2026-10-16
+          现场复核；命令与期望输出均在现网实例上实测过。
         </p>
       </div>
     </main>

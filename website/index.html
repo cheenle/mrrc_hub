@@ -83,8 +83,9 @@
           </h1>
           <p class="hero-subtitle">
             你的 MRRC Modern 继续跑在自己家里（电脑或 W103D
-            盒子），电台、天线都不动。不需要公网 IP、不需要端口映射、不需要动路由器
-            —— 实例主动出站连上 Hub，你就能从任何地方用浏览器操作同一台电台。
+            盒子），电台、天线都不动。不需要公网
+            IP、不需要端口映射、不需要动路由器 —— 实例主动出站连上
+            Hub，你就能从任何地方用浏览器操作同一台电台。
           </p>
           <div class="hero-actions">
             <a href="start.html" class="btn btn-primary btn-large">
@@ -191,8 +192,9 @@
               <div class="icon"><i class="fas fa-hand"></i></div>
               <h3>PTT 释放永远在本地</h3>
               <p>
-                Hub 只是一条通道，<b>从不写下 PTT</b>。断线、掉网，一律由电台所在的那台机器本地强制回
-                RX —— 不依赖云端租约超时。最难的「TCP
+                Hub 只是一条通道，<b>从不写下 PTT</b
+                >。断线、掉网，一律由电台所在的那台机器本地强制回 RX ——
+                不依赖云端租约超时。最难的「TCP
                 还活着但对端已失联」由实例侧的<b>会话心跳闸门</b>覆盖（Hub
                 模式下建议开启，默认关闭）。
               </p>
@@ -220,25 +222,41 @@
           </div>
           <div class="hub-tracks">
             <div class="hub-track pri">
-              <h3><i class="fas fa-rocket" style="color: var(--accent)"></i> 我要接入</h3>
+              <h3>
+                <i class="fas fa-rocket" style="color: var(--accent)"></i>
+                我要接入
+              </h3>
               <p>
-                把已有的 MRRC Modern 挂上云端。前提只有一条：它已经能在局域网里用。
+                把已有的 MRRC Modern
+                挂上云端。前提只有一条：它已经能在局域网里用。
               </p>
               <ul>
                 <li>先看前提自检，再选路径：W103D 盒子或电脑</li>
                 <li>注册：门户核验后拿到你的呼号入口</li>
                 <li>装隧道（或开箱上电）→ 三条命令验通</li>
               </ul>
-              <a href="start.html" class="btn btn-primary" style="margin-top: 1.25rem">
+              <a
+                href="start.html"
+                class="btn btn-primary"
+                style="margin-top: 1.25rem"
+              >
                 <i class="fas fa-rocket"></i> 开始接入
               </a>
             </div>
             <div class="hub-track">
-              <h3><i class="fas fa-toolbox" style="color: var(--accent)"></i> 我在用</h3>
+              <h3>
+                <i class="fas fa-toolbox" style="color: var(--accent)"></i>
+                我在用
+              </h3>
               <p>已经能远程开台了。日常怎么用、出事怎么查、换机器怎么办。</p>
               <ul>
-                <li><a href="use.html">使用与分享</a>：两把口令两个角色、入口选择</li>
-                <li><a href="maintain.html">维护与生命周期</a>：换机、撤销退出、远程协助</li>
+                <li>
+                  <a href="use.html">使用与分享</a>：两把口令两个角色、入口选择
+                </li>
+                <li>
+                  <a href="maintain.html">维护与生命周期</a
+                  >：换机、撤销退出、远程协助
+                </li>
                 <li><a href="trouble.html">排障</a>：症状对照与四跳分诊</li>
               </ul>
             </div>
@@ -285,7 +303,8 @@
                   <td>WebSocket 端点透明转发</td>
                   <td><span class="hub-badge live">已跑通</span></td>
                   <td>
-                    控制、频谱、收音频、发音频四路固定 + 天调（ATR-1000）可选，握手与关闭语义和直连一致
+                    控制、频谱、收音频、发音频四路固定 +
+                    天调（ATR-1000）可选，握手与关闭语义和直连一致
                   </td>
                 </tr>
                 <tr>
@@ -293,17 +312,19 @@
                   <td><span class="hub-badge live">已开启</span></td>
                   <td>
                     Hub →
-                    实例按<b>各实例自己的入口名</b>校验，自签证书的公钥钉在信任包里通过校验 ——
-                    不是靠关掉 verification
+                    实例按<b>各实例自己的入口名</b>校验，自签证书的公钥钉在信任包里通过校验
+                    —— 不是靠关掉 verification
                   </td>
                 </tr>
                 <tr>
                   <td>会话凭据不进 URL</td>
                   <td><span class="hub-badge live">已实现</span></td>
                   <td>
-                    Hub 侧：nginx 日志不记查询串、hub 不经手拼串。<b
-                      >实例侧已随之发布</b
-                    >（mrrc_modern <b>v1.25.4</b>：令牌走 Cookie / Bearer，旧的「查询串拼串」形式仅作兼容保留并告警 —— 其决定 AD-024）
+                    Hub 侧：nginx 日志不记查询串、hub
+                    不经手拼串。<b>实例侧已随之发布</b>（mrrc_modern
+                    <b>v1.25.4</b>：令牌走 Cookie /
+                    Bearer，旧的「查询串拼串」形式仅作兼容保留并告警 —— 其决定
+                    AD-024）
                   </td>
                 </tr>
                 <tr>
@@ -314,7 +335,8 @@
                   </td>
                   <td>
                     拔网线这类「TCP
-                    还活着但对面已失联」的情形：实例侧已有可开的心跳闸门（默认关闭，Hub 模式建议 3–5
+                    还活着但对面已失联」的情形：实例侧已有可开的心跳闸门（默认关闭，Hub
+                    模式建议 3–5
                     s）；<b>隧道层的主动关流还没做</b>。在此之前靠实例本地多层释放兜底。
                   </td>
                 </tr>
@@ -322,9 +344,9 @@
                   <td>自助注册 Portal（呼号核验四步）</td>
                   <td><span class="hub-badge live">公网入口已上线</span></td>
                   <td>
-                    <code>https://portal.mrrc.vlsc.net</code>（通配证书覆盖，<code
-                      >/apply</code
-                    >按来源 IP 限流）。命中呼号库自动核验，库外转人工；核验通过后授予并写入注册表。见<a
+                    <code>https://portal.mrrc.vlsc.net</code
+                    >（通配证书覆盖，<code>/apply</code>按来源 IP
+                    限流）。命中呼号库自动核验，库外转人工；核验通过后授予并写入注册表。见<a
                       href="start.html#register"
                       style="color: var(--accent)"
                       >接入 · 注册</a
@@ -348,7 +370,8 @@
                   <td><span class="hub-badge live">已在用</span></td>
                   <td>
                     每个实例一张签给自己入口名的自签证书，公钥被 Hub
-                    <b>钉在信任包里</b>、按名字逐台校验（2026-10-16 复核：在册实例的校验名由路由生成器逐台生成）。
+                    <b>钉在信任包里</b>、按名字逐台校验（2026-10-16
+                    复核：在册实例的校验名由路由生成器逐台生成）。
                   </td>
                 </tr>
                 <tr>
@@ -387,8 +410,8 @@
           <div class="hub-callout info">
             <span class="hub-callout-title">MRRC Modern 要能在局域网里用</span>
             <p>
-              能登录、有音频、能发射 —— 这是接入
-              Hub 的前提，Hub 不替你做这件事。还没装的话先去产品站；想省一台常开电脑，可以看
+              能登录、有音频、能发射 —— 这是接入 Hub 的前提，Hub
+              不替你做这件事。还没装的话先去产品站；想省一台常开电脑，可以看
               W103D 盒子的完整指南。
             </p>
             <p style="margin-bottom: 0">
@@ -408,8 +431,9 @@
             </p>
           </div>
           <p class="hub-note">
-            本页事实基线：2026-10-16 现场复核（入口与证书、注册表、路由 timer、门户、frps
-            与延迟实测）。运营事实以 <code>SDD/12 §12.8</code>为准；发现页面与现网不符，就是页面该改。
+            本页事实基线：2026-10-16 现场复核（入口与证书、注册表、路由
+            timer、门户、frps 与延迟实测）。运营事实以
+            <code>SDD/12 §12.8</code>为准；发现页面与现网不符，就是页面该改。
           </p>
         </div>
       </section>

@@ -19,7 +19,7 @@
 2. **门户挂在根**：`https://portal.mrrc.vlsc.net/`（不再带 `/mrrc_portal` 前缀；旧路径 301）。
 3. **入口不再带端口**：实例入口与其他服务一起在 **443**（`https://<呼号>.mrrc.vlsc.net/`），
    `:9988` / `:8899` 两个监听一并取消。**唯一保留的独立端口是隧道控制 8989**。
-4. **标签就是呼号**：一个呼号 = 一台设备 = 一个入口，不再拼产品后缀（应用此前发 `product="mrrc_modern"`，
+4. **标签就是呼号**：主产品的一个呼号 = 一台设备 = 一个裸呼号入口（附加产品另加产品后缀，见 §7.x.1），不再拼产品后缀（应用此前发 `product="mrrc_modern"`，
    与主产品名 `modern` 不等，于是每个入口都长了一截 —— 现在两种写法都归一到裸呼号）。
 5. **旧地址自动改道**：配置里写着 `…:8899`、`www.vlsc.net/mrrc_portal` 或带 `/mrrc_portal` 的应用
    （v1.24.3 及更早）会被 v1.24.4 自动改写到新地址，否则它们连门户都到不了。
@@ -164,8 +164,8 @@ socket.`，而该兜底默认关闭（`config.py`: `_env_float("MRRC_PTT_MAX_TX_
 | Status | Accepted —— **与 AD-H04 的原始排期冲突，已并入 MVP** |
 | Decision | 会话 token 一律经 Cookie 或 `Sec-WebSocket-Protocol` 传递；Hub/Tunnel/nginx/实例访问日志对 `token=`、`code=` 强制脱敏；一次性 code 消费后立即重定向到干净 URL |
 
-**Problem**: 实例会话令牌 30 天有效，且**被前端拼进 URL query**
-（`mrrc_modern/static/ft710_main.js`、`static/listen.js` 构造 `?token=`），实例侧
+**Problem**: 实例会话令牌 30 天有效，且**曾被前端拼进 URL query**
+（`mrrc_modern/static/ft710_main.js`、`static/listen.js` 构造 `?token=`；该前端已在 `mrrc_modern` v1.25.4 按 AD-024 停拼、仅保留兼容告警），实例侧
 `_verify_auth` 也接受 query 参数；实例跑 uvicorn 默认访问日志（含 query）。
 项目已知道该问题（`support_bundle.py` 的脱敏正则备注写着 "a `?token=` inside a URL"），
 但**脱敏只发生在导出诊断包时**。透明代理模式下，Hub/Tunnel/nginx 会逐条记录长期令牌明文。
@@ -328,11 +328,11 @@ TX 音频/CAT/PTT 仍按会话独立。
 | Attribute | Value |
 | ----------- | ------- |
 | Type | Product / Identity |
-| Status | Accepted（命名部分已实现，注册与验证属阶段 2） |
-| Decision | 实例的对外标识就是**无线电呼号**：入口 `https://<呼号>.mrrc.vlsc.net/`（443；V0.21 前写作 `:8899`）（子域）与 `https://www.vlsc.net/mrrc_modern/<呼号>/`（前缀，海外真证书）。**注册实例与注册用户都必须提供真实呼号**；呼号即账号标识符，大小写不敏感（`BG1SB` ≡ `bg1sb`），同一呼号在同一时刻只能绑定一个 Owner。 |
+| Status | Accepted（命名、注册与核验均已实现并上线公网，见 UC-H10 / §12.9） |
+| Decision | 实例的对外标识就是**无线电呼号**：入口 `https://<呼号>.mrrc.vlsc.net/`（443；V0.21 前写作 `:8899`）（子域；早先另有海外边缘的 `/mrrc_modern/<呼号>/` 前缀入口，**该路径已随 V0.21 整体删除**）。**注册实例与注册用户都必须提供真实呼号**；呼号即账号标识符，大小写不敏感（`BG1SB` ≡ `bg1sb`），同一呼号在同一时刻只能绑定一个 Owner。 |
 | Alternatives | ①**自增/随机 instance-id**（如 `inst-7f3a2c`）：不泄露身份、天然防枚举，但用户认不出、客服排障要查表、呼号与实例的对应关系还得另建索引；②**邮箱/手机号作标识**：与业余无线电场景无关，且要处理实名与隐私；③**呼号即身份**（采纳）。 |
-| Consequences | ①**命名规范化**：DNS 标签与 Host 头大小写不敏感（hub 的 vhost 用 `server_name ~*` 匹配），而 URL **路径**大小写敏感 ⇒ 规范形式用呼号原样大写，小写输入 301 到规范形式（实测 `/mrrc_modern/bg1sb/` → 301 → `/mrrc_modern/BG1SB/`）；注册表内部统一按小写标签存储，避免同一台出现两个名字。②**存在性可枚举**：呼号是公开且可猜的，`<呼号>.mrrc.vlsc.net` 存在与否可被探测（登记名 → 401/502，未登记 → 404）。这是本方案的**已知代价**，见开放问题 I-H9 与 SC-H5 的措辞争议。③**每个实例独占子域** ⇒ Cookie/会话天然隔离；对比路径前缀方案（同一 origin 下多实例会争用同名 Cookie，见 AD-H09）。④**注册必须验证呼号**：阶段 2 的 Portal 需要呼号核验手段（上传执照 / 呼号库比对 / 人工审核），否则任何人都能冒用他人呼号抢注子域 —— 这是"呼号即身份"成立的前提，不是可选项。 |
-| Status detail | 命名与大小写规范化已实现（registry + `gen_hub_routes.py` + nginx `~*`）；呼号验证、Owner 绑定与抢注保护属阶段 2 Portal |
+| Consequences | ①**命名规范化**：DNS 标签与 Host 头大小写不敏感（hub 的 vhost 用 `server_name ~*` 匹配），而 URL **路径**大小写敏感 ⇒ 规范形式用呼号原样大写，小写输入 301 到规范形式（V0.21 前的路径入口实测 `/mrrc_modern/bg1sb/` → 301 → `/mrrc_modern/BG1SB/`）；注册表内部统一按小写标签存储，避免同一台出现两个名字。②**存在性可枚举**：呼号是公开且可猜的，`<呼号>.mrrc.vlsc.net` 存在与否可被探测（登记名 → 401/502，未登记 → 404）。这是本方案的**已知代价**，见开放问题 I-H9 与 SC-H5 的措辞争议。③**每个实例独占子域** ⇒ Cookie/会话天然隔离；对比路径前缀方案（同一 origin 下多实例会争用同名 Cookie，见 AD-H09）。④**注册必须验证呼号**：Portal 已具备呼号核验手段（Club Log 全库比对，未命中转人工，见 §12.9），否则任何人都能冒用他人呼号抢注子域 —— 这是"呼号即身份"成立的前提，不是可选项。 |
+| Status detail | 命名与大小写规范化已实现（registry + `gen_hub_routes.py` + nginx `~*`）；呼号验证、Owner 绑定与抢注保护已由 `portal/` 落地并上线公网（UC-H10、§12.9） |
 
 **Problem**: 多租户需要给每个实例一个稳定、可读、可运营的标识。自造 ID 能做到防枚举，但把"这是谁的台"这件事推到了产品之外 —— 用户记不住、客服要查表、社区里也无法用"我的呼号"交流。而业余无线电本身就有全行业公认的唯一身份：呼号。
 

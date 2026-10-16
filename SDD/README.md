@@ -22,10 +22,10 @@
 | --- | --------- | ------ |
 | 1 | Executive Summary | [01-executive-summary.md](01-executive-summary.md) |
 | 2 | Business Direction | [02-business-direction.md](02-business-direction.md) |
-| 3 | Project Definition（scope, SC-H1…SC-H9） | [03-project-definition.md](03-project-definition.md) |
+| 3 | Project Definition（scope, SC-H1…SC-H10） | [03-project-definition.md](03-project-definition.md) |
 | 4 | System Context（actors, interfaces, data flows） | [04-system-context.md](04-system-context.md) |
 | 5 | Non-Functional Requirements（NFR-H001…NFR-H033） | [05-non-functional-requirements.md](05-non-functional-requirements.md) |
-| 6 | Use Case Model（UC-H01…UC-H09） | [06-use-case-model.md](06-use-case-model.md) |
+| 6 | Use Case Model（UC-H01…UC-H10） | [06-use-case-model.md](06-use-case-model.md) |
 | 7 | Subject Area Model（entities, state ownership） | [07-subject-area-model.md](07-subject-area-model.md) |
 | 8 | Architecture Decisions（AD-H01…AD-H15，另有卷首未编号的 V0.21 决定） | [08-architecture-decisions.md](08-architecture-decisions.md) |
 | 9 | Architecture Overview（pipelines, routing, failover） | [09-architecture-overview.md](09-architecture-overview.md) |

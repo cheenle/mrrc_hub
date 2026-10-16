@@ -12,7 +12,7 @@
     },
     "3": {
       "file": "SDD/03-project-definition.md",
-      "title": "Project Definition (scope, success criteria SC-H1…SC-H9, release gates G1-G4)"
+      "title": "Project Definition (scope, success criteria SC-H1…SC-H10, release gates G1-G4)"
     },
     "4": {
       "file": "SDD/04-system-context.md",
@@ -20,11 +20,11 @@
     },
     "5": {
       "file": "SDD/05-non-functional-requirements.md",
-      "title": "Non-Functional Requirements (NFR-H001…NFR-H027)"
+      "title": "Non-Functional Requirements (NFR-H001…NFR-H033)"
     },
     "6": {
       "file": "SDD/06-use-case-model.md",
-      "title": "Use Case Model (UC-H01…UC-H09)"
+      "title": "Use Case Model (UC-H01…UC-H10)"
     },
     "7": {
       "file": "SDD/07-subject-area-model.md",
@@ -32,7 +32,7 @@
     },
     "8": {
       "file": "SDD/08-architecture-decisions.md",
-      "title": "Architecture Decisions (AD-H01…AD-H14)"
+      "title": "Architecture Decisions (AD-H01…AD-H15)"
     },
     "9": {
       "file": "SDD/09-architecture-overview.md",
@@ -52,7 +52,7 @@
     },
     "13": {
       "file": "SDD/13-feasibility-assessment.md",
-      "title": "Feasibility Assessment (risks R-H1…R-H11, assumptions A-H1…A-H4, issues I-H1…I-H8)"
+      "title": "Feasibility Assessment (risks R-H1…R-H13, assumptions A-H1…A-H4, issues I-H1…I-H9)"
     },
     "14": {
       "file": "SDD/14-version-history.md",

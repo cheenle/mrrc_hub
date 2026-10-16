@@ -59,6 +59,7 @@
 | AD-H12 | RX 扇出条件启用（含触发门槛） | [08](08-architecture-decisions.md) |
 | AD-H13 | 遥测/OTA 复用既有 `upgrade_core.py` 与 support receiver | [08](08-architecture-decisions.md) |
 | AD-H14 | 频谱带宽是首要优化杠杆（408 kbps ≈ 单会话 86%） | [08](08-architecture-decisions.md) |
+| AD-H15 | **呼号即租户身份（命名、注册与验证）** | [08](08-architecture-decisions.md) |
 
 ## 1.5 与源设计文档的差异（已用代码取证修正）
 

@@ -160,7 +160,7 @@ cp deploy/frpc-instance.toml.example ~/mrrc-frpc.toml   # 填 token
 frpc -c ~/mrrc-frpc.toml
 
 # 3) 验证
-curl -sI https://test1.mrrc.vlsc.net/login            # 期望 200（自签阶段加 -k）
+curl -s -o /dev/null -w '%{http_code}\n' https://test1.mrrc.vlsc.net/login   # 期望 200（HEAD 得 405；自签阶段加 -k）
 curl -s  https://test1.mrrc.vlsc.net/api/health       # 期望 401（鉴权生效）
 ```
 
@@ -241,7 +241,9 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
 
 ## 后台管理台账号与 frps 面板（V0.28）
 
-部署新版 portal 前先看这份检查单（代码在 `portal/`，行为细节见 `../portal/README.md`）：
+部署新版 portal 前先看这份检查单（代码在 `portal/`，现网落点是 hub 的 `/opt/mrrc-portal/`；
+行为细节见 `../portal/README.md`，界面层（8 个视图 + 设计令牌 + 交互契约）见 `../portal/UI.md`。
+界面层 2026-10-11 全面改版后本条按新形态复核过）：
 
 1. **账号文件**（`/etc/mrrc-hub/portal-users`，htpasswd `$apr1$`）：
 
@@ -262,10 +264,25 @@ LaunchAgent 带 `KeepAlive`，崩溃/重启/换网自恢复；脚本拒绝在"�
    `curConns` 与 `lastStartTime/CloseTime`，**没有累计 `trafficIn/Out`**（采样器因此用今日累计差分）。
 4. **来源 IP 透传**：portal vhost 必须设 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
    （与 `X-Real-IP`）。**缺了它登录锁定会退化成 127.0.0.1 全局桶**——与 §12.8 的实例侧同款教训。
-5. **重启 portal**：`sudo systemctl restart mrrc-portal`；随后逐项复验：登录/登出、无 CSRF 动作被拒、
-   隧道视图出数、停掉面板时页面显示原因而不是 0。
-6. **portal unit 不得设 `MRRC_PORTAL_BASE`**（现网 nginx 把门户挂在根，`/mrrc_portal/*` 只是 301；
+5. **前端静态资源**（2026-10-11 界面改版后新增）：portal 自己服务 `/admin/static/*`
+   （vendored `htmx.min.js` + `admin.js`，**精确文件名白名单**，防路径穿越）。部署必须
+   rsync **整个 `portal/` 目录（含 `static/`）** —— 漏了它服务照常起、只是页面裸奔，
+   没有任何报错。复验：`curl -sI https://portal.mrrc.vlsc.net/admin/static/htmx.min.js`
+   200 且带 `Cache-Control: …immutable`；`/admin/static/../portal/app.py` 必须 **404**
+   （回环与 nginx 两条路都测，2026-10-11 实测）。
+6. **重启 portal**：`sudo systemctl restart mrrc-portal`；随后逐项复验：登录/登出、无 CSRF 动作被拒、
+   **8 个视图**都渲染（总览/申请/实例/实例详情/隧道/系统/审计/呼号库）、隧道视图出数、
+   停掉面板时页面显示原因而不是 0、破坏性动作（拒绝/撤销）走**两阶段确认且理由必填**、
+   关掉 JS 后导航/筛选/表单仍可用（渐进增强，关掉 JS 是验收方式不是故障）。
+7. **portal unit 不得设 `MRRC_PORTAL_BASE`**（现网 nginx 把门户挂在根，`/mrrc_portal/*` 只是 301；
    unit 里那个过期变量曾让登录跳去租户页、会话 Cookie 的 Path 也对不上。2026-10-05 已移除）。
+
+**上线顺序（2026-10-11 界面改版上线实测可行）**：上传新代码到 hub 的 `/tmp` 并逐个核对
+sha256 → **以真正的服务账号 `mrrcportal` 在生产机上跑全套测试**（91 组全绿才动现网）→
+`cp -a` 备份 `/opt/mrrc-portal`（留时间戳后缀）→ `rsync --chown=mrrcportal` 安装 →
+逐文件核哈希 → `systemctl restart mrrc-portal`。回滚一条命令：
+`sudo rsync -a --delete <备份>/portal/ /opt/mrrc-portal/portal/ && sudo systemctl restart mrrc-portal`。
+呈现层改版这类"后端 8 个模块逐字节未变"的升级，风险面就是静态资源与模板，按上面复验清单过一遍即可。
 
 > frps 那个单共享 token 仍然存在（见上）；本面板只是**只读统计**，不是第二套认证。
 
@@ -372,7 +389,8 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 尚未覆盖
 
-- **证书当前是自签的**（脚本在无 DNS 凭证时明确吼一声并生成自签证书，SAN 覆盖
+- **入口证书已是真 Let’s Encrypt 通配**（`*.mrrc.vlsc.net`，DNS-01，每日续期）；脚本只在
+  无 `/etc/mrrc-hub/aliyun.ini` 凭证时才回退自签（SAN 覆盖
   `test1.mrrc.vlsc.net` + `*.mrrc.vlsc.net` + `*.vlsc.net`）。这是硬约束，不是偷懒：
   **Let's Encrypt 的 HTTP-01 固定走 80、TLS-ALPN-01 固定走 443**，两个口都不开就没有自动签发路径。
 - `vlsc.net` 的 DNS 托管在**阿里云万网**（`dns25/dns26.hichina.com`）。要真证书/通配证书：
@@ -380,11 +398,11 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
   （0600），重跑 `bootstrap-hub.sh` —— 脚本自动切 DNS-01，那时可一次签 **`*.mrrc.vlsc.net` 通配**，
   200 个实例共用一张。
 - 多实例（`test2`…）可直接复用：再加一条 frpc 代理 + 一条 nginx server 块。
-- Fleet Agent、设备证书、Portal、租约都还没实现（hub SDD 的阶段 2），本次只验证阶段 1 通路。
+- Fleet Agent、设备证书、租约尚未实现（hub SDD 的阶段 2）；**Portal 已实现并上线**（见 `portal/README.md`）。
 
 ## 证书（实况，2026-09-30 起）
 
-`deploy/mrrc-hub-cert.sh` 是唯一入口；`mrrc-hub-cert.sh` 已被它取代并删除。
+`deploy/mrrc-hub-cert.sh` 是唯一入口；`issue_wildcard_cert.sh` 已被它取代并删除。
 
 | 文件 | 作用 |
 | ------ | ------ |
@@ -453,7 +471,8 @@ www 边缘的上游校验用**系统 CA**（不再钉自签证书），故**续�
   而服务本来就要读证书目录 ⇒ 会不断触发自己（实测 2 分钟 232 次 ✗）。30 秒一次的 timer 只花一次
   glob + 一次哈希比较 ✓，脚本**只在生成物真的变了**才 `nginx -t` + reload ✓（所以常态下不 reload ✓）。
 - 新装 hub：`bootstrap-hub.sh` 会一并安装（`install -m 755/644` + `systemctl enable --now`）。
-  **但 2026-10-03 实测到一次装配缺失，所以别把这句话当保证**：现网那台 hub 上**只有**
+  （2026-10-03 曾实测到一次装配缺失，据 SDD/12 §12.9 与 `bootstrap-hub.sh`，其后已修复 ——
+  **但别把上面那句当保证，装完自己核一遍**）：那时现网那台 hub 上**只有**
   `mrrc-hub-routes.service`，**包装脚本与 timer 都没装** ⇒ 该 unit 指向的
   `/usr/local/sbin/mrrc-hub-routes.sh` 不存在 ⇒ 每次执行 `status=203/EXEC` ⇒ **自 2026-10-02 01:07
   起路由从未重生成过**。症状：新实例的一切都就绪（frps 已在 `127.0.0.1:<端口>` 监听、

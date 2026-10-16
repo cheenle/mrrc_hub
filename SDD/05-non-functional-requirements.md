@@ -48,8 +48,8 @@
 | NFR-H013 | Cookie 策略 | 实例子域会话 host-only（不设 `Domain=.mrrc.vlsc.net`）；**Hub 票证 Cookie 名不得与实例 `AUTH_COOKIE` 冲突**；远程模式下加 `Secure` | Critical | Cookie 隔离与命名检查 |
 | NFR-H014 | 日志隐私 | 密码、私钥、完整 ticket、一次性 code、会话 token、音频内容均不得进入实例/Hub/Tunnel/nginx 日志 | Critical | 日志检索（SC-H6） |
 | NFR-H020 | 令牌传输方式 | 会话 token 不得出现在 URL query、Referer 或浏览器历史中 | Critical | 静态检查 + 抓包 + 日志检索 |
-| NFR-H021 | 传输安全 | 公网链路必须校验对端证书；**禁止 `proxy_ssl_verify off` 出现在生产配置**。实况分两跳：www 边缘对 hub 上游的信任源为**系统 CA**；**hub → 实例这一跳的信任源是 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例自签证书公钥）**，自签证书靠“钉住它”通过校验 | Critical | 配置审计 |
-| NFR-H030 | 证书生命周期 | 入口证书必须是**浏览器信任的真证书**；续期无需人工干预，且**不得要求跨机同步信任材料**；到期前 30 天自动续，剩余 <14 天告警 | 证书链校验 + 到期告警演练 | 证书链校验 + 到期告警演练 |
+| NFR-H021 | 传输安全 | 公网链路必须校验对端证书；**禁止 `proxy_ssl_verify off` 出现在生产配置**。今天只有一跳：**hub → 实例**，信任源为 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例自签证书公钥），自签证书靠“钉住它”通过校验；实例入口这一跳由 nginx 按 `$mrrc_tls_name` 逐实例校验（NFR-H031）。原 www 边缘 → hub 上游那一跳已随 V0.21 整体删除 | Critical | 配置审计 |
+| NFR-H030 | 证书生命周期 | 入口证书必须是**浏览器信任的真证书**；续期无需人工干预，且**不得要求跨机同步信任材料**；到期前 30 天自动续，剩余 <14 天告警 | Critical | 证书链校验 + 到期告警演练 |
 | NFR-H022 | 三层一致性 | Access / Tunnel / 实例三层校验 `instance_id` / `session` / `role` 一致；隧道与实例一对一绑定 | Critical | 越权与错绑测试 |
 | NFR-H023 | 运维权限 | Owner/Fleet Admin 强制 MFA；远程诊断默认关闭，Owner 授权后限时开启并全量审计；Fleet Admin 默认无权进入控制台或收听音频 | High | 权限矩阵测试 |
 | NFR-H024 | 合规提示 | 首次启用 Operator 能力时提示用户确认执照与遥控台站合规；保留地区策略与紧急禁用入口 | Medium | UI 流程检查 |
@@ -64,7 +64,7 @@
 | NFR-H032 | **安装在无预装环境可完成**：实例侧只需出站网络，不得要求用户预先安装隧道客户端；若需下载二进制，**必须校验发布方的 SHA-256**，不符即拒绝使用而非降级；宁可不安装，也不能用来历不明的二进制 | 新机器到隧道在线无手工预装步骤 | High | 安装演练（干净机器 + 断网 + 哈希不符三种情况） |
 | NFR-H033 | **文档的事实可追溯**：文档中的每个入口、端口、证书、行为都必须能指回一个可复现的取证动作（读配置 / 实测 / 读源码），不得凭设计意图措辞；无法取证时写“待核实” | 陈述与现网一致 | Medium | 文档站发布前复验清单 |
 
-## 5.6 Maintainability Requirements
+## 5.7 Maintainability Requirements
 
 | ID | Requirement | Target | Priority | Verification |
 | --- | --- | --- | --- | --- |

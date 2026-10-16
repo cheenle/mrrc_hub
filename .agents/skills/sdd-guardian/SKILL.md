@@ -9,7 +9,7 @@ arguments:
 
 # SDD Guardian — engineering lifecycle for mrrc_hub
 
-This repository is governed by `SDD/` (IBM TeamSD, 15 chapters, currently **V0.29**,
+This repository is governed by `SDD/` (IBM TeamSD, 15 chapters, currently **V0.31**,
 status: 阶段 1 已在公网生产运行 —— 通配入口 + 隧道 + 一机一证 + 自助门户；未决项见
 `SDD/README.md` 的 Status 行). The SDD is the canonical
 design record for the **cloud hub only** — radio control and media stay owned by
@@ -63,9 +63,10 @@ Golden rules are **block-level** and project-specific (see `constraints.json`):
 | `hub-log-no-raw-request-uri` | never log `$request_uri` raw (query carries credentials) |
 | `hub-shared-static-token` | no fleet-wide shared token — one certificate per instance |
 | `hub-cookie-name-not-instance-auth` | hub ticket cookie must not reuse the instance's `mrrc_auth` name |
+| `hub-secrets-hardcoded` | no hardcoded credentials (NFR-H012 / NFR-H014) |
 
 Warn-level: `hub-ticket-cookie-httponly` (ticket must be HttpOnly+Secure),
-`hub-lease-not-release-path`, `hub-secrets-hardcoded`, `hub-bandwidth-budget-sync`.
+`hub-lease-not-release-path`, `hub-bandwidth-budget-sync`.
 
 Minimal diffs; match the deployment conventions in ch 12 §12.2 (idempotent scripts,
 block-level replacement, probe-then-mutate, 0600 credentials, `nginx -t && reload`).

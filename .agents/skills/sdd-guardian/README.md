@@ -7,7 +7,7 @@
 | 文件 | 作用 |
 |---|---|
 | `SKILL.md` | 项目级铁律与六阶段循环（含**引擎副本**说明） |
-| `harness/constraints.json` | 17 条规则：6 block / 4 warn / 7 info，全部由评审取证驱动 |
+| `harness/constraints.json` | 17 条规则：7 block / 3 warn / 7 info，全部由评审取证驱动 |
 | `harness/index.json` | 9 个主题 → SDD 章节的活引用（不复制内容，查询时从 `SDD/*.md` 切片） |
 | `harness/sdd_context.py` | 引擎副本，含 2 处 `# LOCAL PATCH (mrrc_hub)` |
 

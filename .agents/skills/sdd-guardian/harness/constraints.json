@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "sdd_version": "V0.1",
+  "sdd_version": "V0.31",
   "description": "Machine-readable constraint registry distilled from SDD/ (IBM TeamSD) for the mrrc_hub cloud-hub codebase. Consumed by sdd_context.py (context | check | hook). severity: block = reject the edit, warn = allow but surface, info = guidance shown in context output only. Patterns target the anti-patterns proven to exist in the current 4 remote-access mechanisms (see SDD/01 §1.2 and docs/2026-09-30-fleet-hub-design-review.md); they are intentionally narrow so they do not fire on prose or on the mrrc_modern repo, whose own registry governs instance-side code.",
   "rules": [
     {

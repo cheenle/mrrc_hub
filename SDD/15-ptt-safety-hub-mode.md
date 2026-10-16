@@ -99,7 +99,7 @@
 
 本机制需要在 `mrrc_modern` 侧落地，因此**必须在该仓 SDD 中同步登记**：
 
-- 新增配置：`MRRC_REMOTE_SESSION_TX_HEARTBEAT_S`（默认 1.0 s，0 = 关闭）
+- 新增配置：`MRRC_REMOTE_SESSION_TX_HEARTBEAT_S`（实例侧默认 **0 = 关闭**；Hub 模式建议启用 3–5 s）
 - 新增行为：TX 期间的远程会话活性闸门（复用 key-owner 仲裁）
 - 默认值变更评估：`MRRC_PTT_MAX_TX_SECONDS` 在 Hub 模式下推荐 120 s
 - 回归：`mrrc_modern` 的 `SDD/15` Layer 表需要新增一层（远程会话活性），并同步测试计数

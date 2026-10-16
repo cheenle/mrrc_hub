@@ -30,7 +30,7 @@
 | Field | Description |
 |-------|-------------|
 | Goal | 实例在无人值守下接入 Hub 并保持可被路由 |
-| Preconditions | 设备证书有效；出站 443 可用 |
+| Preconditions | 设备证书有效；出站 8989 可用（隧道口，NFR-H001） |
 | Basic Flow | Agent 依次尝试 Hub 地址列表，建立 WSS/mTLS 长连接 → 协商隧道协议版本与能力集合 → Tunnel Gateway 写入 `instance_id → tunnel_node_id / connection_id / last_seen`（带 TTL）→ Agent 发送 REGISTER（软件版本、电台型号、能力位、LAN 状态）→ 控制面标记在线并返回策略差量与 OTA 通知 → Agent 每 15 s 心跳（RTT、重连次数、活跃会话、上行健康度、租约状态） |
 | Exceptions | 认证失败 → 不无限重试，转入需人工处理状态；主 Hub 失败 → 切备用 Hub；连续 3 次心跳失败 → 判离线（≤45 s） |
 | Safety | 隧道与实例一对一绑定，禁止跨实例复用（`NFR-H022`） |

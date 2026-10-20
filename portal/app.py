@@ -247,6 +247,11 @@ class Portal:
 
     def apply(self, raw_callsign: str, contact: str = "", product: str = "") -> dict:
         normalized = cs.normalize(raw_callsign)          # ① 规范化
+        # 产品名**先**变成标签再落盘。顺序不能反：store.apply 一写就有了一条记录，
+        # 而 label_for 随后抛的错只是把响应打成 409 —— 库里留下一条 product 不可用、
+        # label 为空的申请，此后每次「分配入口」都在 grant() 里重抛同一个错，只能人工改库
+        # （2026-10-21 现场：BG7SB 填「盒子」，记录已 applied 并人工核验，入口永远分不出来）。
+        label = cs.label_for(normalized, product)
         app = self.store.apply(normalized, contact, product)   # ② 查重（冲突即抛错）
         result = self.verifier.check(normalized)         # ③ 核验
         if result.outcome is VerificationOutcome.VERIFIED:
@@ -254,7 +259,7 @@ class Portal:
         elif result.outcome is VerificationOutcome.REJECTED:
             app = self.store.reject(normalized, result.evidence)
         return {"callsign": normalized, "status": app.status, "evidence": result.evidence,
-                "label": cs.label_for(normalized, product),
+                "label": label,
                 # 申请令牌只随这一次应答交给申请方本人：应用在设置里存下它，凭它轮询 /status。
                 # 它读不了别人的申请、也改不了任何状态（见 store.Application.request_token）。
                 "request_token": app.request_token}
@@ -1264,7 +1269,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 '<input name="callsign" placeholder="呼号，例如 BG1SB" required '
                 'autocomplete="off" style="flex:2 1 160px">'
                 '<input name="contact" placeholder="联系方式（可选）" style="flex:1 1 140px">'
-                '<input name="product" placeholder="产品（留空＝主产品）" style="flex:1 1 140px">'
+                '<input name="product" placeholder="产品（留空＝主产品；只能英文/数字）" style="flex:1 1 140px">'
                 '<button class="pri">提交申请</button>'
                 '</form>'
                 '<details><summary class="hint">为什么必须核验？</summary>'
@@ -1511,6 +1516,9 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 result = portal.revoke(who, body.get("reason", ""), actor=actor)
                 return done("已撤销") or self._send(200, result)
             except cs.InvalidCallsign as exc:
+                return self._send(400, {"error": str(exc)})
+            except cs.InvalidProduct as exc:
+                # 与非法呼号同一条语义：是**输入**不对，不是与服务端状态冲突（409）。
                 return self._send(400, {"error": str(exc)})
             except KeyError as exc:
                 return self._send(404, {"error": f"无此申请: {exc}"})

@@ -33,6 +33,10 @@ class InvalidCallsign(ValueError):
     """输入不可能是一个呼号（规范化后仍不合法）。"""
 
 
+class InvalidProduct(ValueError):
+    """产品名拼不出合法的 DNS 标签（入口地址只能用 a-z0-9-）。"""
+
+
 def normalize(raw: str) -> str:
     """规范化：去空白、转大写、去掉全角字符带来的歧义。
 
@@ -110,5 +114,11 @@ def label_for(callsign: str, product: str | None = None) -> str:
         return base
     slug = re.sub(r"[^a-z0-9]+", "-", str(product).lower()).strip("-")
     if not slug:
-        raise ValueError(f"产品名无法构成合法标签: {product!r}")
+        # 入口是一个 DNS 标签（<label>.mrrc.vlsc.net），所以产品名最终只能由 a-z0-9- 组成。
+        # 中文名（现场实测「盒子」）slug 化后为空 —— 这里必须给出**能照着做**的提示，
+        # 否则运维只看到一句「无法构成合法标签」，不知道该留空还是改英文。
+        raise InvalidProduct(
+            f"产品名无法构成合法标签: {product!r} —— 入口地址是 DNS 标签，只能用英文字母、"
+            "数字和短横线（例如 legacy、box）；中文名请改成英文，或留空表示主产品"
+        )
     return f"{base}-{slug}"

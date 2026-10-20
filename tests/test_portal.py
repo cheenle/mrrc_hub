@@ -137,6 +137,32 @@ def test_label_rule():
     check(cs.label_for("bg1sb", "legacy") == "bg1sb-legacy", "其他产品仍加后缀")
     check(cs.label_for("BG1SB", "legacy") == "bg1sb-legacy", "附加产品加后缀")
     check(cs.label_for("BG1SB", "Old Rig") == "bg1sb-old-rig", "产品名 slug 化")
+    # 入口是 DNS 标签，中文名 slug 化后为空 —— 必须报错（InvalidProduct → HTTP 400），
+    # 且提示要说清该怎么办
+    check(raises(cs.InvalidProduct, cs.label_for, "bg7sb", "盒子"), "中文产品名应抛 InvalidProduct")
+    try:
+        cs.label_for("bg7sb", "盒子")
+    except ValueError as exc:
+        check("英文" in str(exc) and "留空" in str(exc), f"报错要能照着做: {exc}")
+
+
+def test_bad_product_writes_nothing():
+    """产品名拼不出标签时，申请必须整条失败且**一条记录都不留**。
+
+    现场 2026-10-21：BG7SB 用「盒子」申请，接口回了 409，但 store.apply 已经先把记录写进去了；
+    人工核验通过后 label 仍为空，再点「分配入口」还是同一个错，只能人工改库。
+    写库与校验的顺序不能反。
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "portal.json")
+        portal = Portal(store, reg.Registry(Path(tmp) / "instances.tsv"),
+                        verifier=ManualVerifier())
+        check(raises(cs.InvalidProduct, portal.apply, "BG7SB", "a@b.c", "盒子"),
+              "非法产品名必须抛 InvalidProduct（接口据此回 400，而不是 409）")
+        check(store.get("BG7SB") is None, "非法产品名不得留下申请记录")
+        # 同一呼号改成合法产品名应能正常申请（没有被上一条占位）
+        result = portal.apply("BG7SB", "a@b.c", "box")
+        check(result["label"] == "bg7sb-box", f"合法产品名应生成后缀标签: {result['label']}")
 
 
 def test_dedupe_never_overwrites():

@@ -1335,6 +1335,10 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     supplied = str(body.get("secret") or "")
                     if not app or app.status != "granted" or not app.enroll_secret \
                             or not hmac.compare_digest(supplied, app.enroll_secret):
+                        # 同理：认领失败时要知道是呼号不对、尚未批准，还是口令输错
+                        self.log_message("claim 403 callsign=%r reason=%s", callsign,
+                                         "无此申请" if not app else
+                                         ("状态 " + app.status) if app.status != "granted" else "口令不符")
                         return self._send(403, {"error": "登记口令无效或未获授权"})
                     return self._send(200, {
                         "callsign": app.callsign,
@@ -1355,6 +1359,10 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                     supplied = str(body.get("token") or "")
                     if not app or not app.request_token or \
                             not hmac.compare_digest(supplied, app.request_token):
+                        # 403 不告诉运维"是哪台在用哪个呼号"，现场就只能猜：
+                        # 2026-10-21 BG2HCO 改呼号后，实例一直 403，却看不出它到底在报哪个呼号。
+                        self.log_message("status 403 callsign=%r reason=%s",
+                                         callsign, "无此申请" if not app else "令牌不符")
                         return self._send(403, {"error": "申请令牌无效"})
                     reply = {
                         "callsign": app.callsign,

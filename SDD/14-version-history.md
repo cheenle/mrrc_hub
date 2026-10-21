@@ -26,6 +26,11 @@
 **验证**：hub 全套 121 组测试绿；现网 `POST /apply {product:'盒子'}` → 400 且 `portal.json` 条目数
 不变（35）；BG7SB 记录按主产品修复后 `label_for` → `bg7sb`（已留 `.bak-…-cgbox` 备份与 audit 记录）。
 
+**补充（同日）**：`/status` 与 `/claim` 的 403 现在把**请求里的呼号与原因**写进日志
+（`status 403 callsign='GB2HCO' reason=无此申请`）。起因是 BG2HCO 改呼号后实例一直 403，
+而日志只有一行 `POST /status 403`，无法区分"呼号查不到"与"令牌不符" —— 只能靠响应体长度反推，
+这正是当天多花了半小时的地方。
+
 ## V0.37 — 2026-10-17 — 实例入口：静态资源 gzip + 边缘缓存；X1 漂移收口
 
 **触发**：运维反映 `https://ba4eg.mrrc.vlsc.net/` 「每次加载都很慢」，要求"正常访问不必

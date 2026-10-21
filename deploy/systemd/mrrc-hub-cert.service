@@ -1,0 +1,26 @@
+# Maybe issue / renew the *.mrrc.vlsc.net certificate and check its expiry.
+#
+# Why this unit exists: until 2026-10-21 the certificate script was installed but **nothing ever
+# ran it** - no timer, no cron entry. The wildcard certificate (portal + every instance entry)
+# therefore had exactly one path to expiry: the day it lapsed, every `<call>.mrrc.vlsc.net` would
+# answer "certificate has expired" at once, browsers included. The script is idempotent and cheap
+# (two `openssl x509` reads in the common case), so a daily run costs nothing.
+#
+# It runs as root because it may write /etc/mrrc-hub/tls and reload nginx - the Portal service
+# deliberately cannot, which is the same reason mrrc-hub-routes.service exists separately.
+[Unit]
+Description=MRRC hub: issue/renew the *.mrrc.vlsc.net certificate, then check expiry
+After=network-online.target
+Wants=network-online.target
+# A non-zero exit is information here (1 = expiring, 2 = expired/unattended action needed) and the
+# unit is expected to stay in that state until a human fixes it - do not let the start limiter
+# rewrite it into 'start-limit-hit'.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mrrc-hub-cert.sh
+StandardOutput=journal
+StandardError=journal
+# certbot's manual DNS-01 flow waits for the TXT record to propagate; a slow DNS API is not a hang.
+TimeoutStartSec=600

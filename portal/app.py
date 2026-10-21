@@ -334,7 +334,9 @@ def _cert_days(path=None) -> str:
         stamp = [ln.split("=", 1)[1] for ln in text.splitlines() if ln.startswith("notAfter=")][0]
         end = time.mktime(time.strptime(" ".join(stamp.split()[:4]), "%b %d %H:%M:%S %Y"))
         days = int((end - time.time()) // 86400)
-        return f"{days} 天（{stamp}）" + ("　⚠️ 需检查续期" if days < 14 else "")
+        # 21 天与 mrrc-hub-cert.sh 的 DAYS_WARNING 对齐：脚本在 ≤21 天时以退出码 1 告警，
+        # 控制台却到 <14 天才变红 —— 两个数字不一样，看的人会先怀疑其中一个坏了。
+        return f"{days} 天（{stamp}）" + ("　⚠️ 需检查续期" if days <= 21 else "")
     except Exception:                                  # noqa: BLE001
         return "（摘要文件无法解析）"
 

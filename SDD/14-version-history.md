@@ -2,6 +2,31 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.39 — 2026-10-21 — 通配证书的续期链断在四处，逐个接上
+
+**触发**：多名用户报 `certificate has expired`（`portal.mrrc.vlsc.net`），浏览器同样报错。逐层排查后
+证书**今天是有效的**（链上 4 张全部在期、私钥配对、三个网络位置都能打开），真正的问题在**续期侧**：
+
+| # | 断点 | 后果 |
+|---|---|---|
+| ① | **没有任何 timer/cron 调 `mrrc-hub-cert.sh`** | 证书只在 2026-09-30 手工签过一次 |
+| ② | certbot 世系 `mrrc-wildcard` **被删**（`live/`、`renewal/` 里都没有） | `certbot.timer` 每天 renew 却无物可续，脚本只会走"首次签发"分支 |
+| ③ | `--deploy-hook` 指向 `/usr/local/sbin/mrrc-hub-cert-hook.sh`，**该文件不存在** | 一旦世系重建，certbot 会因缺失 hook 让续期失败 |
+| ④ | `write_cert_info()` 定义在 `exit 0` **之后** | 控制台的证书天数永不刷新（停在一次手工写入上） |
+
+**改了什么**：新增 `deploy/systemd/mrrc-hub-cert.{service,timer}`（每天 04:17 + 抖动，≤21 天退出码 1
+→ `systemctl --failed` 可见）；新增 `deploy/mrrc-hub-cert-hook.sh` 并入库安装；脚本改为**两个凭证路径都认**
+（`/root/.secrets/aliyun.ini` 与 `/etc/mrrc-hub/aliyun.ini`，文档此前自相矛盾）、把 `write_cert_info`
+提到退出前、并加一条硬护栏：**无凭证时绝不用自签覆盖真证书**（原逻辑在"剩余 <30 天"时会把 LE 证书换掉，
+到期前就搞坏所有实例入口且私钥一并被换，不可逆）。portal 的天数告警阈值 14 → 21，与脚本对齐。
+
+**影响**：不触碰标签/注册表/隧道任何逻辑；只补"证书会自己续上"这件事。到期日仍是 2026-12-29，
+但**现在缺的只剩一个阿里云 RAM AccessKey**（`AliyunDNSFullAccess`）。
+
+**验证**：装完手工跑一次 → `[CRITICAL] 找不到阿里云凭证 + [OK] 还有 69 天`、证书文件 mtime 未变
+（证明护栏生效）；`systemctl start` → 同样输出、退出码 0、timer 已排到次日 04:25；
+portal 全套 44 组测试绿。
+
 ## V0.38 — 2026-10-21 — 非法产品名不再留下半条申请；中文名给可照做的报错
 
 **触发**：现场 `POST /apply` 回 `{"error": "产品名无法构成合法标签: '盒子'"}`，申请人以为申请失败。

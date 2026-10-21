@@ -1,0 +1,19 @@
+# Daily certificate check, deliberately at an odd hour with a jitter so it never coincides with
+# the 30-second route timer or a certbot.timer run (that one renews every 12 hours for the other
+# lineages on this host).
+#
+# 21 days before expiry the run exits 1, so `systemctl --failed` and the journal both show it.
+# That line is not a substitute for an external check (it cannot see a certificate that is broken
+# for *clients* while being valid for us) - it only guarantees we are never surprised by the one
+# date we can compute.
+[Unit]
+Description=MRRC hub: daily certificate check
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=mrrc-hub-cert.service
+
+[Install]
+WantedBy=timers.target

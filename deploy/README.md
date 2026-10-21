@@ -233,12 +233,21 @@ Let's Encrypt 的通配只走 DNS-01。而 hub 在境内，80/443 本来就不�
 sudo install -d -m 700 /root/.secrets
 sudo sh -c 'printf "dns_aliyun_access_key = %s\ndns_aliyun_access_key_secret = %s\n" \
     "<AccessKeyId>" "<AccessKeySecret>" > /root/.secrets/aliyun.ini && chmod 600 /root/.secrets/aliyun.ini'
-sudo bash deploy/mrrc-hub-cert.sh     # 有凭证签真证书，无凭证自签（见 §证书）
+sudo systemctl start mrrc-hub-cert.service   # 有凭证立刻签，日志里看结果
+sudo journalctl -u mrrc-hub-cert.service -n 20
 ```
 
-脚本会：装 `certbot-dns-aliyun` → 签 `*.mrrc.vlsc.net` + 裸域 → 写一个 **deploy hook** 把证书装到
-`/etc/mrrc-hub/tls/`（nginx 已在读这个路径，**无需改任何 nginx 配置**）并 reload → 之后由
-`certbot.timer` 每 90 天自动续订，hook 自动生效。
+脚本会：用**自写的 DNS-01 hook**（`deploy/aliyun-acme-dns-hook.py`，纯标准库，不装第三方
+`certbot-dns-aliyun`）签 `*.mrrc.vlsc.net` + 裸域 → 由 **deploy hook**（`deploy/mrrc-hub-cert-hook.sh`）
+把证书装到 `/etc/mrrc-hub/tls/`（nginx 已在读这个路径，**无需改任何 nginx 配置**）并 reload。
+
+**定时任务（2026-10-21 补）**：`deploy/systemd/mrrc-hub-cert.{service,timer}`，每天 04:17（带 10 分钟抖动）
+跑一次。之前**没有任何东西调这个脚本** —— 证书是 2026-09-30 手工签的，certbot 世系被删过，
+`certbot.timer` 里也没有它，所以那张证书唯一的结局就是到期那天全站一起“过期”。定时器现在同时负责：
+续期、到期监控（≤21 天退出码 1，`systemctl --failed` 里看得见）、以及刷 portal 控制台的天数。
+
+**护栏（同日）**：无凭证时脚本**绝不会用自签覆盖真证书**（原实现在“剩余 < 30 天”时会把 LE 证书
+换掉 —— 那会在到期前就搞坏所有实例入口，而且私钥一并换掉、不可逆）。
 
 **不想建 key 的话**：`certbot certonly --manual --preferred-challenges dns -d '*.mrrc.vlsc.net'`
 在任何机器上跑，把打印出的 TXT 记录加到阿里云 DNS 控制台即可 —— 但**每 90 天要手工来一次**，
@@ -426,14 +435,14 @@ HTTP-01 没问题），重跑脚本即换成**真证书**、浏览器零警告�
 
 ## 尚未覆盖
 
-- **入口证书已是真 Let’s Encrypt 通配**（`*.mrrc.vlsc.net`，DNS-01，每日续期）；脚本只在
-  无 `/etc/mrrc-hub/aliyun.ini` 凭证时才回退自签（SAN 覆盖
-  `test1.mrrc.vlsc.net` + `*.mrrc.vlsc.net` + `*.vlsc.net`）。这是硬约束，不是偷懒：
+- **入口证书已是真 Let’s Encrypt 通配**（`*.mrrc.vlsc.net`，DNS-01），`mrrc-hub-cert.timer` 每天检查
+  并续期；凭证（`/root/.secrets/aliyun.ini` 或 `/etc/mrrc-hub/aliyun.ini`，0600）缺失时只回退自签，
+  且**不会覆盖已有的真证书**。这是硬约束，不是偷懒：
   **Let's Encrypt 的 HTTP-01 固定走 80、TLS-ALPN-01 固定走 443**，两个口都不开就没有自动签发路径。
 - `vlsc.net` 的 DNS 托管在**阿里云万网**（`dns25/dns26.hichina.com`）。要真证书/通配证书：
-  建一个只带 `AliyunDNSFullAccess` 的 RAM 用户，把 AccessKey 写进 `/etc/mrrc-hub/aliyun.ini`
-  （0600），重跑 `bootstrap-hub.sh` —— 脚本自动切 DNS-01，那时可一次签 **`*.mrrc.vlsc.net` 通配**，
-  200 个实例共用一张。
+  建一个只带 `AliyunDNSFullAccess` 的 RAM 用户，把 AccessKey 写进 `/root/.secrets/aliyun.ini`
+  （0600），`sudo systemctl start mrrc-hub-cert.service` —— 脚本自动切 DNS-01，一次签
+  **`*.mrrc.vlsc.net` 通配**，所有实例共用一张。
 - 多实例（`test2`…）可直接复用：再加一条 frpc 代理 + 一条 nginx server 块。
 - Fleet Agent、设备证书、租约尚未实现（hub SDD 的阶段 2）；**Portal 已实现并上线**（见 `portal/README.md`）。
 

@@ -22,8 +22,8 @@
 
 | 已实现的组件 | 对应目标态 | 实现在哪 |
 | ------- | -------- | -------- |
-| 呼号注册 Portal | Portal（极简子集） | `portal/`（运行时零第三方依赖，标准库 HTTP；`htpasswd.py` 账号校验、`sessions.py` 会话/登录锁定、`metrics.py` 隧道采样）；**界面层三分**：`app.py` 只做传输与事实采集、`views.py` 纯呈现（有 AST 守卫禁止它自己采集）、`ui.py` 令牌与组件；**前端只有一份 vendored 依赖**（htmx 2.0.7，逐字节冻结 + sha256 守卫）；systemd `mrrc-portal.service`；`apply/status/verify/grant/enroll/revoke` 端点 + `/admin` 审批台（会话+CSRF，**八视图**：总览/申请/实例/实例详情/隧道/系统/审计/呼号库） |
-| 遥号核验 | IAM 的核验部分 | Club Log 全库（27 万条，与站内留言版同源，每日同步）+ 自建呼号库 + 人工兜底 |
+| 呼号注册 Portal | Portal（极简子集） | `portal/`（运行时零第三方依赖，标准库 HTTP；`htpasswd.py` 账号校验、`sessions.py` 会话/登录锁定、`metrics.py` 隧道采样）；**界面层三分**：`app.py` 只做传输与事实采集、`views.py` 纯呈现（有 AST 守卫禁止它自己采集）、`ui.py` 令牌与组件；**前端只有一份 vendored 依赖**（htmx 2.0.7，逐字节冻结 + sha256 守卫）；systemd `mrrc-portal.service`；`apply/status/verify/grant/enroll/revoke/claim` + `help/{request,heartbeat,close,revoke}` 端点 + `/admin` 审批台（会话+CSRF，**八视图**：总览/申请/实例/实例详情/隧道/系统/审计/呼号库） |
+| 呼号核验 | IAM 的核验部分 | Club Log 全库（27 万条，与站内留言版同源）+ 自建呼号库 + 人工兜底。**每日同步在现网未安装**：2026-10-25 复核，门户侧副本停在 10-11，见 13 I-H10 |
 | 注册表（静态） | Registry（在线状态版） | `/etc/mrrc-hub/instances.tsv` + `gen_hub_routes.py` 生成 nginx map。**无在线状态、无 Redis、无心跳** |
 | 实例证书签发 | Device CA（极简子集） | `deploy/make_instance_cert.sh` + `/etc/mrrc-hub/trust-bundle.pem`。**无轮换、无 CRL** |
 | 子域路由 + 透明代理 | Access Gateway | nginx 通配 vhost（无验票、无 Cookie 设置、无内网 RPC） |
@@ -67,7 +67,7 @@ Access Gateway ──(内网 RPC)──► Tunnel Gateway ──(mTLS WSS)──
 > **残留（仍未做）**：Cookie 仍 `httponly=False`（C2 之后「JS 要读它」的理由已不成立，可改 True）、
 > 无 `Secure`（C3 仍 open）。
 
-**交付状态（2026-10-06 订正）**：C1–C6 已进打包版并已发布 —— 当前 Stable **v1.25.4**
+**交付状态（2026-10-06 订正，2026-10-25 复核）**：C1–C6 已进打包版并已发布 —— 当前 tag **v1.28.2**
 （原文写的 v1.22.0/v1.23.0 是 `feat/hub` 上的分支版本号，**从未发布**）
 （C1 的阈值以 `MRRC_REMOTE_SESSION_TX_HEARTBEAT_S` 实现，默认 0 = 关，Hub 模式建议 3–5 s）。
 注意：**进包 ≠ 默认开启** —— C1 默认是关的，需要实例侧显式打开。

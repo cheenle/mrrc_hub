@@ -14,12 +14,12 @@
 ## 1.2 现状基线（评审新增）
 
 源设计文档 v2.0 的选型比较（其 §6.1）把远程接入当成从零开始。**实际已存在 4 套机制**，
-其中 B2 已在公网生产运行 —— 这改变了 MVP 的起点与验收口径（AD-H10）。
+其中 B2 的通道至今仍在现网配置里（2026-10-25 复核：上游实例离线，`/mrrc_modern/listen` 回 502）—— 这改变了 MVP 的起点与验收口径（AD-H10）。
 
 | # | 机制 | 实现载体 | 公网通道 | 认证 | 每实例运维成本 | 状态 |
 |---|---|---|---|---|---|---|
 | **B1** | SSH 反向端口转发 | `mrrc/mrrc_tunnel.sh` + launchd `com.user.mrrc.tunnel.plist` + `install_tunnel_service.sh` | `ssh -N -R 8891/8892:localhost → www.vlsc.net` → 远端 nginx 反代 `radio1.vlsc.net` | **服务器系统账号** + `ssh-copy-id` 免密 | 手工：装 key、开服务器账号、加 nginx 段 | 历史 |
-| **B2** | **IPv6 直连 + nginx 幂等反代** | `mrrc_modern/deploy_listen_proxy.sh` → nginx `location = /mrrc_modern/{listen,login,*}` | `https://www.vlsc.net/mrrc_modern/listen` → `proxy_pass https://radio.vlsc.net:8888`（**IPv6，无隧道**） | 实例自身的 admin / listen 密码 | **必须 SSH 到中心机 + sudo 改 nginx** | **生产运行** |
+| **B2** | **IPv6 直连 + nginx 幂等反代** | `mrrc_modern/deploy_listen_proxy.sh` → nginx `location = /mrrc_modern/{listen,login,*}` | `https://www.vlsc.net/mrrc_modern/listen` → `proxy_pass https://radio.vlsc.net:8888`（**IPv6，无隧道**） | 实例自身的 admin / listen 密码 | **必须 SSH 到中心机 + sudo 改 nginx** | **在用（2026-10-25：上游离线，502）** |
 | **B3** | 路径前缀 Web 代理 | `mrrc_modern/pi_web_proxy.py`（`AUTH_COOKIE = "pi_web_auth"`，basic auth + httponly cookie） | 同 B2 的中心机侧 | 独立 basic auth / cookie（30 天） | 已存在 | 现役 |
 | **B4** | 实例 → 作者服务器上报 | `mrrc_modern/deploy_support_receiver.sh` + `tools/support_receiver/server.py`（独立 systemd unit、8098、独立存储、0600 口令文件） | 出站 HTTPS | 共享口令（**非设备证书**） | 一次性 | 现役 |
 
@@ -30,6 +30,10 @@
 - 逐前端资源改中心 nginx（listen / login / listen.js / rx_worklet_processor.js / `/modules/` / `/api/` / `/WS` 各一条 `location`），且踩过 `^~` 优先级与重复块导致 `nginx -t` 失败的事故
 - `proxy_ssl_verify off` —— 公网链路上实例自签证书校验被关闭
 - 实例会话令牌（30 天有效）被前端拼进 URL query（`static/ft710_main.js`、`static/listen.js`），经代理必然进日志
+
+> **2026-10-25 复核（决定与实现不一致）**：V0.21 决定删除的海外边缘路径，在 www 的 nginx 里**仍留着
+> 一段指向旧机 `8.160.161.80:9988` 的 path-proxy**（该机已下线，实测 502）。它不承载任何现网入口，
+> 但也不能记作"已删除" —— 见 `12-operational-model.md` §12.8。
 
 > 详细取证见 [`docs/2026-09-30-fleet-hub-design-review.md`](../docs/2026-09-30-fleet-hub-design-review.md)。
 

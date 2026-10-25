@@ -37,7 +37,7 @@
 
 | ID | Requirement | Target | Priority | Verification |
 | --- | --- | --- | --- | --- |
-| NFR-H006 | **PTT 释放（含半开连接）**：Operator 通道断开或 TX 期间心跳失效，实例必须在本地释放 PTT，不等待云端租约 TTL | **EOF 型 ≤ 1 s**（现状已满足）；**半开型 ≤ 1.5 s**（待实现，MVP 必需） | Critical | 两组注入：①关闭浏览器（EOF 型）②拔网线/切 Wi-Fi/静默丢弃（半开型）；完整矩阵见第 [15](15-ptt-safety-hub-mode.md) 章 §15.5 |
+| NFR-H006 | **PTT 释放（含半开连接）**：Operator 通道断开或 TX 期间心跳失效，实例必须在本地释放 PTT，不等待云端租约 TTL | **EOF 型 ≤ 1 s**（现状已满足）；**半开型 ≤ 1.5 s**（实例侧闸门已实现、默认关；隧道层关流未做 —— MVP 仍开） | Critical | 两组注入：①关闭浏览器（EOF 型）②拔网线/切 Wi-Fi/静默丢弃（半开型）；完整矩阵见第 [15](15-ptt-safety-hub-mode.md) 章 §15.5 |
 | NFR-H019 | TX 期间会话心跳 | TX 期间心跳间隔 **500 ms**；隧道层连续 **2 次**未达（≈1.0 s）主动关流；实例侧活性闸门阈值 **1.0 s**（与隧道层一致） | Critical | 心跳丢失与单包抖动注入（V3/V4/V7/V10） |
 
 ## 5.5 Security & Privacy Requirements
@@ -48,8 +48,8 @@
 | NFR-H013 | Cookie 策略 | 实例子域会话 host-only（不设 `Domain=.mrrc.vlsc.net`）；**Hub 票证 Cookie 名不得与实例 `AUTH_COOKIE` 冲突**；远程模式下加 `Secure` | Critical | Cookie 隔离与命名检查 |
 | NFR-H014 | 日志隐私 | 密码、私钥、完整 ticket、一次性 code、会话 token、音频内容均不得进入实例/Hub/Tunnel/nginx 日志 | Critical | 日志检索（SC-H6） |
 | NFR-H020 | 令牌传输方式 | 会话 token 不得出现在 URL query、Referer 或浏览器历史中 | Critical | 静态检查 + 抓包 + 日志检索 |
-| NFR-H021 | 传输安全 | 公网链路必须校验对端证书；**禁止 `proxy_ssl_verify off` 出现在生产配置**。今天只有一跳：**hub → 实例**，信任源为 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例自签证书公钥），自签证书靠“钉住它”通过校验；实例入口这一跳由 nginx 按 `$mrrc_tls_name` 逐实例校验（NFR-H031）。原 www 边缘 → hub 上游那一跳已随 V0.21 整体删除 | Critical | 配置审计 |
-| NFR-H030 | 证书生命周期 | 入口证书必须是**浏览器信任的真证书**；续期无需人工干预，且**不得要求跨机同步信任材料**；到期前 30 天自动续，剩余 <14 天告警 | Critical | 证书链校验 + 到期告警演练 |
+| NFR-H021 | 传输安全 | 公网链路必须校验对端证书；**禁止 `proxy_ssl_verify off` 出现在生产配置**。今天只有一跳：**hub → 实例**，信任源为 `/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 各实例自签证书公钥），自签证书靠“钉住它”通过校验；实例入口这一跳由 nginx 按 `$mrrc_tls_name` 逐实例校验（NFR-H031）。原 www 边缘 → hub 上游那一跳已随 V0.21 停用。**范围注（2026-10-25）**：现网 `vlsc.net` 里 B2 的七个 location 仍是 `proxy_ssl_verify off`（历史路径，AD-H10 保留）；Hub 链路（入口 vhost 与静态资源 location 共两处）无一例外，且不得新增关闭点 | Critical | 配置审计 |
+| NFR-H030 | 证书生命周期 | 入口证书必须是**浏览器信任的真证书**；续期无需人工干预，且**不得要求跨机同步信任材料**；到期前 30 天自动续，剩余 ≤21 天以退出码 1 告警（2026-10-21 起；原 14 天） | Critical | 证书链校验 + 到期告警演练 |
 | NFR-H022 | 三层一致性 | Access / Tunnel / 实例三层校验 `instance_id` / `session` / `role` 一致；隧道与实例一对一绑定 | Critical | 越权与错绑测试 |
 | NFR-H023 | 运维权限 | Owner/Fleet Admin 强制 MFA；远程诊断默认关闭，Owner 授权后限时开启并全量审计；Fleet Admin 默认无权进入控制台或收听音频 | High | 权限矩阵测试 |
 | NFR-H024 | 合规提示 | 首次启用 Operator 能力时提示用户确认执照与遥控台站合规；保留地区策略与紧急禁用入口 | Medium | UI 流程检查 |

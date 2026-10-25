@@ -11,6 +11,7 @@
 | `Membership` | `(user, instance, role)` | 控制面 ACL | 授权 → 撤销 |
 | `LaunchCode` | 不透明值、TTL ≤60 s、已消费标记 | Ticket 服务 | 签发 → 消费/过期（单次） |
 | `Session` | `session_id`、`instance_id`、role、cookie 引用、隧道流引用、TX 状态 | Access/Tunnel；**电台侧状态以实例为准** | 建立 → 活跃 → 关闭 |
+| `HelpSession` | 口令（不落盘）、限时窗口、分配的端口、状态 | **客户侧发起**；Portal 只做分配、心跳与强制结束 | 申请 → 活跃（心跳）→ 停止 / 到期 / 强制 |
 | `OperatorLease` | `instance_id`、holder、状态、TTL、续租时间 | Lease 服务（**授权互斥**，非释放机制） | `FREE → HELD → RELEASED / EXPIRED` |
 | `TunnelConnection` | `connection_id`、`node_id`、协议版本、能力、心跳 | Tunnel Gateway | 建立 → 活跃 → 断开/切换 |
 | `InstanceRoute` | `instance_id → {node_id, connection_id, last_seen}`，带 TTL | Registry/Redis | 写入 → 心跳续期 → 过期 |
@@ -90,8 +91,9 @@ ACTIVE ──TX 开始──► TX_ACTIVE ──500 ms 心跳──► 继续 TX
 
 - 标签仍受 `[a-z0-9-]+` 约束（与 nginx 通配 vhost 的正则一致），故产品后缀用小写字母与连字符
 - 加实例仍是“注册表一行”，`gen_hub_routes.py` 由 root 的 30 s `mrrc-hub-routes.timer` 自动重生成（V0.17 起），无需手工重跑 —— 模型不变
-- **（已随 V0.21 删除）** 早先的 www 路径入口按产品段区分（主产品 `/mrrc_modern/<呼号>/`、
-  附加产品 `/mrrc_legacy/<呼号>/`），该路径已随 V0.21 整体删除。附加产品（`mrrc`）的**路径前缀能力**
+- **（V0.21 起不再作为接入方式；配置残留待清）** 早先的 www 路径入口按产品段区分（主产品
+  `/mrrc_modern/<呼号>/`、附加产品 `/mrrc_legacy/<呼号>/`）。应用侧与监听确已删除，但 www 的 nginx 里
+  仍留着指向旧机的 path-proxy（2026-10-25 实测 502，见 12 §12.8）。附加产品（`mrrc`）的**路径前缀能力**
   虽已实现（见 §12.8.1），但今天所有实例 —— 主产品与附加产品一样 —— 都只走**通配子域入口** `<标签>.mrrc.vlsc.net`
 - 迁移含义：产品换代时，裸呼号标签**转移**到新产品，旧产品改装产品后缀标签（入口变更需通知该租户）
 - **实现**：标签规则已由 `portal/callsign.py::label_for()` 落地（主产品裸呼号、附加产品加后缀、产品名 slug 化），并由 `tests/test_portal.py` 守住

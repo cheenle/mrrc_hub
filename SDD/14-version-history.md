@@ -2,6 +2,42 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.42 — 2026-10-25 — 一次逐章的 SDD 对账：五处「文档说已删除/已在跑，现网不是」
+
+**触发**：用户要求「SDD 全面更新」。做法不是改版本号，而是把 15 章逐条对回 2026-10-25 的现网读数、
+仓库代码与版本历史（V0.21 之后的每一项变更都要能落到某一章）。共二十余处陈旧陈述，其中五处是
+**断言型错误**（不是数字过时，而是把没有的事写成了有、把留着的东西写成了删掉）：
+
+| # | 章 | 文档原话 | 2026-10-25 现网 |
+| --- | --- | --- | --- |
+| 1 | 01/04/07/08/09/10/12 | 「海外边缘路径随 V0.21 **整体删除**」 | 应用侧与监听确已删；**www 的 nginx 里 `/mrrc_modern/BG1SB/` 那段 path-proxy 仍在**，`proxy_pass https://8.160.161.80:9988`，旧机已下线 ⇒ 实测 502；B2 的七段 `proxy_ssl_verify off` 也仍在 |
+| 2 | 12 §12.9 | 「hub 每天 04:30 从 www 拉取 `clublog_users.json`（`mrrc-portal-sync-clublog.sh`）」 | **该脚本在整台机器上不存在**，无 cron / timer；门户侧副本停在 2026-10-11（源侧 `vlsc-feedback-db.timer` 每天 03:00 正常刷新）。门户 UI 的"立即刷新"命令是一条死命令 ⇒ 新增 I-H10 |
+| 3 | 12 §12.8 / README | 「现网 `bg1sb` 仍用旧证书名 `radio.vlsc.net`」 | `bg1sb` 已于 10-11 重签为 `CN=bg1sb.mrrc.vlsc.net`；`instance-certs/` 22 张证书全部签给各自入口名 |
+| 4 | README / 11 / 12 | 「当前 Stable **v1.25.4**」 | tag 最新 **v1.28.2**（2026-10-21），CHANGELOG 已写到 v1.28.6；C1–C6 仍在包内 |
+| 5 | 15 / 05 | 半开释放「❌ 待实现（MVP）」 | 实例侧闸门自 v1.25.4 起在包内（默认 **0 = 关**）；**隧道层心跳 + 主动关流仍未做** —— 两半要分开说 |
+
+**其余是数字与路径过时**：注册表 14 → **19 行**（端口 18802–18820，仍无第三列）、信任包
+134 → **139 块**、实例登记证书 22 张、同一时刻 5 条隧道在线；门户数据档 `/etc/mrrc-hub/portal.json`
+→ **`/var/lib/mrrc-hub/portal/portal.json`**；门户测试 120 → **134 组**（`test_portal` 44、
+`probe_cache` 10）；证书有效期 2026-12-29 → **2027-01-19**；文档站 5 → 6 页；NFR-H030 告警线
+14 → **21 天**（与脚本 `DAYS_WARNING=21` 一致）；NFR-H021 补上范围注（B2 的七个 location 仍是
+`proxy_ssl_verify off`，Hub 链路无一例外）。
+
+**新增/收紧**：`07.1` 补 `HelpSession` 实体（客户发起、口令不落盘、Portal 只分配与强制结束）；
+`10.1` as-built 补 `/claim` 与 `/help/{request,heartbeat,close,revoke}`；`11.1` 把「每日同步」标为未安装；
+`09.9` 把 V0.37/V0.40 的三件边缘能力（gzip、只缓存 200 的 1 h 缓存、503 + `Retry-After` 离线页）
+写进 as-built；`13.2` 新增 **I-H10**（呼号库同步缺失），并把 **I-H7** 收窄为"先决定那段死块删不删"。
+
+**刻意没做**：没有改任何线上配置；没有把「决定」改写成「没决定过」—— V0.21 的删除决定仍然成立，
+新增的是**决定与实现的偏差**记录。删掉 www 上那段 path-proxy、补呼号库同步脚本，是 I-H7 / I-H10
+的执行动作，留给运维决定。
+
+**验证**：逐条命令可复现 —— `curl -sk https://www.vlsc.net/mrrc_modern/BG1SB/`（502）、
+`systemctl list-timers`（无 clublog 项）、`find / -name 'mrrc-portal-sync-clublog*'`（空）、
+`stat -c %y /var/lib/mrrc-hub/portal/clublog_users.json`（10-11）、
+`ls /etc/mrrc-hub/instance-certs/*.pem` + `openssl x509 -subject`（22 张同名 CN）、
+`grep -c BEGIN /etc/mrrc-hub/trust-bundle.pem`（139）。`sdd check --staged` clean。
+
 ## V0.41 — 2026-10-25 — 全面发布前的文档收口：站点与 SDD 追上 V0.39/V0.40
 
 **触发**：V0.39（续期链）与 V0.40（离线页）都只动了 hub 侧代码，站点六页与 SDD 的两处运营

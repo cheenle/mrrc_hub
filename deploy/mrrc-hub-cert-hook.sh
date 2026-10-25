@@ -17,8 +17,8 @@ CRT="$CERT_DIR/fullchain.pem"
 KEY="$CERT_DIR/privkey.pem"
 
 if [ ! -s "$LIVE_DIR/fullchain.pem" ] || [ ! -s "$LIVE_DIR/privkey.pem" ]; then
-    echo "[ERROR] 续期结果不存在: $LIVE_DIR" >&2
-    exit 2
+	echo "[ERROR] 续期结果不存在: $LIVE_DIR" >&2
+	exit 2
 fi
 
 install -m 644 "$LIVE_DIR/fullchain.pem" "$CRT" || exit 2
@@ -27,15 +27,15 @@ install -m 600 "$LIVE_DIR/privkey.pem" "$KEY" || exit 2
 # 先写 portal 的到期快照，再 reload：万一 reload 失败，控制台上仍然是新值
 dest=/var/lib/mrrc-hub/portal/cert.txt
 if install -d -o mrrcportal -g mrrcportal -m 750 "$(dirname "$dest")" 2>/dev/null; then
-    openssl x509 -in "$CRT" -noout -enddate -subject > "$dest" 2>/dev/null
-    chown mrrcportal:mrrcportal "$dest" 2>/dev/null || true
-    chmod 0640 "$dest" 2>/dev/null || true
+	openssl x509 -in "$CRT" -noout -enddate -subject >"$dest" 2>/dev/null
+	chown mrrcportal:mrrcportal "$dest" 2>/dev/null || true
+	chmod 0640 "$dest" 2>/dev/null || true
 fi
 
 # 证书换了要 reload；nginx -t 不过就保持旧配置（reload 不会生效）
 if nginx -t >/dev/null 2>&1; then
-    systemctl reload nginx && echo "[INFO] 新证书已安装到 $CRT，nginx 已 reload"
+	systemctl reload nginx && echo "[INFO] 新证书已安装到 $CRT，nginx 已 reload"
 else
-    echo "[ERROR] nginx -t 未通过，未 reload；证书文件已更新" >&2
-    exit 1
+	echo "[ERROR] nginx -t 未通过，未 reload；证书文件已更新" >&2
+	exit 1
 fi

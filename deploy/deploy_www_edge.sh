@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#
+# ⚠️ RETIRED (2026-10-25). The path-proxy this script installs was removed from the live
+# www vhost: it pointed at 8.160.161.80:9988, a host that is gone (every port timed out).
+# Running this again would re-add a block whose only possible answer is 502.
+# Kept for the record — it is the only implementation of the "path proxy" mode that ever
+# existed. Do not run it against the production host.
+#
 # Publish the Cloud Hub entry on the overseas host (www.vlsc.net) — the detour
 # around a mainland-China region's 80/443 reality.
 #

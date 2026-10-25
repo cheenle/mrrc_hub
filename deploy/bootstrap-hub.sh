@@ -345,3 +345,14 @@ rm -f /etc/systemd/system/mrrc-hub-routes.path # 早期版本用过 path 单元�
 systemctl daemon-reload
 systemctl enable --now mrrc-hub-routes.timer
 echo "routes auto-regeneration: enabled"
+
+# ---- 呼号库每日同步（root）----
+# 留言版每天 03:00 刷新源文件，这里 04:30 换进门户。规模门 + 原子替换 + **不重启门户**
+# （ClubLogVerifier 按 mtime/size 判新鲜度）。源不存在时以退出码 1 留在 systemctl --failed 里，
+# 而不是把一个空库静默装进去。
+install -m 755 "$SELF_DIR/mrrc-portal-sync-clublog.sh" /usr/local/sbin/mrrc-portal-sync-clublog.sh
+install -m 644 "$SELF_DIR/systemd/mrrc-portal-sync-clublog.service" /etc/systemd/system/mrrc-portal-sync-clublog.service
+install -m 644 "$SELF_DIR/systemd/mrrc-portal-sync-clublog.timer" /etc/systemd/system/mrrc-portal-sync-clublog.timer
+systemctl daemon-reload
+systemctl enable --now mrrc-portal-sync-clublog.timer
+echo "callsign DB sync: enabled (source /home/cheenle/feedback/clublog_users.json)"

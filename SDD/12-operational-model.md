@@ -101,7 +101,7 @@
 | 角色 | 位置 | 说明 |
 | ------ | ------ | ------ |
 | Hub（含站点与门户） | 香港 VPS `hub.vlsc.net`（203.25.119.168，Ubuntu 26.04） | nginx（`mrrc-instances` 通配 vhost 承载实例入口 **443**；`mrrc-portal-mrrc` 把门户挂在 `portal.mrrc.vlsc.net` 的**根**；`vlsc.net` 承载站点与下载）、frps 0.71.0（控制口 8989，`proxyBindAddr=127.0.0.1`）、`mrrc-portal.service`（呼号注册，仅回环 8890）、`/etc/mrrc-hub/trust-bundle.pem`（系统 CA + 逐实例公钥）。**一台机器同时承担原先 Hub 与 Edge 两个角色**（V0.21） |
-| ~~Edge~~ | —（已无对应主机） | 海外边缘 `/mrrc_modern/<呼号大写>/` 反代的**应用侧与监听已随 V0.21 删除**；但 www 的 nginx 里仍留有一段指向旧机 `8.160.161.80:9988` 的 path-proxy（该机已下线，2026-10-25 实测 502）——**决定与实现不一致，属待清理** |
+| ~~Edge~~ | —（已无对应主机） | 海外边缘 `/mrrc_modern/<呼号大写>/` 反代：应用侧与监听随 V0.21 删除；www 的 nginx 里那段指向旧机 `8.160.161.80:9988` 的 path-proxy **已于 2026-10-25 删除**（删除前实测 502，删除后该路径回 404） |
 | Instance | 实例归属人自己的机器（macOS / Linux / Windows） | 常驻隧道（launchd / systemd / 计划任务）；MRRC 服务是否常驻取决于是打包版还是源码运行（见下） |
 
 ### 入口（当前）
@@ -111,11 +111,14 @@
 - 已取消：原先的 `:8899`「第二 TLS 入口」与 `www.vlsc.net/mrrc_modern/<呼号大写>/` 海外边缘反代
   —— 两者的取消原因与教训见 `08-architecture-decisions.md` 卷首的 **V0.21** 一节
   （该节未编号；本仓没有 AD-H21）与下方「排障增补」。
-  **2026-10-25 复核（决定与实现不一致）**：`:8899` 确已无监听；但 www 的 `vlsc.net` vhost 里
-  `location ^~ /mrrc_modern/BG1SB/` 仍在，`proxy_pass https://8.160.161.80:9988`（旧机已下线）⇒ 实测 **502**。
-  B2 的 `/mrrc_modern/{listen,login,listen.js,rx_worklet_processor.js,modules/,api/,WS}` 七段也仍在
-  （`proxy_ssl_verify off`，上游 `radio.vlsc.net:8888` 当前不可达）。两者都不承载任何现网入口，
-  但**不是"已删除"**；清理由运维决定（见 13 I-H7）。
+  **2026-10-25 收口**：`:8899` 确无监听；www 的 `vlsc.net` vhost 里 `location ^~ /mrrc_modern/BG1SB/`
+  那整段 path-proxy（`proxy_pass https://8.160.161.80:9988`，旧机全部端口超时）**已删除**，
+  `/mrrc_modern/BG1SB/` 由 502 变为 **404**。同一台机器上还收掉一处更危险的漂移：
+  `sites-enabled/vlsc.net` 原本是与 `sites-available/vlsc.net` **分叉的普通文件**（enabled 多一段
+  在跑的 `/mrrc-decode`），而 `website/deploy.sh` 改的是 available —— 它过去改的是**没被加载的那一份**。
+  现在 enabled 是指向 available 的符号链接，两份文件在 `/var/backups/nginx-vlsc/` 留了备份。
+  B2 的 `/mrrc_modern/{listen,login,listen.js,rx_worklet_processor.js,modules/,api/,WS}` 七段
+  按 AD-H10 **保留**（`proxy_ssl_verify off`，上游 `radio.vlsc.net:8888` 当前不可达 ⇒ 502）。
 - 注册表 `/etc/mrrc-hub/instances.tsv` —— 每行 `<标签> <回环端口> [上游 TLS 名]`（第三列**可选**，缺省 = 自己的入口名）。
   加实例 = 一行 + 重跑 `gen_hub_routes.py`（自 V0.17 起由 30 s 的 root timer 自动做，见 §12.9）。
   **2026-10-16 机上读数（全量、14 行）**：`bg7zhs 18805` / `ba4eg 18807` / `bg6lh-legacy 18802` /
@@ -284,8 +287,8 @@ connect 返回 `tunnel_started: false` 而**页面不报错** —— 排查时�
 
 | 现象 | 先查什么 |
 | ------ | ---------- |
-| （存史）边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步）。**该边缘入口自 V0.21 起停用，配置残留仍在**，见上方「入口（当前）」 |
-| **边缘路径间歇性无响应**（2026-10-01，2026-10-02 定根因；该路径 V0.21 起停用、配置残留仍在，本条存史） | 6 次请求 3 次 20 s 无响应，当时只定到 `www → hub:9988` 这一跳、猜是云厂商入方向限流。**真因**：边缘 nginx 那两处指向 hub 的 `proxy_pass` 写的是**裸主机名**（无 `resolver` ⇒ 启动时解析一次），而 hub 已加 AAAA、边缘的 `getaddrinfo` 又按 RFC6724 把 IPv6 排前 ⇒ nginx 选了 hub 的 IPv6，而**该地址当时不可达**（实测 0/4 超时，同机 v4 4/4 通；边缘自身 v6 正常，google 0.1 s）。**修法**：两处 `proxy_pass` 钉为 hub 的 IPv4 `8.160.161.80:9988` 并 reload —— 复测 `/mrrc_portal/` **8/8 200**（修前 3/6 挂死），实例入口 4/4 302。**复现判据**：`getent ahosts https://portal.mrrc.vlsc.net` 首行是 v6 就说明任何一次 reload 都会踩中。**待办**：hub 的 IPv6 入站仍不可达（阿里云安全组/IPv6 公网带宽，见 V0.19），且 hub 上 `net.ipv6.conf.eth0.accept_ra=0` ⇒ RA 派生的地址与默认路由约 2.5 h 后过期不续（要设 `accept_ra=2` 并持久化）；v6 端到端验通后可改成 upstream 双地址（v6 优先 + 连接超时 3 s 退 v4）。**2026-10-04 补正**：搬去香港那台 hub 的 v6 **可达且 AAAA 已发布**（本机实测 82 ms / 0% 丢包，v4 对照 293 ms / 6.7%；同一请求 0.37 s vs 1.40 s），本条"hub 的 IPv6 入站仍不可达"与旧机那句 `accept_ra` 待办**均随搬迁作废**（新机 sysctl 未复测） |
+| （存史）边缘 502 而直连正常 | www 的上游校验信任源是否被改回钉证书（应为系统 CA）；hub 证书是否刚换（现已无需同步）。**该边缘入口自 V0.21 起停用，其 nginx 段已于 2026-10-25 删除**，见上方「入口（当前）」 |
+| **边缘路径间歇性无响应**（2026-10-01，2026-10-02 定根因；该路径 V0.21 起停用、nginx 段已于 2026-10-25 删除，本条存史） | 6 次请求 3 次 20 s 无响应，当时只定到 `www → hub:9988` 这一跳、猜是云厂商入方向限流。**真因**：边缘 nginx 那两处指向 hub 的 `proxy_pass` 写的是**裸主机名**（无 `resolver` ⇒ 启动时解析一次），而 hub 已加 AAAA、边缘的 `getaddrinfo` 又按 RFC6724 把 IPv6 排前 ⇒ nginx 选了 hub 的 IPv6，而**该地址当时不可达**（实测 0/4 超时，同机 v4 4/4 通；边缘自身 v6 正常，google 0.1 s）。**修法**：两处 `proxy_pass` 钉为 hub 的 IPv4 `8.160.161.80:9988` 并 reload —— 复测 `/mrrc_portal/` **8/8 200**（修前 3/6 挂死），实例入口 4/4 302。**复现判据**：`getent ahosts https://portal.mrrc.vlsc.net` 首行是 v6 就说明任何一次 reload 都会踩中。**待办**：hub 的 IPv6 入站仍不可达（阿里云安全组/IPv6 公网带宽，见 V0.19），且 hub 上 `net.ipv6.conf.eth0.accept_ra=0` ⇒ RA 派生的地址与默认路由约 2.5 h 后过期不续（要设 `accept_ra=2` 并持久化）；v6 端到端验通后可改成 upstream 双地址（v6 优先 + 连接超时 3 s 退 v4）。**2026-10-04 补正**：搬去香港那台 hub 的 v6 **可达且 AAAA 已发布**（本机实测 82 ms / 0% 丢包，v4 对照 293 ms / 6.7%；同一请求 0.37 s vs 1.40 s），本条"hub 的 IPv6 入站仍不可达"与旧机那句 `accept_ra` 待办**均随搬迁作废**（新机 sysctl 未复测） |
 | hub 日志被 `proxy [<名>] already exists` 刷屏 | **先去查“这个名字有几个客户端”，不要去改 frps**。三步取证：① `sudo grep -a 'client login info' /var/log/frps.log \| tail` 给出各 run id 的**来源 IP / hostname / os / frpc 版本**（同一台机器会占好几个 run id）；② `sudo ss -tn \| grep :8989` 看当前控制连接与地址族；③ 到那台实例机上数进程（Windows：`Get-Process frpc`，看各自命令行、启动时间与父进程是否还在）。**2026-10-04 实例**：一台 Windows 机（hostname `MRRC`）积累了 **6 个 frpc**（命令行逐字相同、5 个为孤儿），1 个赢得注册、其余每 30 s 重试 —— 一天 7143 行 `ba4eg`。那是**客户端缺陷**（回收旧 frpc 的代码依赖 Win11 已移除的 `wmic` 且失败静默，修法见 `mrrc_modern/SDD/14` V2.69），hub 侧只能止血（杀掉多余进程）与取证。**同名噪音频次本身也是判据**：`bg6lh-legacy` 那 362 行查实是本机重连窗口的重叠（新旧连接争注册），属正常抖动，不要当故障查 |
 | 证书签发失败 | `/var/log/letsencrypt/letsencrypt.log`；hook 的 phase 判定依据环境变量（`CERTBOT_VALIDATION`=auth，`CERTBOT_AUTH_OUTPUT`=cleanup），**certbot 不给 hook 传参数** |
 | 记录存在但 CA 看不见 | hook 已轮询 DoH 等公共解析器可见；仍失败则查 `_acme-challenge` 下是否有重复 TXT |
@@ -314,7 +317,7 @@ connect 返回 `tunnel_started: false` 而**页面不报错** —— 排查时�
 （§7.x.1 举的 `bg1sb-legacy` 只是标签示例，并不在表里）。
 **隧道后面是不是真有该产品在服务，SDD 没有记录，这里不下断言。**
 **该产品今天也走通配子域入口**（`<标签>.mrrc.vlsc.net`，如实测在表的 `bg6lh-legacy`）；
-早先设想的 www 路径产品段（形如 `/mrrc_legacy/<呼号>/`）与主产品那条一样，**V0.21 起不再作为接入方式**（nginx 配置残留见 §12.8）。若要在一台**独立运行该产品的站点**上做实机验证，仍需独立硬件或经同意的停机窗口
+早先设想的 www 路径产品段（形如 `/mrrc_legacy/<呼号>/`）与主产品那条一样，**V0.21 起不再作为接入方式**（nginx 段已于 2026-10-25 删除，见 §12.8）。若要在一台**独立运行该产品的站点**上做实机验证，仍需独立硬件或经同意的停机窗口
 （它要占用电台/音频/串口，不能与主产品同机并行）。
 
 改造记录与逐步计划：`../../mrrc/docs/current/design/hub-parity-plan.md`。
@@ -326,7 +329,7 @@ connect 返回 `tunnel_started: false` 而**页面不报错** —— 排查时�
 | 代码 | `portal/`（零第三方依赖，标准库 HTTP；与 HTTP 层解耦便于测试） |
 | 数据 | `/var/lib/mrrc-hub/portal/portal.json`（申请/授予 + 追加式审计，原子写；`/etc/mrrc-hub/portal.json` 已不存在 —— 2026-10-25 复核） |
 | 注册表 | 与 hub 同一份 `/etc/mrrc-hub/instances.tsv`（Portal 只追加一行） |
-| 呼号库（权威） | `/var/lib/mrrc-hub/portal/clublog_users.json` —— **Club Log** 全库（273,047 条），与站内留言版 `www.vlsc.net/feedback` **同源**（源文件 `/home/cheenle/feedback/clublog_users.json`，由 `vlsc-feedback-db.timer` 每日 03:00 刷新）。**门户侧副本的每日同步在现网不存在**：2026-10-25 复核，副本停在 2026-10-11，`mrrc-portal-sync-clublog.sh` 在机器上找不到 —— 见 13 I-H10 |
+| 呼号库（权威） | `/var/lib/mrrc-hub/portal/clublog_users.json` —— **Club Log** 全库（**273,909 条 / 36.7 MB**，2026-10-25 同步），与站内留言版 `www.vlsc.net/feedback` **同源**（源文件 `/home/cheenle/feedback/clublog_users.json`，由 `vlsc-feedback-db.timer` 每日 03:00 刷新）。**每日 04:30 由 `mrrc-portal-sync-clublog.timer` 换进来**（规模门 ≥10 万条、原子替换）；`ClubLogVerifier` 按 (mtime, size) 热重载，换库不需要重启门户 |
 | 呼号库（自建） | `/etc/mrrc-hub/callsigns.txt`（一行一个）—— 用于权威库暂未收录的新执照 |
 | 核验链 | `ClubLogVerifier → CallsignListVerifier → ManualVerifier`（能给出**确定结论**的依据先问，人工始终兜底） |
 | 运维令牌 | `/etc/mrrc-hub/portal.token`（0600），常数时间比较；**只走请求头**（机器路径） |
@@ -337,11 +340,11 @@ connect 返回 `tunnel_started: false` 而**页面不报错** —— 排查时�
 | 实例探测（V0.36） | **一轮后台并发探测，页面渲染只读快照**（`metrics.ProbeCache`，`--probe-interval` 默认 20 s；2026-10-16 在 14 个在册实例上一轮实测 wall 6.2 s / cpu 0.05 s，2026-10-25 在册 19 个）。这是 2026-10-16「后台打开要等十秒」的正解：此前**每次渲染**都在请求线程里探全部实例、实例视图还探两轮，而慢实例经隧道一次 TLS 握手要 1–3 s（bg7kxr 1.7 s / bg7ifp 1.0 s 实测）⇒ 页面 4–11 s，且 instances 页每 20 s 自动刷新一次，单核 hub 上探测成了常态负载。修后同一台机器实测：总览 4.8 ms / 实例列表 7.5 ms / 实例详情 **7.3 ms**（原 11.1 s）/ live 片段 7.5 ms。**同源**（轻探 states 与完整报告 reports 来自同一轮）顺带消掉了「表头 4 台在服务、某行写着离线」那类自相矛盾；页面显示**数据龄**，首轮没回来就写「探测进行中」——不拿旧数据冒充刚探的 |
 | 界面层 | 2026-10-11 全面改版：8 个视图（新增**实例详情**）、桌面侧栏 + 手机标签栏、逐视图"首屏回答一个问题"、自动刷新（切后台/暂停/正在输入即停）、破坏性动作**服务端两阶段确认**（必填理由）。前端只引入一份 vendored htmx，**全部交互是渐进增强**（关掉 JS 照常可用）。设计令牌由 `ui.TOKENS` 单处生成，测试直接读它算对比度（每个文字色 ≥4.5:1）；静态资源走**白名单精确匹配**（`/admin/static/../portal/app.py` → 404）。详见 `portal/UI.md` |
 | 监听 | **仅 127.0.0.1**（管理面）。对外自助需经 nginx 暴露并在那层加限流 |
-| 测试 | `python3 tests/test_portal.py`（44 组）；另有 `test_portal_auth.py`（10）、`test_portal_help.py`（11）、`test_portal_metrics.py`（10）、`test_portal_probe_cache.py`（10，页面渲染不探测/同源/数据龄诚实/异常降级/采样器只读）、`test_htpasswd.py`（4）、`test_portal_trust.py`（5）、`test_portal_ui.py`（30，令牌对比度/组件/外壳/静态白名单/降级/视图层纯度）——共 **134 组**（以 `tests/` 实际输出为准，本行曾长期停在 91 / 120） |
+| 测试 | `python3 tests/test_portal.py`（44 组）；另有 `test_portal_auth.py`（10）、`test_portal_help.py`（11）、`test_portal_metrics.py`（10）、`test_portal_probe_cache.py`（10，页面渲染不探测/同源/数据龄诚实/异常降级/采样器只读）、`test_htpasswd.py`（4）、`test_portal_trust.py`（5）、`test_portal_ui.py`（30，令牌对比度/组件/外壳/静态白名单/降级/视图层纯度）、`test_clublog_sync.py`（8，热重载/规模门/原子替换/timer 落点）——共 **142 组**（以 `tests/` 实际输出为准，本行曾长期停在 91 / 120 / 134） |
 | 入口 | `https://portal.mrrc.vlsc.net/`（通配证书已覆盖；精确 server_name 压过通配 vhost） |
 | **主机** | **与 hub 同一台机器**：香港 VPS `hub.vlsc.net`（203.25.119.168），门户挂在该名字的**根**（见 §12.8 主机表）。V0.20 把它迁到阿里云 `47.80.243.9` 的那次拆分只存续了几个小时，**已被 V0.21 取代**；那台机器不再承载门户（其后续处置**未取证**） |
 | 运行方式 | systemd `mrrc-portal.service`（`User=mrrcportal`、`NoNewPrivileges`、`PrivateTmp`、`Restart=on-failure`） |
-| 自维护 | **跨机同步已随 V0.21 失去对象**：V0.20 那条 `mrrc-portal-sync.timer`（每日 08:30 从 hub 拉通配证书 + 呼号库）不再需要 —— 证书与呼号库现在就在本机同一批目录（存史）。**但所谓"每天 04:30 的 `mrrc-portal-sync-clublog.sh`"在现网并不存在**：2026-10-25 复核，该脚本在整台机器上找不到，也没有对应的 cron / timer；门户侧副本停在 2026-10-11（源侧 `vlsc-feedback-db.timer` 每天 03:00 正常刷新到 36.7 MB）。门户 UI 里"立即刷新呼号库"的复制命令因此是一条死命令 —— 见 13 I-H10 |
+| 自维护 | **跨机同步已随 V0.21 失去对象**：V0.20 那条 `mrrc-portal-sync.timer`（每日 08:30 从 hub 拉通配证书 + 呼号库）不再需要 —— 证书与呼号库现在就在本机同一批目录（存史）。**每天 04:30 的呼号库同步自 2026-10-25 起真的在跑**：`mrrc-portal-sync-clublog.timer` → `.service` → `/usr/local/sbin/mrrc-portal-sync-clublog.sh`（源侧 `vlsc-feedback-db.timer` 每天 03:00 刷新；同步带规模门 ≥10 万条与原子替换）。此前它只是**设计里的一条**：脚本不在机器上、门户侧副本停在 10-11，门户 UI 的"立即刷新"命令是死命令 —— 这正是 V0.42 记下的 I-H10，已于 V0.43 结案 |
 | ~~**仍耦合在 hub**~~ | **V0.21 后三条耦合都已消失**（同一台机器、同一批目录）：`grant` 写的注册表就是入口 nginx 读的那一份，30 s timer 直接接手重生成；`/enroll` 落的实例证书就在逐实例校验要读的 `instance-certs/` 里；边缘的 `/etc/nginx/mrrc-hub-trust.pem` 随反代路径一起删除，**已无归属**。这三条正是"合并值得一做"的理由，保留为记录 |
 | 限流 | `/apply` 上 `limit_req zone=mrrc_portal_apply burst=5 nodelay`（10 r/m/来源）。**这里能用真实客户端 IP** —— 与被隧道合并来源的实例侧不同 |
 
@@ -395,12 +398,14 @@ clublog.org 刷新，与 RumLogNG 同源）。Portal **直接采用同一套规�
 | 基准呼号提取 | `4X/BG1SB`→`BG1SB`、`BG1SB/P`→`BG1SB`、`1A0C_14`→`1A0C`、`SOS`→'' |
 | 判定语义 | 命中 = 已核验；**未命中 ≠ 冒用**（新执照、低活跃、未上传 Club Log 都可能不在库里）⇒ 转人工，只有人能拒绝 |
 
-**拉取方式（2026-10-25 复核）**：V0.20 的跨机受限命令（www 的 `authorized_keys` 里绑定
-`command="cat .../clublog_users.json"`）是**两台机器时代**的做法；V0.21 合并到同一台后，源文件就在
-`/home/cheenle/feedback/`，本机复制即可。**但那份每日同步脚本在现网并不存在**：门户侧副本停在
-2026-10-11，`/usr/local/sbin/mrrc-portal-sync-clublog.sh` 找不到，门户 UI 里"立即刷新呼号库"的
-复制命令因此是一条死命令。核验链仍按"未命中转人工"工作，但权威库不再每日更新 —— 见 13 I-H10。
-原设计里的**规模校验门**（<10 万条即拒绝替换）仍应作为重建脚本时的硬约束。
+**拉取方式（2026-10-25 落地）**：V0.20 的跨机受限命令（www 的 `authorized_keys` 里绑定
+`command="cat .../clublog_users.json"`）是**两台机器时代**的做法，已随 V0.21 失去对象；源文件就在
+本机 `/home/cheenle/feedback/`。同步脚本 `deploy/mrrc-portal-sync-clublog.sh`（装到
+`/usr/local/sbin/`）做三件事：**规模门**（解析一次，条数 ≥10 万才继续；坏 JSON / 空库一律拒绝）、
+**原子替换**（同目录临时文件 + rename，门户不会读到半截 36 MB）、**内容相同则不动**（省掉一次索引重建）。
+它不重启门户 —— `ClubLogVerifier` 按 (mtime, size) 判新鲜度，下一次核验自动用新库。
+门户 UI 里"立即刷新呼号库"的复制命令因此是一条真命令；定时器 `mrrc-portal-sync-clublog.timer`
+每天 04:30（±10 分钟）跑一次，失败会留在 `systemctl --failed` 里。
 
 ## 12.10 实例入口的静态资源：gzip + 边缘缓存（2026-10-17）
 

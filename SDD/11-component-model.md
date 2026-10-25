@@ -23,7 +23,7 @@
 | 已实现的组件 | 对应目标态 | 实现在哪 |
 | ------- | -------- | -------- |
 | 呼号注册 Portal | Portal（极简子集） | `portal/`（运行时零第三方依赖，标准库 HTTP；`htpasswd.py` 账号校验、`sessions.py` 会话/登录锁定、`metrics.py` 隧道采样）；**界面层三分**：`app.py` 只做传输与事实采集、`views.py` 纯呈现（有 AST 守卫禁止它自己采集）、`ui.py` 令牌与组件；**前端只有一份 vendored 依赖**（htmx 2.0.7，逐字节冻结 + sha256 守卫）；systemd `mrrc-portal.service`；`apply/status/verify/grant/enroll/revoke/claim` + `help/{request,heartbeat,close,revoke}` 端点 + `/admin` 审批台（会话+CSRF，**八视图**：总览/申请/实例/实例详情/隧道/系统/审计/呼号库） |
-| 呼号核验 | IAM 的核验部分 | Club Log 全库（27 万条，与站内留言版同源）+ 自建呼号库 + 人工兜底。**每日同步在现网未安装**：2026-10-25 复核，门户侧副本停在 10-11，见 13 I-H10 |
+| 呼号核验 | IAM 的核验部分 | Club Log 全库（27 万条，与站内留言版同源）+ 自建呼号库 + 人工兜底。每日 04:30 由 `mrrc-portal-sync-clublog.timer` 同步（2026-10-25 起；规模门 + 原子替换 + 热重载，见 12 §12.9） |
 | 注册表（静态） | Registry（在线状态版） | `/etc/mrrc-hub/instances.tsv` + `gen_hub_routes.py` 生成 nginx map。**无在线状态、无 Redis、无心跳** |
 | 实例证书签发 | Device CA（极简子集） | `deploy/make_instance_cert.sh` + `/etc/mrrc-hub/trust-bundle.pem`。**无轮换、无 CRL** |
 | 子域路由 + 透明代理 | Access Gateway | nginx 通配 vhost（无验票、无 Cookie 设置、无内网 RPC） |

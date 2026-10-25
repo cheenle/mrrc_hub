@@ -31,9 +31,9 @@
 - `proxy_ssl_verify off` —— 公网链路上实例自签证书校验被关闭
 - 实例会话令牌（30 天有效）被前端拼进 URL query（`static/ft710_main.js`、`static/listen.js`），经代理必然进日志
 
-> **2026-10-25 复核（决定与实现不一致）**：V0.21 决定删除的海外边缘路径，在 www 的 nginx 里**仍留着
-> 一段指向旧机 `8.160.161.80:9988` 的 path-proxy**（该机已下线，实测 502）。它不承载任何现网入口，
-> 但也不能记作"已删除" —— 见 `12-operational-model.md` §12.8。
+> **2026-10-25 复核与收口**：V0.21 决定删除的海外边缘路径，其 path-proxy 曾一直留在 www 的 nginx 里
+> （指向已下线的旧机 `8.160.161.80:9988`，实测 502）；**当天已整段删除**（`/mrrc_modern/BG1SB/` 现回 404）。
+> 过程与备份见 `12-operational-model.md` §12.8。B2 的 `/mrrc_modern/listen` 七段按 AD-H10 保留。
 
 > 详细取证见 [`docs/2026-09-30-fleet-hub-design-review.md`](../docs/2026-09-30-fleet-hub-design-review.md)。
 

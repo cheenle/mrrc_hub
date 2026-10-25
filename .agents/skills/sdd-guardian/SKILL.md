@@ -9,7 +9,7 @@ arguments:
 
 # SDD Guardian — engineering lifecycle for mrrc_hub
 
-This repository is governed by `SDD/` (IBM TeamSD, 15 chapters, currently **V0.42**,
+This repository is governed by `SDD/` (IBM TeamSD, 15 chapters, currently **V0.43**,
 status: 阶段 1 已在公网生产运行 —— 通配入口 + 隧道 + 一机一证 + 自助门户；未决项见
 `SDD/README.md` 的 Status 行). The SDD is the canonical
 design record for the **cloud hub only** — radio control and media stay owned by

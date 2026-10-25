@@ -1,0 +1,25 @@
+# Refresh the portal's Club Log callsign DB from the feedback board's copy.
+#
+# Why a unit and not a cron entry: the failure mode here is silent. An empty or
+# half-downloaded DB would still serve pages; it would just turn every new
+# callsign into "needs manual review". A failed oneshot stays visible in
+# `systemctl --failed`, and the journal keeps the size/entry count of the run
+# that succeeded.
+#
+# It runs as root only because it must write into /var/lib/mrrc-hub/portal as
+# `mrrcportal` - the portal service itself has no business touching that path.
+[Unit]
+Description=MRRC hub: refresh the portal's Club Log callsign DB
+After=network-online.target
+Wants=network-online.target
+# A non-zero exit is information (source missing / gate failed) and should stay
+# visible rather than being rewritten into 'start-limit-hit'.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mrrc-portal-sync-clublog.sh
+StandardOutput=journal
+StandardError=journal
+# Reading + parsing 36 MB twice (validate, then copy) on a 1 vCPU box.
+TimeoutStartSec=300

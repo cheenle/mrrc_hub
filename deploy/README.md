@@ -71,6 +71,32 @@ upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL hands
 **处置**：X1 原计划「只记录、不改脚本」，2026-10-17 与静态资源缓存一并改了（改模板
 正是为了让「下次加一个 location」不再有漏抄校验设置的余地）。X2 / X3 继续留档不改。
 
+> **2026-10-25 收口**：现网 `vlsc.net` vhost 里那段指向 `8.160.161.80:9988` 的
+> `/mrrc_modern/BG1SB/` path-proxy（X2 的原型）**已删除**，`deploy_www_edge.sh` 随之标为 RETIRED。
+> 同一台机器上还收掉一处更危险的漂移：`/etc/nginx/sites-enabled/vlsc.net` 原本是**普通文件**
+> （enabled 多一段在跑的 `/mrrc-decode`，与 sites-available 分叉），而 `website/deploy.sh` 改的是
+> sites-available —— 也就是说它过去改的是**没被加载的那一份**。现在 enabled 是指向 available 的
+> 符号链接；改动前的两份文件在 `/var/backups/nginx-vlsc/`（**别把备份放进 `sites-enabled/`**：
+> 它被 `include sites-enabled/*` 匹配，`nginx -t` 会报 `duplicate listen options`）。
+
+## 呼号库每日同步（2026-10-25 落地）
+
+门户的 Club Log 呼号库不再靠人拷：
+
+```
+vlsc-feedback-db.timer（每天 03:00，留言版自己刷新源文件）
+  → mrrc-portal-sync-clublog.timer（每天 04:30 ±10min）
+  → /usr/local/sbin/mrrc-portal-sync-clublog.sh
+     规模门 ≥10 万条 / 原子替换 / 同内容 no-op
+  → /var/lib/mrrc-hub/portal/clublog_users.json（0640 mrrcportal）
+  → ClubLogVerifier 按 (mtime,size) 热重载（**不重启门户**）
+```
+
+源文件 `/home/cheenle/feedback/clublog_users.json` 不在时，服务以退出码 1 留在
+`systemctl --failed` 里 —— 空库或半截下载绝不会被换进去（那会把核验悄悄降级成全员人工）。
+手工刷新：`sudo systemctl start mrrc-portal-sync-clublog.service`，日志在
+`journalctl -u mrrc-portal-sync-clublog`。
+
 ## 静态资源：gzip + 边缘缓存（2026-10-17）
 
 实例侧（`mrrc_modern`）只发 `ETag`/`Last-Modified`，不发 `Cache-Control`，也不实现条件

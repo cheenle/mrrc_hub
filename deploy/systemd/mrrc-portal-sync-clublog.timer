@@ -1,0 +1,18 @@
+# 04:30 — after the feedback board's own 03:00 refresh (vlsc-feedback-db.timer)
+# has rewritten the source file, and well away from the 04:17 cert run and the
+# 30-second route timer.
+#
+# Persistent=true matters: this box is a single 1 vCPU VPS and reboots happen
+# during maintenance; a missed run must catch up rather than leave the DB stale
+# until the next evening.
+[Unit]
+Description=MRRC hub: daily refresh of the portal's Club Log callsign DB
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=mrrc-portal-sync-clublog.service
+
+[Install]
+WantedBy=timers.target

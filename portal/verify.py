@@ -81,12 +81,27 @@ class ClubLogVerifier:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self._index: set | None = None
+        self._stamp: tuple[int, int] | None = None
 
     def _load(self) -> set:
-        if self._index is not None:
+        """按 `(mtime, size)` 判新鲜度：文件被换掉就重建索引。
+
+        为什么不是"启动时读一次"：这份库每天 03:00 由留言版刷新
+        （`vlsc-feedback-db.timer`），04:30 由 `mrrc-portal-sync-clublog.sh` 换进门户。
+        若只读一次，换库后就得重启门户才能生效，而重启会让所有管理会话失效 ——
+        一天一次的重启不该成为常态。重建只发生在换库后的第一次核验（36 MB 解析
+        约 1–2 s），之后走缓存。
+
+        半截文件不必担心：同步脚本是同目录临时文件 + `rename` 原子替换，读到的
+        要么是旧库、要么是新库。
+        """
+        try:
+            st = self.path.stat()
+        except FileNotFoundError:
+            self._index, self._stamp = set(), None
             return self._index
-        if not self.path.exists():
-            self._index = set()
+        stamp = (st.st_mtime_ns, st.st_size)
+        if self._index is not None and stamp == self._stamp:
             return self._index
         try:
             with self.path.open(encoding="utf-8") as fh:
@@ -99,7 +114,7 @@ class ClubLogVerifier:
             base = cs.base_callsign(key)
             if base:
                 index.add(base)
-        self._index = index
+        self._index, self._stamp = index, stamp
         return index
 
     def check(self, callsign: str) -> VerificationResult:

@@ -52,7 +52,7 @@ python3 -m portal.app --port 8890
 | `--store` | `/etc/mrrc-hub/portal.json` | 申请/授予记录 + 追加式审计（原子写） |
 | `--registry` | `/etc/mrrc-hub/instances.tsv` | 与 hub 上 `gen_hub_routes.py` 用的同一份 |
 | `--callsign-db` | `/etc/mrrc-hub/callsigns.txt` | 呼号库，一行一个（`#` 注释）。有它就自动核验，没有就全转人工 |
-| `--clublog` | `/var/lib/mrrc-hub/portal/clublog_users.json` | **Club Log 全库**（27 万条），与站内留言版同源；由 hub 每天 04:30 从 www 拉取 |
+| `--clublog` | `/var/lib/mrrc-hub/portal/clublog_users.json` | **Club Log 全库**（27.4 万条），与站内留言版同源；由 `mrrc-portal-sync-clublog.timer` 每天 04:30 同步，按 mtime/size 热重载 |
 | `--token-file` | `/etc/mrrc-hub/portal.token` | 运维动作令牌（建议 0600，`openssl rand -hex 32`） |
 | `--users-file` | `/etc/mrrc-hub/portal-users` | 后台账号（htpasswd `$apr1$`，一行一个 `用户名:哈希`；建议 `0640 root:mrrcportal`） |
 | `--cookie-secure` | `auto` | 会话 Cookie 的 Secure：`auto` = 回环 Host 不带、其余带；`on`/`off` 强制 |

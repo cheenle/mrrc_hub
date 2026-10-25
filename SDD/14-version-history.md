@@ -2,6 +2,40 @@
 
 > 记录本 SDD 与其描述的系统的演进。每条必须说明：改了什么、为什么、影响哪些约束/决策。
 
+## V0.43 — 2026-10-25 — 把 V0.42 记下的两件实事做掉：删死块、补呼号库同步（含热重载）
+
+**触发**：V0.42 逐章对账时发现两处"文档与现网不一致"，当时只记录、未动手。用户确认后执行。
+
+**① 删掉 www 上 V0.21 遗留的边缘死块**
+
+- `vlsc.net` vhost 里 `location ^~ /mrrc_modern/BG1SB/` 那整段 path-proxy
+  （`proxy_pass https://8.160.161.80:9988`）删除。删前目标机全部端口超时；删后
+  `/mrrc_modern/BG1SB/` **502 → 404**，产品站 / 文档站 / 门户 / 实例入口均未受影响。
+- 顺带收掉一处更危险的漂移：**`sites-enabled/vlsc.net` 原本是与 `sites-available` 分叉的普通文件**
+  （enabled 多一段在跑的 `/mrrc-decode`），而 `website/deploy.sh` 改的是 available —— 它过去改的是
+  **没被加载的那一份**。现在 enabled 是指向 available 的符号链接；两份原文件在
+  `/var/backups/nginx-vlsc/`。
+- `deploy/deploy_www_edge.sh` 标记 **RETIRED**：它的产物就是那段死块，重跑只会把它加回去。
+
+**② 补上门户的呼号库每日同步**
+
+- `deploy/mrrc-portal-sync-clublog.sh`：源 = 留言版每天 03:00 刷新的
+  `/home/cheenle/feedback/clublog_users.json`（同一台机器，不再需要跨机）；规模门 ≥10 万条、
+  坏 JSON / 空库拒绝、同内容 no-op、同目录临时文件 + rename 原子替换。
+- `mrrc-portal-sync-clublog.{service,timer}`：每天 04:30（±10 分钟，晚于源刷新）。
+- **`ClubLogVerifier` 改为按 `(mtime, size)` 热重载**：换库后第一次核验自动重建索引（36 MB 解析
+  约 1–2 s），不再需要"换库后重启门户"—— 每天重启一次会让所有管理会话失效。
+- 现网实测：首次运行 **273,909 条 / 36,720,339 B / `0640 mrrcportal:mrrcportal`**；
+  门户重启后 `BG1SB -> verified（224,656 个基准呼号）`。
+- 门户 UI 里"立即刷新呼号库"的复制命令从**死命令**变成真命令。
+
+**测试**：新增 `tests/test_clublog_sync.py`（8 组）：Verifier 热重载（换库后同一实例看见新呼号、
+旧呼号失效）/ 缺文件降级 / 原子替换与 0640 / 规模门拒绝且目标不动 / 坏 JSON 拒绝 / 同内容 no-op /
+timer→service→脚本路径 / UI 命令指向真脚本。全套 **134 → 142 组**；`sdd check --staged` clean。
+
+**踩坑一条**：备份文件不能落在 `sites-enabled/` 里 —— 它被 `include sites-enabled/*` 匹配，
+`nginx -t` 直接报 `duplicate listen options`（本次第一次尝试就这么失败并回滚，未影响线上）。
+
 ## V0.42 — 2026-10-25 — 一次逐章的 SDD 对账：五处「文档说已删除/已在跑，现网不是」
 
 **触发**：用户要求「SDD 全面更新」。做法不是改版本号，而是把 15 章逐条对回 2026-10-25 的现网读数、

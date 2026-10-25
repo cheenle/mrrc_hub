@@ -27,6 +27,29 @@ server {
     gzip_proxied any;
     gzip_types text/css application/javascript text/plain application/json image/svg+xml;
 
+    # ── 实例离线时访客拿到的东西 ────────────────────────────────────────
+    # 原先这里什么都没有：隧道一断，访客看到的是 nginx 的默认 502 页。那页同时说错
+    # 两件事 —— 「网关坏了」（其实是实例那端不在）和「再刷新就好了」。实测一个挂着
+    # 死实例的标签页就这样刷出整天的 502：2026-10-18 单日 10,621 条，来源是同一个
+    # /64 的一两个标签页（应用侧 5 路 WebSocket 各自退避到 30 s 后不再增长）。
+    #
+    # 503 + Retry-After 才是这件事的语义（临时不可用，稍后再试），也把选择权交回给
+    # 人。**页面刻意没有自动刷新**：那正是上面那条风暴的成因。
+    #
+    # 只拦 nginx 自己生成的 502/504（连接失败、读超时）。实例真的回了 502 就照原样
+    # 透传 —— `proxy_intercept_errors` 保持默认 off，否则我们会替实例撒谎。
+    error_page 502 504 = @mrrc_offline;
+
+    location @mrrc_offline {
+        internal;
+        default_type text/html;
+        add_header Retry-After 30 always;
+        add_header Cache-Control "no-store" always;
+        # 截图/贴日志时能看出是哪台实例回的它（body 里插不了变量）。
+        add_header X-MRRC-Instance $host always;
+        return 503 '<!doctype html><meta charset=utf-8><title>实例离线</title><style>body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:34rem;margin:12vh auto;padding:0 1.2rem;color:#1b1f24;background:#fff}h1{font-size:1.25rem;margin:0 0 .8rem}p{margin:.6rem 0}.muted{color:#5b6675;font-size:.85rem;margin-top:1.6rem}</style><h1>这台实例当前离线</h1><p>云端入口是通的，但这台实例的隧道没连上。常见原因：实例机断电、断网，或者上面的 MRRC 程序没在运行。</p><p>本页不会自动刷新 —— 反复重试只会把日志搅浑。请稍后手动刷新，或联系实例主人。</p><p class="muted">HTTP 503 · MRRC Cloud Hub</p>';
+    }
+
     location / {
         include /etc/nginx/snippets/mrrc-hub-upstream.conf;
 

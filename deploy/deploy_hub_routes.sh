@@ -8,6 +8,7 @@
 #   deploy/nginx/mrrc-instances.vhost       → /etc/nginx/sites-available/mrrc-instances
 #   deploy/nginx/mrrc-hub-upstream.conf     → /etc/nginx/snippets/   (hub → 实例那一跳的唯一定义)
 #   deploy/nginx/mrrc-hub-cache.conf        → /etc/nginx/conf.d/     (静态资源缓存区与两个 map)
+#   deploy/nginx/mrrc-hub-log.conf          → /etc/nginx/conf.d/     (hub_safe 日志格式，含 $host)
 #
 #   <name>.mrrc.vlsc.net  →  https://127.0.0.1:<port>  (that instance's tunnel)
 #
@@ -31,6 +32,7 @@ GENERATOR="/usr/local/sbin/gen_hub_routes.py"
 VHOST="/etc/nginx/sites-available/mrrc-instances" # 现网名；旧脚本写的 mrrc-hub 早已不是 sites-enabled 指向的那个
 SNIPPET="/etc/nginx/snippets/mrrc-hub-upstream.conf"
 CACHE_CONF="/etc/nginx/conf.d/mrrc-hub-cache.conf"
+LOG_CONF="/etc/nginx/conf.d/mrrc-hub-log.conf"
 CACHE_DIR="/var/lib/nginx/cache-mrrc"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -61,6 +63,9 @@ python3 "$GENERATOR"
 
 install -D -m 0644 "$HERE/nginx/mrrc-hub-upstream.conf" "$SNIPPET"
 install -D -m 0644 "$HERE/nginx/mrrc-hub-cache.conf" "$CACHE_CONF"
+# 日志格式也进仓库、由这里安装。它原先只存在于现网机器的 conf.d 里（"hub_safe 记 URI
+# 不记 Host" 那句文档就是那么来的）—— 又一处「现网有、仓库没有」的漂移。
+install -D -m 0644 "$HERE/nginx/mrrc-hub-log.conf" "$LOG_CONF"
 
 # nginx 的 worker 是 www-data，缓存目录必须它可写（cache conf 里 use_temp_path=off，
 # 临时文件也落这里）。

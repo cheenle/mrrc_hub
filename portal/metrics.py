@@ -103,12 +103,15 @@ class ProbeCache:
     """
 
     def __init__(self, entries, probe, *, interval: float = 20.0, workers: int = 8,
-                 clock=time.time):
+                 clock=time.time, on_change=None):
         self._entries = entries          # () -> [(label, port, tls_name)]
         self._probe = probe              # (port, label, tls_name) -> (report, latency_ms|None)
         self.interval = max(1.0, interval)          # 调用方（argparse/测试）已给数值；不在这里解析
         self._workers = max(1, workers)
         self._clock = clock
+        #: 状态变化时回调 `(label, 旧状态, 新状态, 说明)`。用来把「什么时候掉的」写成
+        #: 一行 journal —— 在它之前，从服务中变成离线这件事**没有任何地方记录过**。
+        self._on_change = on_change
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -116,6 +119,10 @@ class ProbeCache:
         self._reports: dict = {}
         self._ports: dict = {}
         self._latency: dict = {}
+        #: label -> 当前状态第一次被看到的时刻。视图用它回答「已经这样多久了」。
+        #: 它量的是**观测**时长（portal 重启即重新计时），不是实例的真实离线时长。
+        self._since: dict = {}
+        self._prev: dict = {}
 
     # ---- 采集 ----
     def _one(self, item):
@@ -140,9 +147,32 @@ class ProbeCache:
                     if ms is not None:
                         latency[label] = ms
         with self._lock:
+            now = self._clock()
+            changes = []
+            for label, report in reports.items():
+                state = report.get("state", "")
+                prev = self._prev.get(label)
+                if prev != state:
+                    self._since[label] = now
+                    changes.append((label, prev, state, report.get("detail", "")))
+                self._prev[label] = state
+            live = set(reports)                  # 注册表里删掉的标签不能留下幽灵计时
+            self._since = {k: v for k, v in self._since.items() if k in live}
+            self._prev = {k: v for k, v in self._prev.items() if k in live}
             self._reports, self._latency = reports, latency
             self._ports = {label: port for label, port, _tls in items}
-            self._at = self._clock()
+            self._at = now
+        # 钩子在锁外调用：它能写日志、发通知，也能自己出错 —— 都不许拖住探测线程。
+        self._notify(changes)
+
+    def _notify(self, changes) -> None:
+        if self._on_change is None:
+            return
+        for label, prev, state, detail in changes:
+            try:
+                self._on_change(label, prev, state, detail)
+            except Exception:                # noqa: BLE001 — 一个通知钩子不许带走探测线程
+                pass
 
     # ---- 读取 ----
     def snapshot(self) -> dict:
@@ -153,11 +183,13 @@ class ProbeCache:
         """
         with self._lock:
             at, reports, latency, ports = self._at, self._reports, self._latency, self._ports
+            since = dict(self._since)
         if at is None and self._thread is None:
             self.tick()
             with self._lock:
                 at, reports, latency, ports = (self._at, self._reports, self._latency,
                                                self._ports)
+                since = dict(self._since)
         now = self._clock()
         return {
             "at": at,
@@ -168,6 +200,8 @@ class ProbeCache:
                        for label, rep in reports.items() if label in ports},
             "latency": dict(latency),
             "interval": self.interval,
+            #: {label: 当前状态第一次被看到的时刻}。没探到过的实例不在这里（不冒充 down）。
+            "since": since,
         }
 
     def latest(self, port, label: str = "") -> tuple:

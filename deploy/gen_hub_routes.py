@@ -108,8 +108,8 @@ def load_tls_names(path: Path) -> tuple[dict[str, str], list[str]]:
     """注册表第三列：hub 校验该实例证书时要用的名字。
 
     租户没有自己的域名，安装器给的是自签证书 —— 按本项目的约定，证书签给实例**自己的
-    入口名**（<label>.mrrc.vlsc.net）。老行不写这一列时沿用 radio.vlsc.net：操作者自己
-    那条实例注册的就是它，这也是本次改动保持向后兼容的地方。
+    入口名**（<label>.mrrc.vlsc.net）。第三列只在实例自带公有证书（CN 不是自己的入口名）时
+    才写；不写就走缺省，与 `srcli` 的缺省分支一致。
     """
     names: dict[str, str] = {}
     notes: list[str] = []
@@ -127,8 +127,6 @@ def load_tls_names(path: Path) -> tuple[dict[str, str], list[str]]:
             own = f"{label}.mrrc.vlsc.net"   # 不写这一列 = 新式自签租户：证书签给它自己的入口名
             names[label] = own
             notes.append(f"{path}:{lineno}: {label} 未写 tls_name ⇒ 按自己的入口名 {own} 校验")
-            notes.append(f"{path}:{lineno}: {label} 未写 tls_name，按 {DEFAULT_TLS_NAME} 校验"
-                         f"（新实例应写自己的入口名，如 {label}.mrrc.vlsc.net）")
     return names, notes
 
 

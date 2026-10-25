@@ -799,6 +799,22 @@ def _probe_full_timed(port, label: str = "", tls_name: str = "", timeout: float 
     return rep, (elapsed if rep.get("state") == TUNNEL_SERVING else None)
 
 
+def _announce_tunnel_change(label, prev, state, detail) -> None:
+    """隧道状态变化 → 一行 journal（原先**没有任何地方记录它**）。
+
+    2026-10-22 那次「入口 502 四天」事后只能翻 nginx 日志反推，是因为状态从「服务中」
+    变成「离线」这件事从来没有被记过：ProbeCache 每 20 秒就知道一次，但只把它塞进页面。
+    现在 `journalctl -u mrrc-portal | grep '隧道 '` 就能回答「它什么时候掉的、掉了多久」。
+
+    格式刻意定得短而稳：跳闸的 frpc 一天能变几百次（实测 bi6okx 271 次/天），一行、
+    不带上下文、可直接 grep；长时间降级由页面与总览待办展示，不在这里刷屏。
+    """
+    was = TUNNEL_TEXT.get(prev or "", prev or "未知")
+    now = TUNNEL_TEXT.get(state, state or "未知")
+    sys.stderr.write(f"portal: 隧道 {label}: {was} → {now}（{detail}）\n")
+    sys.stderr.flush()
+
+
 def _probe_timed(port, label: str = "", timeout: float = 2.5) -> tuple:
     """采样器用的三元组视图：(状态, 说明, 毫秒)。
 
@@ -968,7 +984,8 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
         # ProbeCache 首轮现探一次、此后只读快照 —— 于是不管哪种装配，渲染都不重复探测。
         probes = metrics_mod.ProbeCache(
             entries=lambda: portal.registry.entries_full(),
-            probe=lambda port, label, tls: _probe_full_timed(port, label, tls))
+            probe=lambda port, label, tls: _probe_full_timed(port, label, tls),
+            on_change=_announce_tunnel_change)
     class Handler(BaseHTTPRequestHandler):
         server_version = "MRRC-Portal/1.0"
 
@@ -1183,6 +1200,7 @@ def make_handler(portal: Portal, token: str, base: str = "", *,
                 reports=snapshot["reports"] if view in ("instances", "instance") else {},
                 probe_age=snapshot["age"],
                 probe_interval=snapshot["interval"],
+                probe_since=snapshot["since"],
                 trust=_trust_report() if view in ("instances", "instance") else {},
                 resources=_host_resources() if view == "system" else {},
                 services=_service_states() if view == "system" else [],
@@ -1607,7 +1625,8 @@ def main(argv=None) -> int:
     probes = metrics_mod.ProbeCache(
         entries=lambda: portal.registry.entries_full(),
         probe=lambda port, label, tls: _probe_full_timed(port, label, tls),
-        interval=args.probe_interval)
+        interval=args.probe_interval,
+        on_change=_announce_tunnel_change)
     probes.start()
     sampler = None
     if args.metrics_interval > 0:

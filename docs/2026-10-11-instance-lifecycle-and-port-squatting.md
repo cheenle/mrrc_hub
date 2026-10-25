@@ -38,7 +38,8 @@
 ## 3. 诊断链（五步分诊，任何实例 502 都按这个顺序）
 
 ```bash
-# ① hub：nginx 拒绝上游的真实原因（含 host 字段；hub_safe 记 URI 不记 Host）
+# ① hub：nginx 拒绝上游的真实原因（含 host 字段 —— V0.40 起 access log 也记 host 了，
+#     但「连不上/证书不对/握手被关」这些**原因**仍然只在 error.log 里）
 sudo tail -200 /var/log/nginx/error.log | grep -E 'host: "|self-signed|Connection refused|certificate verify'
 
 # ② hub：frps 上"哪个代理名占着哪个远端端口"（只读 dashboard，凭据在 /etc/frp/frps.toml）

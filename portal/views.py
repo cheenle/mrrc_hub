@@ -39,6 +39,10 @@ class Ctx:
     #: `probe_interval == 0` 表示没有快照可报（单视图渲染/未装配）—— 此时不出声。
     probe_age: float | None = None
     probe_interval: float = 0.0
+    #: {label: 当前状态第一次被看到的时刻}（`ProbeCache` 的状态变化计时）。
+    #: 视图用它回答「已经离线多久了」——看的是**观测**时长，不是实例的真实离线时长，
+    #: 所以文案必须带「已观测」的限定（portal 重启即重新计时）。
+    probe_since: dict = field(default_factory=dict)
     # 系统
     resources: dict = field(default_factory=dict)
     services: list = field(default_factory=list)
@@ -355,6 +359,41 @@ def _ago_text(now: float, then) -> str:
     return f"{d // 86400} 天前"
 
 
+def _since_seconds(ctx: Ctx, label: str):
+    """这个实例**当前状态**已经持续了多少秒（起点由 `ProbeCache` 记）。
+
+    没探过、或者存储里是个读不懂的值，一律 None —— 不拿猜的数充数（与 `_ago_text` 同规矩）。
+    """
+    since = _num_or_none(ctx.probe_since.get(label))
+    if since is None:
+        return None
+    try:
+        return max(0.0, ctx.now - since)
+    except (TypeError, ValueError, OverflowError):        # inf/nan 混进来（存储可手改）
+        return None
+
+
+def _duration_text(seconds) -> str:
+    """「已离线 N 天」—— **观测**时长，portal 重启即重新计时。
+
+    措辞刻意不说「它已经离线 4 天」：要断言那个数得看 frps 面板的 lastCloseTime，
+    而这里量的是「我们亲眼看到它一直没好」的时间。两者不是一回事，混着说就是编数据。
+    """
+    if seconds is None:
+        return ""
+    try:
+        d = int(seconds)
+    except (TypeError, ValueError, OverflowError):      # inf/nan 混进来（存储可手改）
+        return ""
+    if d < 60:
+        return "刚刚断开"
+    if d < 3600:
+        return f"已离线 {d // 60} 分钟"
+    if d < 86400:
+        return f"已离线 {d // 3600} 小时"
+    return f"已离线 {d // 86400} 天"
+
+
 def _int_or_none(value):
     try:
         return int(str(value).strip())
@@ -394,13 +433,21 @@ def _todo_items(ctx: Ctx) -> list[tuple[str, str, str, str]]:
             "warn", f"待核验 · {a['callsign'].upper()}",
             f"{ui.esc(evidence)} · {_ago_text(ctx.now, a.get('at'))}",
             f'<a class="chip" href="{ctx.root}/admin?view=applications">去处理</a>'))
+    # 掉得最久的先说话。2026-10-22 那次「入口 502 四天」以前排第几全看注册表顺序，
+    # 长掉线的实例反而可能被埋在十几行之后 —— 而待办清单存在的理由就是让它跳出来。
+    down = []
     for label, port in ctx.entries:
         state, detail = ctx.states.get(port, ("", "未探测"))
         if _is_serving(ctx, state):
             continue
+        down.append((label, state, detail, _since_seconds(ctx, label)))
+    down.sort(key=lambda row: (row[3] is None, -(row[3] or 0)))
+    for label, state, detail, secs in down:
+        age = _duration_text(secs)
         items.append((
             "bad" if _level(ctx, state) == "bad" else "warn",
-            f"{label} · {ctx.tunnel_text.get(state, state or '未探测')}",
+            f"{label} · {ctx.tunnel_text.get(state, state or '未探测')}"
+            + (f" · {age}" if age else ""),
             ui.esc(detail) + " —— 访客会拿到 502，请查实例机",
             f'<a class="chip" href="{ctx.root}/admin?view=instances">看实例</a>'))
     for unit, st, enabled, _since, _restarts in ctx.services:
@@ -599,6 +646,12 @@ def view_instances(ctx: Ctx) -> Rendered:
         serving = _is_serving(ctx, state)
         state_pill = ui.pill(ctx.tunnel_pill.get(state, "mute"),
                              ctx.tunnel_text.get(state, state or "未探测"))
+        if not serving:
+            # 「它已经这样多久了」——此前列表只给一个状态字，看不出是刚抖一下还是
+            # 已经死了四天（2026-10-22 那次就是这个区别最要紧）。
+            age = _duration_text(_since_seconds(ctx, label))
+            if age:
+                state_pill += f'<div class="hint">{ui.esc(age)}</div>'
         # 「入口」与「隧道」是**两件事**：前者要把 nginx 那一跳的证书校验也算进去。
         # 只看隧道，就会出现 2026-10-16 那种“列表说在服务、浏览器 502”。
         entry, entry_word, entry_note = _entry_verdict(ctx, label, rep, apps_by_label.get(label))

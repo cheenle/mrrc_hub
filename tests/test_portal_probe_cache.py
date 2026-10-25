@@ -209,6 +209,72 @@ def test_instances_page_states_and_reports_come_from_the_same_round():
     check("个入口开不了" not in page, "同源之后不报入口故障")
 
 
+def test_state_changes_are_announced_once_and_reset_the_clock():
+    """状态变化 → 一次回调 + 重新计时（2026-10-25）。
+
+    原先「从服务中变成离线」这件事**没有任何地方记录过**：ProbeCache 每 20 秒就知道
+    一次，但只把它塞进页面。于是 2026-10-22 那次入口 502 四天，事后只能翻 nginx 日志反推。
+    """
+    states = ["serving", "serving", "down", "down", "serving"]
+    clock = [1000.0]
+    seen = []
+
+    def probe(port, label, tls_name=""):
+        state = states.pop(0) if states else "serving"
+        return ({"state": state, "detail": "换态", "generation": "", "cert": {}}, None)
+
+    cache = mt.ProbeCache(lambda: _entries(["bg1sb"]), probe,
+                          clock=lambda: clock[0], on_change=lambda *a: seen.append(a))
+    cache.tick()                               # serving：第一轮也算一次「变化」（prev=None）
+    check(seen == [("bg1sb", None, "serving", "换态")], f"第一轮记一次（实测 {seen}）")
+    first_since = cache.snapshot()["since"]["bg1sb"]
+    clock[0] += 20
+    cache.tick()                               # 状态不变 → 不重复报，计时不动
+    check(len(seen) == 1, f"状态没变就不该再报（实测 {len(seen)} 次）")
+    check(cache.snapshot()["since"]["bg1sb"] == first_since, "计时不因同一状态而重置")
+    clock[0] += 20
+    cache.tick()                               # serving → down：报一次，计时重置
+    check(seen[-1][2] == "down", "掉线被报出来")
+    check(cache.snapshot()["since"]["bg1sb"] == clock[0], "计时从掉线那一刻起")
+    clock[0] += 60
+    cache.tick()                               # 仍是 down：不重复报
+    check(len(seen) == 2, f"持续离线不再刷屏（实测 {len(seen)} 次）")
+
+
+def test_a_broken_hook_never_kills_the_prober():
+    """回调会写日志、以后还会发通知 —— 它自己出错不许把探测线程带走。"""
+    def boom(*_a):
+        raise RuntimeError("通知发不出去")
+
+    cache = mt.ProbeCache(lambda: _entries(["bg1sb"]), SlowProbe(delay=0), on_change=boom)
+    cache.tick()                               # 不抛
+    check(cache.snapshot()["reports"]["bg1sb"]["state"] == "serving", "快照照常更新")
+
+
+def test_a_long_down_instance_says_how_long_it_has_been_down():
+    """实例页要能回答「它已经这样多久了」（2026-10-25）。
+
+    此前只有一个状态字：「刚抖一下」与「已经死了四天」长得一模一样。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        four_days_ago = time.time() - 4 * 86400
+        cache = mt.ProbeCache(lambda: _entries(["bg1sb", "ba4eg"]),
+                              SlowProbe(delay=0, state="down"),
+                              clock=lambda: four_days_ago)
+        cache.tick()
+        httpd, base, opener = _server(tmp, cache, labels=("bg1sb", "ba4eg"))
+        try:
+            with opener.open(base + "/admin?view=instances", timeout=30) as r:
+                page = r.read().decode()
+            with opener.open(base + "/admin?view=overview", timeout=30) as r:
+                overview = r.read().decode()
+        finally:
+            httpd.shutdown()
+    check("已离线 4 天" in page, "实例页要写出离线时长")
+    check("已离线 4 天" in overview, "总览待办也要写（否则得逐行点开才知道）")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in tests:

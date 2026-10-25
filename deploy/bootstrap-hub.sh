@@ -167,6 +167,11 @@ allowPorts = [{ start = 18800, end = 18999 }]
 
 log.to = "/var/log/frps.log"
 log.level = "info"
+# frp 自己按天切（frps.YYYYMMDD-HHMMSS.log），默认只留 3 天 —— 换成 14 天。
+# 为什么：这台机器上一次排「谁的隧道在抖」时，3 天窗口只能看到两三个例子，
+# 跨周的漂移（某台机器一天断两次 → 一天断六百次）刚好落在窗口外。
+# 日志量很小（约 6 MB/天），14 天不到 100 MB。
+log.maxDays = 14
 
 # Read-only dashboard API on loopback: the portal samples per-proxy
 # todayTrafficIn/Out + curConns from it (0.71 has no cumulative counters; the

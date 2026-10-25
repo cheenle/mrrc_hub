@@ -108,6 +108,46 @@ upstream SSL certificate does not match "<标签>.mrrc.vlsc.net" while SSL hands
 `/etc/nginx/snippets/mrrc-hub-upstream.conf` 与 `/var/lib/nginx/cache-mrrc`，
 再 `nginx -t && systemctl reload nginx`。
 
+## 实例离线时：503 + 离线页，日志能按实例归属（V0.40，2026-10-25）
+
+frps **只在 frpc 挂着的时候**监听那个回环口 —— 客户端一走端口就关，nginx 拿到
+`ECONNREFUSED`。原先这直接变成默认的 502 页，而 502 只说「网关坏了」，既不告诉访客
+「是这台实例不在」，也不告诉运维是哪台。现在：
+
+| 场景 | 访客拿到 | 日志里 |
+| --- | --- | --- |
+| 隧道不在（端口没人听） | **503** + 一页中文说明 + `Retry-After: 30` | `503` + error.log 的 `Connection refused` |
+| 隧道在、实例应用不在 | **503**（同上） | 同上 + error.log 的 `peer closed … SSL handshake` |
+| 实例自己回了 502/504 | 原样透传（`proxy_intercept_errors` 保持 **off**） | `502` / `504` |
+
+三件事一起看：
+
+```bash
+# 1) 现在有多少访客撞上离线页，按实例分（$1 就是 host —— V0.40 新增）
+sudo awk '$0 ~ /" 503 / {print $1}' /var/log/nginx/mrrc-hub.access.log | sort | uniq -c | sort -rn
+
+# 2) 它是**什么时候**掉的（V0.40 起状态变化会写 journal）
+sudo journalctl -u mrrc-portal --since -2d | grep '隧道 '
+
+# 3) 哪些实例已经掉了很久（页面也会写：实例页与总览待办里的「已离线 N 天」）
+sudo journalctl -u mrrc-portal -n 200 | grep '隧道 '
+```
+
+四条容易踩的：
+
+1. **离线页必须是 503，而且绝不能自动刷新**。早期没有 error_page 时，一个挂着死实例的
+   标签页一天刷出 10,621 条 502（2026-10-18，应用侧五路 WS 退避封顶 30 s 后不再增长）。
+   所以 `location @mrrc_offline` 里没有 `http-equiv`、没有 JS、也没有 `proxy_cache`。
+2. **`error_page` 只拦 nginx 自己生成的 502/504**。一旦打开 `proxy_intercept_errors on`，
+   实例真的返回的 502 也会被换掉 —— 那是在替实例撒谎。测试钉住了这一点。
+3. **静态资源仍走 stale-cache**：实例离线时，已缓存过的 JS/CSS 继续 200，只有 API/HTML 落到 503。
+4. **`hub_safe` 日志格式现在在仓库里**（`deploy/nginx/mrrc-hub-log.conf`，由
+   `deploy_hub_routes.sh` 安装）。它原先只存在现网机器的 `conf.d` 里 —— 又一处「现网有、仓库没有」，
+   所以当时文档里写的「hub_safe 记 URI 不记 Host」一直没人发现是错的。
+
+回滚：`git checkout` 后重跑 `deploy_hub_routes.sh`（脚本会先备份 vhost、再 `nginx -t`，
+不通过就自动退回上一版）。
+
 ## 已探明的事实（2026-09-30 实测，**指迁移前那台 `8.160.161.80`，仅作历史**）
 
 > 本节的"Hub 主机"是阿里云 ECS，**不是现网**。现网事实见文首提示框。

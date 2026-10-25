@@ -177,7 +177,7 @@ frps 只在 frpc 挂着的时候监听那个回环口，客户端一走端口就
 - 签发：hub 上 `mrrc-hub-cert.sh`，DNS-01，覆盖 `*.mrrc.vlsc.net` 与 `mrrc.vlsc.net`
 - 验证方式：certbot `manual` 插件 + **自建 hook** `aliyun-acme-dns-hook.py`（纯标准库自算阿里云 RPC 签名，直接调 DNS API）。**刻意不用 `certbot-dns-aliyun`**：第三方、年久失修，本机 Python 版本已超前
 - 凭证：`/root/.secrets/aliyun.ini`（0600）。存在 ⇒ 真证书；不存在 ⇒ 回退自签通配（脚本自动切换）
-- 续期：root crontab 每天 8:00 跑 `mrrc-hub-cert.sh`，剩余 <30 天自动续；日志 `/var/log/mrrc-hub-cert.log`；退出码 0/1/2（<14 天为告警）
+- 续期：systemd timer `mrrc-hub-cert.timer` 每天 04:17（±10 分钟抖动）跑 `mrrc-hub-cert.sh`，剩余 <30 天自动续；日志走 journal（`journalctl -u mrrc-hub-cert`）；退出码 0/1/2（≤21 天以 1 告警、已过期或文件缺失为 2，非零会留在 `systemctl --failed` 里）
 - 安装：`mrrc-hub-cert-hook.sh` 拷贝证书到 `/etc/mrrc-hub/tls/` 并 reload nginx
 - **www 边缘不再需要同步信任锚**（存史）：上游校验信任源是系统 CA。此前钉自签证书的做法咬过两次（换证书未同步 ⇒ 立即 502），已废弃。**V0.21 把海外边缘那条反代路径整体删除，这一跳今天已不存在** —— 本条已无对象，只留作教训记录
 

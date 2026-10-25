@@ -303,7 +303,7 @@
                       style="color: var(--text-secondary); font-size: 0.85rem"
                     >
                       证书是<b>进程启动时读进内存</b>的：只换证书文件、不重启进程，入口会一直
-                      502 而本机看起来正常。换机的完整清单见
+                      503（离线页）而本机看起来正常。换机的完整清单见
                       <a
                         href="maintain.html#rotate"
                         style="color: var(--accent)"
@@ -332,17 +332,16 @@
                   </td>
                 </tr>
                 <tr>
-                  <td>deploy/*.sh 与现网漂移</td>
+                  <td>deploy/*.sh 与现网配置</td>
                   <td>
-                    <span class="hub-badge gap">已记录未修</span><br />
+                    <span class="hub-badge live">已对齐</span><br />
                     <span
                       style="color: var(--text-secondary); font-size: 0.85rem"
                     >
-                      仓库里的
                       <code>deploy_hub_routes.sh</code
-                      >仍落后于现网配置：重跑会把逐实例的校验名压平成
-                      <code>radio.vlsc.net</code>，凡按自己入口名签证的实例立即
-                      502。自己跑本仓脚本前，先读
+                      >已改为安装仓库里的 nginx 模板：逐实例校验名与信任包都在模板里，
+                      <code>nginx -t</code> 不过自动回滚。重跑安全。旧的漂移记录
+                      （X2/X3）只存史，见
                       <code>deploy/README.md</code>的「脚本与现网漂移」一节。
                     </span>
                   </td>

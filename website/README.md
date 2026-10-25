@@ -59,6 +59,7 @@ SHA-256 完全一致）。**不要在这里改它。**
 | 站点内容 | 事实源 |
 | --- | --- |
 | 入口 URL、端口、TLS 入口数量 | 现网 nginx 实际配置；`SDD/12 §12.8`；本次基线 `docs/2026-10-16-site-recheck.md` |
+| 实例离线时访客看到什么（503 + `Retry-After`，不自动刷新；实例自己回的 502 透传） | `SDD/12 §12.8`「实例离线时访客看到什么」、`deploy/nginx/mrrc-instances.vhost` |
 | ~~边缘入口的路径前缀、大小写规范~~ | **已随 V0.21 取消**（现网只有一台机器的 443） |
 | 证书签发方式与有效期 | 现网证书文件 + `SDD/05 NFR-H030` |
 | 实例侧行为（口令、角色、数据通道、PTT） | `mrrc_modern` 源码 + `mrrc_modern/SDD/` |
@@ -206,8 +207,8 @@ shasum -a 256 css/octen.css ../../mrrc_modern/website/css/octen.css
 # ④ 站点与门户的门面（不依赖任何实例的隧道是否在线）
 curl -s -o /dev/null -w "站点 → %{http_code}（期望 200）\n" https://www.vlsc.net/mrrc_hub/
 curl -s -o /dev/null -w "门户 → %{http_code}（期望 200）\n" https://portal.mrrc.vlsc.net/
-# 实例入口只在实例在线时有意义：隧道不在线时报 502，那不是站点问题
-# （2026-10-16 复核时 bg1sb 的隧道不在线 → 502；ba4eg 在线 → 200）
+# 实例入口只在实例在线时有意义：隧道不在线时回 503 离线页，那不是站点问题
+# （2026-10-25 复核：bg6lh-legacy / bh7kyz / bg2hco 均 503 + Retry-After 30）
 curl -s -o /dev/null -w "示例实例 /login → %{http_code}（在线期望 200）\n" https://ba4eg.mrrc.vlsc.net/login
 
 # ⑤ 仓库 SDD 约束
@@ -225,8 +226,8 @@ python3 ../.agents/skills/sdd-guardian/harness/sdd_context.py check --staged
 | --- | --- | --- |
 | （历史）海外边缘入口 `www → hub:9988` 这一跳间歇性失败（2026-10-01 实测 6 次中 3 次 20 s 无响应） | **已随 V0.21 一并取消**（该路径整体删除）；当年已定位到 www 到 Hub 那一跳；已排除本地链路、www 静态服务、www 上另一条代理腿、Hub 侧 SNI/Host 组合 | `use.html#entries`、`design.html#status`、`trouble.html#symptoms` |
 | 登录限流在隧道路径下退化为全局桶 | 已决定暂缓 | `use.html#gaps` |
-| `deploy/*.sh` 与现网漂移（重跑会让现网退化） | 已记录未修。**X1 已升级为高危**：`deploy_hub_routes.sh` 还会抹掉逐实例校验与信任包 | `deploy/README.md` 的「⚠️ 脚本与现网漂移」 |
-| 实例证书链：**逐实例校验名已在用**（`mrrc-hub-map.conf` 为 14 个在册实例生成 `<标签>.mrrc.vlsc.net`；注册表第三列缺省即此值）。2026-10-16 复核时 `bg1sb` 隧道不在线（502），其证书名待实例上线后复测 | 基本就位 | `index.html`、`design.html#status`、`SDD/12 §12.8` |
+| `deploy/*.sh` 与现网漂移 | **X1 已于 2026-10-17 收口**：配置改成仓库里的 nginx 模板，`deploy_hub_routes.sh` 重跑安全（实测 `nginx -t` 通过、在线实例无 502）。X2/X3 随 V0.21 失去对象，存史 | `deploy/README.md` 的「⚠️ 脚本与现网漂移」 |
+| 实例证书链：**逐实例校验名已在用**（`mrrc-hub-map.conf` 按注册表为每个在册实例生成 `<标签>.mrrc.vlsc.net`；注册表第三列缺省即此值）。2026-10-25 复核时 `bg1sb` 隧道在线；离线实例回 503 离线页 | 基本就位 | `index.html`、`design.html#status`、`SDD/12 §12.8` |
 | 安装器仍是仓内脚本，无公开发布的安装包下载 | 待做 | `start.html`、`index.html` |
 | 隧道层 PTT 半开释放未做（实例侧已有） | 待做 | `index.html`、`design.html#status` |
 
